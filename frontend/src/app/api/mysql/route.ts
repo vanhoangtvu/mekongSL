@@ -1,9 +1,47 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { pool } from '../../../lib/db';
 import { normalizeDataSource } from '../../../lib/constants/data-sources';
+import { cookies } from 'next/headers';
 
 export async function GET(request: NextRequest) {
   try {
+    // Check authentication from localStorage (passed via header or cookie)
+    const authHeader = request.headers.get('authorization');
+    const authCookie = cookies().get('auth');
+    
+    let isAuthenticated = false;
+    let hasDataManagerRole = false;
+    
+    // Check from Authorization header (for API calls)
+    if (authHeader && authHeader.startsWith('Bearer ')) {
+      const token = authHeader.substring(7);
+      try {
+        // Decode JWT to check role (simple check, not full validation)
+        const payload = JSON.parse(atob(token.split('.')[1]));
+        const exp = payload.exp * 1000;
+        
+        if (Date.now() < exp) {
+          isAuthenticated = true;
+          // Check if user has DATA_MANAGER role by calling backend
+          const backendUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8084/api';
+          const verifyResponse = await fetch(`${backendUrl}/data`, {
+            headers: { 'Authorization': `Bearer ${token}` }
+          });
+          hasDataManagerRole = verifyResponse.ok;
+        }
+      } catch (e) {
+        // Invalid token
+      }
+    }
+    
+    // If not authenticated or no DATA_MANAGER role, deny access
+    if (!isAuthenticated || !hasDataManagerRole) {
+      return NextResponse.json(
+        { error: 'Unauthorized. DATA_MANAGER role required.' }, 
+        { status: 403 }
+      );
+    }
+    
     const sourceParam = request.nextUrl.searchParams.get('source');
     const dateParam = request.nextUrl.searchParams.get('date');
     const source = normalizeDataSource(sourceParam);
