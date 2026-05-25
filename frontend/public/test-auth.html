@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Test Auth Frontend</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 50px auto;
+            padding: 20px;
+        }
+        .test-section {
+            margin: 20px 0;
+            padding: 20px;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+        }
+        button {
+            padding: 10px 20px;
+            margin: 5px;
+            cursor: pointer;
+            background: #3b82f6;
+            color: white;
+            border: none;
+            border-radius: 6px;
+        }
+        button:hover {
+            background: #2563eb;
+        }
+        .result {
+            margin-top: 10px;
+            padding: 10px;
+            background: #f8fafc;
+            border-radius: 6px;
+            white-space: pre-wrap;
+            font-family: monospace;
+            font-size: 12px;
+        }
+        .success { color: #059669; }
+        .error { color: #dc2626; }
+    </style>
+</head>
+<body>
+    <h1>🧪 Test Đăng ký/Đăng nhập Frontend</h1>
+    
+    <div class="test-section">
+        <h2>1. Test Login Manager</h2>
+        <button onclick="testLoginManager()">Login Manager</button>
+        <div id="login-manager-result" class="result"></div>
+    </div>
+
+    <div class="test-section">
+        <h2>2. Test Login User</h2>
+        <button onclick="testLoginUser()">Login User</button>
+        <div id="login-user-result" class="result"></div>
+    </div>
+
+    <div class="test-section">
+        <h2>3. Test Register</h2>
+        <button onclick="testRegister()">Register New User</button>
+        <div id="register-result" class="result"></div>
+    </div>
+
+    <div class="test-section">
+        <h2>4. Test Access /api/data</h2>
+        <button onclick="testAccessData()">Access Data (with token)</button>
+        <div id="access-data-result" class="result"></div>
+    </div>
+
+    <script>
+        const API_URL = 'http://113.170.158.188:8084/api';
+        let currentToken = null;
+
+        async function testLoginManager() {
+            const resultDiv = document.getElementById('login-manager-result');
+            resultDiv.innerHTML = 'Testing...';
+            
+            try {
+                const response = await fetch(`${API_URL}/auth/login`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        username: 'manager',
+                        password: 'manager123'
+                    })
+                });
+                
+                const data = await response.json();
+                currentToken = data.token;
+                
+                resultDiv.innerHTML = `<span class="success">✅ SUCCESS</span>\n${JSON.stringify(data, null, 2)}`;
+            } catch (error) {
+                resultDiv.innerHTML = `<span class="error">❌ ERROR</span>\n${error.message}`;
+            }
+        }
+
+        async function testLoginUser() {
+            const resultDiv = document.getElementById('login-user-result');
+            resultDiv.innerHTML = 'Testing...';
+            
+            try {
+                const response = await fetch(`${API_URL}/auth/login`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        username: 'user',
+                        password: 'user123'
+                    })
+                });
+                
+                const data = await response.json();
+                
+                resultDiv.innerHTML = `<span class="success">✅ SUCCESS</span>\n${JSON.stringify(data, null, 2)}`;
+            } catch (error) {
+                resultDiv.innerHTML = `<span class="error">❌ ERROR</span>\n${error.message}`;
+            }
+        }
+
+        async function testRegister() {
+            const resultDiv = document.getElementById('register-result');
+            resultDiv.innerHTML = 'Testing...';
+            
+            const randomNum = Math.floor(Math.random() * 10000);
+            
+            try {
+                const response = await fetch(`${API_URL}/auth/register`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        username: `testuser${randomNum}`,
+                        email: `test${randomNum}@example.com`,
+                        password: 'password123'
+                    })
+                });
+                
+                const data = await response.json();
+                
+                resultDiv.innerHTML = `<span class="success">✅ SUCCESS</span>\n${JSON.stringify(data, null, 2)}`;
+            } catch (error) {
+                resultDiv.innerHTML = `<span class="error">❌ ERROR</span>\n${error.message}`;
+            }
+        }
+
+        async function testAccessData() {
+            const resultDiv = document.getElementById('access-data-result');
+            
+            if (!currentToken) {
+                resultDiv.innerHTML = '<span class="error">❌ Please login first (Test 1)</span>';
+                return;
+            }
+            
+            resultDiv.innerHTML = 'Testing...';
+            
+            try {
+                const response = await fetch(`${API_URL}/data`, {
+                    headers: {
+                        'Authorization': `Bearer ${currentToken}`
+                    }
+                });
+                
+                if (response.ok) {
+                    const data = await response.json();
+                    resultDiv.innerHTML = `<span class="success">✅ SUCCESS (HTTP ${response.status})</span>\n${JSON.stringify(data, null, 2)}`;
+                } else {
+                    resultDiv.innerHTML = `<span class="error">❌ BLOCKED (HTTP ${response.status})</span>\nAccess denied`;
+                }
+            } catch (error) {
+                resultDiv.innerHTML = `<span class="error">❌ ERROR</span>\n${error.message}`;
+            }
+        }
+    </script>
+</body>
+</html>
