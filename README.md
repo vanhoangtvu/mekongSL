@@ -44,7 +44,12 @@ node mekong/fetch-mekong-data.mjs
 
 # Fetch Ecowitt data
 node ecowitt/fetch-ecowitt-data.mjs
+
+# Tự động fetch Mekong theo lịch 00:00, 05:00, 10:00, 15:00, 20:00
+npm run fetch:mekong:schedule
 ```
+
+Script scheduler này dùng lại luồng lưu MySQL hiện có, nên không đổi cấu trúc bảng hay format dữ liệu.
 
 ## Environment Variables
 

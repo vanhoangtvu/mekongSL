@@ -1,10 +1,13 @@
 import { readdir, stat } from 'fs/promises';
 import { resolve } from 'path';
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import { getDataSourceOption } from '../../../../lib/constants/data-sources';
+import { requireRoleFromRequest } from '../../../../lib/server-auth';
 
-export async function GET() {
+export async function GET(request: NextRequest) {
   try {
+    await requireRoleFromRequest(request, ['DATA_MANAGER', 'ADMIN']);
+
     const config = getDataSourceOption('mekong');
     const dataDir = resolve(process.cwd(), config.outputFolder);
     const files = await readdir(dataDir);
@@ -27,6 +30,9 @@ export async function GET() {
 
     return NextResponse.json({ files: xlsxFiles });
   } catch (error) {
+    if (error instanceof Error && error.message === 'Unauthorized') {
+      return NextResponse.json({ error: 'Unauthorized. DATA_MANAGER or ADMIN role required.', files: [] }, { status: 403 });
+    }
     return NextResponse.json({ error: 'Cannot read files', files: [] }, { status: 500 });
   }
 }

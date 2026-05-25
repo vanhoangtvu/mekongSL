@@ -22,3 +22,10 @@ spring:
 jwt:
   secret: ${JWT_SECRET:mekong-secret-key-change-in-production-min-256-bits-long}
   expiration: 86400000
+
+s3:
+  endpoint: https://backup.hci.vn
+  bucket: c01-mekong-prod-01
+  access-key: WGU85A069Z04ESKJXYHF
+  secret-key: E9YWIUztSKCGxEtmETrxBPmzl4XCBadOnPMNxTYH
+  region: us-east-1

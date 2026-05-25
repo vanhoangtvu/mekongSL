@@ -13,7 +13,7 @@ import java.util.Map;
 public class DataController {
     
     @GetMapping
-    @PreAuthorize("hasRole('DATA_MANAGER')")
+    @PreAuthorize("hasAnyRole('DATA_MANAGER', 'ADMIN')")
     public ResponseEntity<Map<String, String>> getData() {
         return ResponseEntity.ok(Map.of(
                 "message", "This is protected data endpoint",

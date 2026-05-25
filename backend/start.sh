@@ -1,15 +1,29 @@
 #!/bin/bash
 
-# Compile backend
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PID_FILE="$SCRIPT_DIR/.backend.pid"
+LOG_FILE="$SCRIPT_DIR/backend.log"
+
+if [[ -f "$PID_FILE" ]]; then
+  OLD_PID="$(cat "$PID_FILE")"
+  if [[ -n "$OLD_PID" ]] && kill -0 "$OLD_PID" 2>/dev/null; then
+    echo "Backend is already running with PID: $OLD_PID"
+    exit 0
+  fi
+  rm -f "$PID_FILE"
+fi
+
+cd "$SCRIPT_DIR"
+
 echo "Compiling backend..."
-cd /home/hv/DuAn/Mekong/backend
-./mvnw clean compile
+./mvnw -q -DskipTests compile
 
-# Start backend
 echo "Starting backend on 0.0.0.0:8084..."
-nohup ./mvnw spring-boot:run > backend.log 2>&1 &
-echo $! > .backend.pid
+nohup ./mvnw spring-boot:run > "$LOG_FILE" 2>&1 &
+echo $! > "$PID_FILE"
 
-echo "Backend started with PID: $(cat .backend.pid)"
+echo "Backend started with PID: $(cat "$PID_FILE")"
 echo "Access at: http://113.170.158.188:8084"
-echo "Logs: tail -f backend.log"
+echo "Logs: tail -f $LOG_FILE"

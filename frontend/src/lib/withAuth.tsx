@@ -2,7 +2,7 @@
 
 import { useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { authService } from '../../lib/auth';
+import { authService } from './auth';
 
 export function withAuth<P extends object>(
   Component: React.ComponentType<P>,

@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
-import { authService } from '../lib/auth';
+import { authService } from '../../lib/auth';
 
 export function AuthGuard({ children, requiredRole }: { children: React.ReactNode; requiredRole?: string }) {
   const router = useRouter();
@@ -19,7 +19,7 @@ export function AuthGuard({ children, requiredRole }: { children: React.ReactNod
         return;
       }
 
-      if (requiredRole && !authService.hasRole(requiredRole)) {
+      if (requiredRole && !authService.canAccess(requiredRole)) {
         router.push('/unauthorized');
         return;
       }
@@ -46,9 +46,9 @@ export function AuthGuard({ children, requiredRole }: { children: React.ReactNod
     );
   }
 
-  if (!isAuthorized) {
-    return null;
-  }
+    if (!isAuthorized) {
+      return null;
+    }
 
   return <>{children}</>;
 }

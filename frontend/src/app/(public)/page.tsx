@@ -4,9 +4,9 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { AppHeader } from "../../components/layout/app-header";
 import { AppFooter } from "../../components/layout/app-footer";
-import { SearchTabs, GeoSearchSidebar } from "../../components/layout/geo-search-sidebar";
+import { SearchTabs, GeoSearchSidebar } from "../../features/map/geo-search-sidebar";
 import { ResizablePanel } from "../../components/layout/resizable-panel";
-import { MapStage } from "../../components/map/map-stage";
+import { MapStage } from "../../features/map/map-stage";
 
 type TabType = "criteria" | "datasets" | "additional" | "results";
 

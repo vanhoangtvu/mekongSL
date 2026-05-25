@@ -297,6 +297,17 @@ Sau mỗi lần chạy script:
 - Bảng `mekong` lưu dữ liệu Mekong.
 - Bảng `ecowitt` lưu dữ liệu Ecowitt đã làm phẳng theo time-series.
 
+## ⏱️ CHẠY TỰ ĐỘNG THEO LỊCH
+
+Để tự động fetch Mekong hằng ngày vào các mốc `00:00`, `05:00`, `10:00`, `15:00`, `20:00`, dùng:
+
+```bash
+cd datacenter
+npm run fetch:mekong:schedule
+```
+
+Script scheduler chỉ gọi lại `mekong/fetch-mekong-data.mjs`, nên vẫn giữ nguyên cấu trúc MySQL hiện tại.
+
 Kết nối MySQL mặc định:
 - Host: `127.0.0.1`
 - Port: `3306`

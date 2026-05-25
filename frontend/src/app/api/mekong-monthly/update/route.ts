@@ -1,8 +1,11 @@
 import { spawn } from 'child_process';
 import { resolve } from 'path';
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
+import { requireRoleFromRequest } from '../../../../lib/server-auth';
 
-async function runUpdate() {
+async function runUpdate(request: NextRequest) {
+  await requireRoleFromRequest(request, ['DATA_MANAGER', 'ADMIN']);
+
   const repoRoot = resolve(process.cwd(), '..');
   const scriptPath = resolve(repoRoot, 'data/mekong/scripts/update-mekong-monthly-xlsx.mjs');
 
@@ -34,12 +37,15 @@ async function runUpdate() {
   });
 }
 
-export async function POST() {
+export async function POST(request: NextRequest) {
   try {
-    await runUpdate();
+    await runUpdate(request);
     return NextResponse.json({ message: 'Đã cập nhật file Excel theo tháng.' });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
+    if (message === 'Unauthorized') {
+      return NextResponse.json({ message: 'Unauthorized. DATA_MANAGER or ADMIN role required.' }, { status: 403 });
+    }
     return NextResponse.json({ message: 'Lỗi khi cập nhật: ' + message }, { status: 500 });
   }
 }

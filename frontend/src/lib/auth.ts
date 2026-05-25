@@ -24,6 +24,12 @@ export interface AuthResponse {
   role: string;
 }
 
+const ROLE_PRIORITY: Record<string, number> = {
+  USER: 0,
+  DATA_MANAGER: 1,
+  ADMIN: 2,
+};
+
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8084/api';
 
 class AuthService {
@@ -88,6 +94,18 @@ class AuthService {
     return auth?.role === role;
   }
 
+  hasAccess(requiredRole?: string): boolean {
+    if (!requiredRole) {
+      return this.isAuthenticated();
+    }
+
+    const auth = this.getAuth();
+    const currentPriority = auth ? ROLE_PRIORITY[auth.role] ?? -1 : -1;
+    const requiredPriority = ROLE_PRIORITY[requiredRole] ?? Number.MAX_SAFE_INTEGER;
+
+    return this.isAuthenticated() && currentPriority >= requiredPriority;
+  }
+
   getToken(): string | null {
     return this.getAuth()?.token || null;
   }
@@ -113,8 +131,25 @@ class AuthService {
       this.logout();
       return false;
     }
-    if (requiredRole && !this.hasRole(requiredRole)) return false;
-    return true;
+    return this.hasAccess(requiredRole);
+  }
+
+  getLandingPath(): string {
+    const auth = this.getAuth();
+
+    if (!auth) {
+      return '/';
+    }
+
+    if (auth.role === 'ADMIN') {
+      return '/dashboard';
+    }
+
+    if (auth.role === 'DATA_MANAGER') {
+      return '/data';
+    }
+
+    return '/';
   }
 }
 

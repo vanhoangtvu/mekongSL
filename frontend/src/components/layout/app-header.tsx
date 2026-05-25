@@ -2,9 +2,9 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import { authService } from "../../lib/auth";
 import { LogOut, User } from "lucide-react";
-import Link from "next/link";
 
 export function AppHeader() {
   const router = useRouter();
@@ -31,8 +31,9 @@ export function AppHeader() {
           </Link>
         </div>
         <nav className="app-header-nav">
-          <a href="/">Bản đồ</a>
-          <a href="/data">Dữ liệu</a>
+          <Link href="/">Bản đồ</Link>
+          <Link href="/data">Dữ liệu</Link>
+          {user?.role === 'ADMIN' && <Link href="/dashboard">Quản trị</Link>}
           {user ? (
             <>
               <span className="user-info">
@@ -45,7 +46,7 @@ export function AppHeader() {
               </button>
             </>
           ) : (
-            <a href="/auth">Đăng nhập</a>
+            <Link href="/auth">Đăng nhập</Link>
           )}
         </nav>
       </div>

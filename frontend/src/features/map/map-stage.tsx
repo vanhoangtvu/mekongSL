@@ -217,7 +217,7 @@ export function MapStage() {
         return;
       }
 
-      if (selectedLayer.previewUrl.endsWith('.tif') || selectedLayer.previewUrl.endsWith('.tiff')) {
+      if (selectedLayer.previewUrl.endsWith(".tif") || selectedLayer.previewUrl.endsWith(".tiff")) {
         if (isActive) {
           setRasterUrl(selectedLayer.previewUrl);
           setLoadStatus(`Đang hiển thị ${selectedLayer.name}`);
@@ -276,7 +276,7 @@ export function MapStage() {
 
     // Force multiple size updates to ensure proper rendering
     const updateSizes = [0, 100, 300, 500];
-    updateSizes.forEach(delay => {
+    updateSizes.forEach((delay) => {
       setTimeout(() => {
         if (mapRef.current) {
           mapRef.current.updateSize();
@@ -284,10 +284,10 @@ export function MapStage() {
       }, delay);
     });
 
-    map.on('pointermove', (evt) => {
+    map.on("pointermove", (evt) => {
       const coordinate = evt.coordinate;
       setMouseCoords(coordinate as [number, number]);
-      
+
       const layer = rasterLayerRef.current;
       if (!layer) {
         setPixelValue(null);
@@ -331,19 +331,19 @@ export function MapStage() {
       }
     };
 
-    window.addEventListener('resize', handleResize);
-    document.addEventListener('visibilitychange', handleVisibilityChange);
+    window.addEventListener("resize", handleResize);
+    document.addEventListener("visibilitychange", handleVisibilityChange);
 
     return () => {
-      window.removeEventListener('resize', handleResize);
-      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      window.removeEventListener("resize", handleResize);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
     };
   }, []);
 
   useEffect(() => {
     const map = mapRef.current;
     const currentBaseLayer = baseLayerRef.current;
-    
+
     if (!map || !currentBaseLayer) {
       return;
     }
@@ -375,24 +375,24 @@ export function MapStage() {
 
     console.log("Creating GeoTIFF source with URL:", rasterUrl);
 
-    const absoluteUrl = rasterUrl.startsWith('http') 
-      ? rasterUrl 
-      : `${window.location.origin}${rasterUrl}`;
-    
+    const absoluteUrl = rasterUrl.startsWith("http") ? rasterUrl : `${window.location.origin}${rasterUrl}`;
+
     console.log("Absolute GeoTIFF URL:", absoluteUrl);
 
     const source = new GeoTIFF({
-      sources: [{ 
-        url: absoluteUrl,
-        nodata: selectedLayer.nodata ?? undefined,
-      }],
+      sources: [
+        {
+          url: absoluteUrl,
+          nodata: selectedLayer.nodata ?? undefined,
+        },
+      ],
       convertToRGB: false,
       normalize: false,
       interpolate: false,
-      projection: 'EPSG:32648',
+      projection: "EPSG:32648",
     });
 
-    source.on('change', () => {
+    source.on("change", () => {
       console.log("GeoTIFF source state:", source.getState());
     });
 
@@ -402,21 +402,21 @@ export function MapStage() {
       source,
       style: {
         color: [
-          'case',
-          ['<=', ['band', 1], nodataValue], [0, 0, 0, 0],
-          ['<=', ['band', 1], 0], [0, 0, 0, 0],
-          ['<', ['band', 1], 0.06], [0, 0, 0, 0],
+          "case",
+          ["<=", ["band", 1], nodataValue], [0, 0, 0, 0],
+          ["<=", ["band", 1], 0], [0, 0, 0, 0],
+          ["<", ["band", 1], 0.06], [0, 0, 0, 0],
           [
-            'interpolate',
-            ['linear'],
-            ['band', 1],
+            "interpolate",
+            ["linear"],
+            ["band", 1],
             0.06, [0, 0, 255, 1],
             5, [0, 255, 255, 1],
             10, [0, 255, 0, 1],
             15, [255, 255, 0, 1],
             20, [255, 165, 0, 1],
             21, [255, 0, 0, 1],
-          ]
+          ],
         ],
       },
     });
@@ -426,103 +426,104 @@ export function MapStage() {
     map.addLayer(rasterLayer);
     rasterLayerRef.current = rasterLayer;
 
-    rasterLayer.on('error', (event) => {
+    rasterLayer.on("error", (event) => {
       console.error("Raster layer error:", event);
     });
 
     void (async () => {
       const worldFile = await loadWorldFile(absoluteUrl);
       return source.getView().then((viewOptions) => ({ viewOptions, worldFile }));
-    })().then(({ viewOptions, worldFile }) => {
-      console.log("GeoTIFF viewOptions:", viewOptions);
-      console.log("GeoTIFF extent:", viewOptions.extent);
-      console.log("GeoTIFF projection:", viewOptions.projection);
-      console.log("GeoTIFF resolutions:", viewOptions.resolutions);
-      
-      if (!mapRef.current) {
-        return;
-      }
+    })()
+      .then(({ viewOptions, worldFile }) => {
+        console.log("GeoTIFF viewOptions:", viewOptions);
+        console.log("GeoTIFF extent:", viewOptions.extent);
+        console.log("GeoTIFF projection:", viewOptions.projection);
+        console.log("GeoTIFF resolutions:", viewOptions.resolutions);
 
-      if (viewOptions.extent && viewOptions.projection) {
+        if (!mapRef.current) {
+          return;
+        }
+
+        if (viewOptions.extent && viewOptions.projection) {
+          const view = map.getView();
+          const sourceProjection =
+            typeof viewOptions.projection === "string"
+              ? viewOptions.projection
+              : viewOptions.projection.getCode();
+
+          console.log("Source projection code:", sourceProjection);
+
+          const transformedExtent = transformExtent(viewOptions.extent, sourceProjection, "EPSG:3857");
+          console.log("Transformed extent (EPSG:3857):", transformedExtent);
+
+          view.fit(transformedExtent, {
+            padding: [48, 48, 48, 48],
+            duration: 300,
+            maxZoom: 15,
+          });
+
+          console.log("✅ Map fitted to GeoTIFF extent");
+          return;
+        }
+
         const view = map.getView();
-        const sourceProjection =
-          typeof viewOptions.projection === "string"
-            ? viewOptions.projection
-            : viewOptions.projection.getCode();
+        const pixelExtent =
+          viewOptions.extent && viewOptions.extent.length === 4
+            ? (viewOptions.extent as [number, number, number, number])
+            : null;
+        const worldExtent = worldFile && pixelExtent ? buildWorldFileExtent(worldFile, pixelExtent) : null;
+        const fallbackExtent = selectedLayer?.bbox ?? [594885, 1052655, 688485, 1117455];
+        const resolvedExtent = worldExtent ?? fallbackExtent;
 
-        console.log("Source projection code:", sourceProjection);
+        if (worldExtent) {
+          console.log("✅ Map fitted to world file extent");
+        } else {
+          console.warn("⚠️ No extent/projection in GeoTIFF; using fallback extent");
+        }
 
-        const transformedExtent = transformExtent(viewOptions.extent, sourceProjection, "EPSG:3857");
-        console.log("Transformed extent (EPSG:3857):", transformedExtent);
+        const transformedExtent = transformExtent(resolvedExtent, "EPSG:32648", "EPSG:3857");
+        console.log("Resolved transformed extent:", transformedExtent);
 
         view.fit(transformedExtent, {
           padding: [48, 48, 48, 48],
           duration: 300,
           maxZoom: 15,
         });
-        
-        console.log("✅ Map fitted to GeoTIFF extent");
-        return;
-      }
+      })
+      .catch((error) => {
+        console.error("❌ Error reading GeoTIFF view:", error);
+        console.error("Error stack:", error.stack);
 
-      const view = map.getView();
-      const pixelExtent = viewOptions.extent && viewOptions.extent.length === 4
-        ? (viewOptions.extent as [number, number, number, number])
-        : null;
-      const worldExtent = worldFile && pixelExtent
-        ? buildWorldFileExtent(worldFile, pixelExtent)
-        : null;
-      const fallbackExtent = selectedLayer?.bbox ?? [594885, 1052655, 688485, 1117455];
-      const resolvedExtent = worldExtent ?? fallbackExtent;
+        const view = map.getView();
+        const fallbackExtent = selectedLayer?.bbox ?? [594885, 1052655, 688485, 1117455];
+        const transformedExtent = transformExtent(fallbackExtent, "EPSG:32648", "EPSG:3857");
 
-      if (worldExtent) {
-        console.log("✅ Map fitted to world file extent");
-      } else {
-        console.warn("⚠️ No extent/projection in GeoTIFF; using fallback extent");
-      }
-
-      const transformedExtent = transformExtent(resolvedExtent, "EPSG:32648", "EPSG:3857");
-      console.log("Resolved transformed extent:", transformedExtent);
-
-      view.fit(transformedExtent, {
-        padding: [48, 48, 48, 48],
-        duration: 300,
-        maxZoom: 15,
+        view.fit(transformedExtent, {
+          padding: [48, 48, 48, 48],
+          duration: 300,
+          maxZoom: 15,
+        });
       });
-    }).catch((error) => {
-      console.error("❌ Error reading GeoTIFF view:", error);
-      console.error("Error stack:", error.stack);
-      
-      const view = map.getView();
-      const fallbackExtent = selectedLayer?.bbox ?? [594885, 1052655, 688485, 1117455];
-      const transformedExtent = transformExtent(fallbackExtent, "EPSG:32648", "EPSG:3857");
-      
-      view.fit(transformedExtent, {
-        padding: [48, 48, 48, 48],
-        duration: 300,
-        maxZoom: 15,
-      });
-    });
   }, [rasterUrl, selectedLayer]);
 
   return (
     <section className="geo-map">
       <div className="geo-map-canvas">
         <div ref={mapContainerRef} className="geo-map-viewport" aria-label="OpenLayers Map" />
-        
+
         {/* Base Layer Switcher */}
         <div className="map-layer-switcher">
-          <button 
+          <button
             className="map-layer-toggle"
             onClick={() => setShowLayerMenu(!showLayerMenu)}
             type="button"
             title="Change base layer"
           >
             <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
-              <path d="M11.99 18.54l-7.37-5.73L3 14.07l9 7 9-7-1.63-1.27-7.38 5.74zM12 16l7.36-5.73L21 9l-9-7-9 7 1.63 1.27L12 16z"/>
+              <path d="M11.99 18.54l-7.37-5.73L3 14.07l9 7 9-7-1.63-1.27-7.38 5.74zM12 16l7.36-5.73L21 9l-9-7-9 7 1.63 1.27L12 16z" />
             </svg>
           </button>
-          
+
           {showLayerMenu && (
             <div className="map-layer-menu">
               <div className="map-layer-switcher-title">Base Layers</div>
@@ -546,7 +547,7 @@ export function MapStage() {
 
         {/* Zoom Controls */}
         <div className="map-zoom-controls">
-          <button 
+          <button
             className="map-zoom-btn"
             onClick={() => {
               const view = mapRef.current?.getView();
@@ -557,7 +558,7 @@ export function MapStage() {
           >
             +
           </button>
-          <button 
+          <button
             className="map-zoom-btn"
             onClick={() => {
               const view = mapRef.current?.getView();

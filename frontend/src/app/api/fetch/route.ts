@@ -2,9 +2,12 @@ import { spawn } from 'child_process';
 import { resolve } from 'path';
 import { NextRequest, NextResponse } from 'next/server';
 import { normalizeDataSource } from '../../../lib/constants/data-sources';
+import { requireRoleFromRequest } from '../../../lib/server-auth';
 
 async function runFetch(request: NextRequest) {
   try {
+    await requireRoleFromRequest(request, ['DATA_MANAGER', 'ADMIN']);
+
     const source = normalizeDataSource(request.nextUrl.searchParams.get('source'));
     
     const scriptMap: Record<string, string> = {
@@ -58,6 +61,11 @@ async function runFetch(request: NextRequest) {
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
+    if (message === 'Unauthorized') {
+      return NextResponse.json({ 
+        message: 'Unauthorized. DATA_MANAGER or ADMIN role required.' 
+      }, { status: 403 });
+    }
     return NextResponse.json({ 
       message: 'Lỗi khi lấy dữ liệu: ' + message
     }, { status: 500 });

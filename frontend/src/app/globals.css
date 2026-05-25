@@ -104,7 +104,8 @@ select {
 .app-container {
   display: flex;
   flex-direction: column;
-  height: 100vh;
+  height: 100dvh;
+  min-height: 100dvh;
   overflow: hidden;
 }
 
@@ -163,6 +164,10 @@ select {
   font-size: 0.7rem;
 }
 
+.public-home .app-content {
+  min-height: 0;
+}
+
 /* Header */
 .app-header {
   position: relative;
@@ -177,6 +182,7 @@ select {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 1rem;
   max-width: 100%;
   padding: 1rem 2.8rem;
 }
@@ -203,6 +209,8 @@ select {
   display: flex;
   align-items: center;
   gap: 1.5rem;
+  flex-wrap: wrap;
+  justify-content: flex-end;
 }
 
 .app-header-nav a {
@@ -231,10 +239,17 @@ select {
   z-index: 50;
   display: flex;
   flex-shrink: 0;
+  overflow-x: auto;
   border-bottom: 3px solid var(--border);
   background: var(--surface-strong);
   padding: 0 1.5rem;
   box-shadow: var(--shadow-sm);
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.search-tabs::-webkit-scrollbar {
+  display: none;
 }
 
 .search-tab {
@@ -394,6 +409,146 @@ select {
 
 .app-footer-links a:hover {
   color: #ffffff;
+}
+
+@media (max-width: 960px) {
+  .app-header-content {
+    padding: 1rem 1.25rem;
+    align-items: flex-start;
+  }
+
+  .app-header-nav {
+    gap: 0.75rem;
+  }
+
+  .app-header-nav a,
+  .app-header-nav button,
+  .user-info {
+    font-size: 0.85rem;
+  }
+
+  .app-logo {
+    font-size: 1.1rem;
+  }
+}
+
+@media (max-width: 720px) {
+  .app-container {
+    height: auto;
+    min-height: 100dvh;
+    overflow: visible;
+  }
+
+  .app-main {
+    overflow: visible;
+  }
+
+  .app-header-content {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0.75rem;
+    padding: 0.9rem 1rem;
+  }
+
+  .app-header-left {
+    justify-content: space-between;
+  }
+
+  .app-header-nav {
+    width: 100%;
+    justify-content: flex-start;
+    gap: 0.5rem;
+  }
+
+  .app-header-nav a,
+  .app-header-nav button,
+  .user-info {
+    width: 100%;
+    justify-content: center;
+  }
+
+  .app-header-nav a {
+    padding: 0.55rem 0.75rem;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.12);
+  }
+
+  .search-tabs {
+    padding: 0 0.75rem;
+  }
+
+  .search-tab {
+    padding: 0.85rem 1rem;
+    font-size: 0.88rem;
+  }
+
+  .app-content {
+    flex-direction: column;
+    overflow: visible;
+  }
+
+  .resizable-panel {
+    width: 100% !important;
+  }
+
+  .resize-handle {
+    display: none;
+  }
+
+  .geo-sidebar {
+    border-right: none;
+    border-bottom: 3px solid var(--border);
+    box-shadow: var(--shadow-md);
+  }
+
+  .geo-sidebar-content {
+    padding: 1rem;
+  }
+
+  .geo-sidebar-actions {
+    padding: 0.85rem 1rem;
+  }
+
+  .geo-panel {
+    min-height: 58vh;
+  }
+
+  .geo-map-canvas {
+    min-height: 58vh;
+  }
+
+  .app-footer {
+    padding: 0.9rem 0.75rem;
+  }
+
+  .app-footer-links {
+    gap: 0.75rem 1rem;
+  }
+}
+
+@media (max-width: 480px) {
+  .app-header-nav {
+    gap: 0.45rem;
+  }
+
+  .app-header-nav a,
+  .app-header-nav button,
+  .user-info {
+    font-size: 0.8rem;
+  }
+
+  .search-tabs {
+    padding: 0 0.5rem;
+  }
+
+  .search-tab {
+    padding: 0.75rem 0.9rem;
+    font-size: 0.84rem;
+  }
+
+  .app-footer-links {
+    justify-content: flex-start;
+  }
 }
 
 .page-shell {

@@ -390,6 +390,10 @@ async function main() {
       tableName: 'ecowitt',
       rows: mysqlRows,
       columnDefinitions,
+      indexDefinitions: [
+        { name: 'idx_ecowitt_fetched_at', columns: ['fetched_at'] },
+        { name: 'idx_ecowitt_record_time', columns: ['record_time'] },
+      ],
     });
   }
 
