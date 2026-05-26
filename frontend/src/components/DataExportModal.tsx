@@ -14,7 +14,6 @@ export default function DataExportModal({ open, onClose, timeframes, date }: { o
   const now = new Date();
   const [year, setYear] = useState(now.getFullYear());
   const [month, setMonth] = useState(now.getMonth() + 1);
-  const [selectedRunId, setSelectedRunId] = useState('');
   const [province, setProvince] = useState('');
   // region abbreviations used by UI filters (matches frontend logic: '- TV', '- BT', '- VL')
   const REGION_OPTIONS = [
@@ -27,8 +26,6 @@ export default function DataExportModal({ open, onClose, timeframes, date }: { o
 
   // internal timeframe list when selecting daily mode (load by date)
   const [selectedDate, setSelectedDate] = useState<string>(date || new Date().toISOString().slice(0,10));
-  const [availableTimeframes, setAvailableTimeframes] = useState<Array<{ fetch_run_id: string; fetched_at: string }>>(timeframes || []);
-  const [timeframesLoadingLocal, setTimeframesLoadingLocal] = useState(false);
 
   React.useEffect(() => {
     (async () => {
@@ -44,35 +41,6 @@ export default function DataExportModal({ open, onClose, timeframes, date }: { o
       }
     })();
   }, []);
-
-  // Fetch timeframes for selectedDate when in daily mode
-  React.useEffect(() => {
-    if (mode !== 'daily') return;
-    let cancelled = false;
-    (async () => {
-      setTimeframesLoadingLocal(true);
-      try {
-        const token = authService.getToken();
-        const url = `/api/mysql?source=mekong&date=${encodeURIComponent(selectedDate)}&view=timeframes`;
-        const res = await fetch(url, { headers: token ? { Authorization: `Bearer ${token}` } : undefined });
-        if (!res.ok) {
-          setAvailableTimeframes([]);
-          setTimeframesLoadingLocal(false);
-          return;
-        }
-        const body = await res.json();
-        if (cancelled) return;
-        setAvailableTimeframes(Array.isArray(body.data) ? body.data : body.data || []);
-        // reset selectedRunId if not in new list
-        setSelectedRunId((cur) => (Array.isArray(body.data) && body.data.some((t:any)=>t.fetch_run_id===cur)) ? cur : (body.data?.[0]?.fetch_run_id || ''));
-      } catch (e) {
-        setAvailableTimeframes([]);
-      } finally {
-        setTimeframesLoadingLocal(false);
-      }
-    })();
-    return () => { cancelled = true; };
-  }, [mode, selectedDate]);
 
   const [selectedMetrics, setSelectedMetrics] = useState<string[]>(['salinity']);
   const [loading, setLoading] = useState(false);
@@ -96,13 +64,12 @@ export default function DataExportModal({ open, onClose, timeframes, date }: { o
       if (mode === 'monthly') {
         url += `&year=${year}&month=${String(month).padStart(2, '0')}`;
       } else {
-        // daily requires runId
-        if (!selectedRunId) {
-          alert('Vui lòng chọn khung giờ (runId) cho xuất theo ngày');
+        if (!selectedDate) {
+          alert('Vui lòng chọn ngày để xuất theo ngày');
           setLoading(false);
           return;
         }
-        url += `&runId=${encodeURIComponent(selectedRunId)}`;
+        url += `&date=${encodeURIComponent(selectedDate)}`;
       }
 
       const res = await fetch(url, {
@@ -146,12 +113,12 @@ export default function DataExportModal({ open, onClose, timeframes, date }: { o
       if (mode === 'monthly') {
         url += `&year=${year}&month=${String(month).padStart(2, '0')}`;
       } else {
-        if (!selectedRunId) {
-          alert('Vui lòng chọn khung giờ (runId) để xem trước');
+        if (!selectedDate) {
+          alert('Vui lòng chọn ngày để xem trước');
           setPreviewLoading(false);
           return;
         }
-        url += `&runId=${encodeURIComponent(selectedRunId)}`;
+        url += `&date=${encodeURIComponent(selectedDate)}`;
       }
 
       const res = await fetch(url, { headers: token ? { Authorization: `Bearer ${token}` } : undefined });
@@ -194,28 +161,6 @@ export default function DataExportModal({ open, onClose, timeframes, date }: { o
               <label style={{ minWidth: 120 }}>Chọn ngày:</label>
               <input type="date" value={selectedDate} onChange={(e) => setSelectedDate(e.target.value)} />
             </div>
-
-            <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-              <label style={{ minWidth: 120 }}>Khung giờ:</label>
-              <select value={selectedRunId} onChange={(e) => setSelectedRunId(e.target.value)} style={{ flex: 1 }}>
-                <option value="">-- Chọn khung giờ --</option>
-                {timeframesLoadingLocal ? (
-                  <option disabled>Đang tải...</option>
-                ) : availableTimeframes.length === 0 ? (
-                  <option disabled>Chưa có snapshot trong ngày này</option>
-                ) : (
-                  availableTimeframes.map((tf) => {
-                    const timeLabel = (typeof tf.fetched_at === 'string' && tf.fetched_at.length >= 16) ? tf.fetched_at.slice(11,16) : String(tf.fetched_at);
-                    const shortRun = (tf.fetch_run_id || '').slice(0,8);
-                    return (
-                      <option key={tf.fetch_run_id} value={tf.fetch_run_id} title={`${tf.fetched_at} • ${tf.fetch_run_id}`}>
-                        {timeLabel} {shortRun ? `(${shortRun})` : ''}
-                      </option>
-                    );
-                  })
-                )}
-              </select>
-            </div>
           </div>
         )}
 
@@ -250,21 +195,21 @@ export default function DataExportModal({ open, onClose, timeframes, date }: { o
 
         {previewData ? (
           <div style={{ marginBottom: 12, maxHeight: 420, overflow: 'auto', border: '1px solid var(--muted)', padding: 8, borderRadius: 6 }}>
-            {/* Normalize preview shape: monthly returns { sheets: [{ metric, columns, rows }, ...] }, daily returns { headers, rows } */}
             {previewLoading ? (
               <div>Đang tải xem trước...</div>
             ) : (() => {
-              const isMonthly = Array.isArray(previewData.sheets);
-              const sheets = isMonthly ? previewData.sheets : null;
-              const firstSheet = isMonthly ? sheets[0] : null;
-              const headers = isMonthly ? (firstSheet?.columns || []) : (previewData.headers || []);
-              const rows = isMonthly ? (firstSheet?.rows || []) : (previewData.rows || []);
+              const sheets = previewData.sheets || [];
+              const firstSheet = sheets[0] || null;
+              const headers = firstSheet?.columns || [];
+              const rows = firstSheet?.rows || [];
+
+              if (!rows.length) return <div>Không có dữ liệu cho thời gian này</div>;
 
               return (
                 <div>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
                     <div style={{ fontWeight: 600 }}>Xem trước ({headers.length} cột, {Array.isArray(rows) ? rows.length : 0} hàng)</div>
-                    {isMonthly && sheets.length > 1 ? (
+                    {sheets.length > 1 ? (
                       <div>
                         <label style={{ marginRight: 8 }}>Sheet:</label>
                         <select onChange={(e) => {

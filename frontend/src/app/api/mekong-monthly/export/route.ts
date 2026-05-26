@@ -223,15 +223,15 @@ export async function GET(request: NextRequest) {
       });
     }
 
-    // Daily mode: prefer runId param (snapshot). If runId provided, export single snapshot with selected metrics
+    // Daily mode: export by date with time columns
     if (mode === 'daily') {
-      const runId = searchParams.get('runId');
-      if (!runId) {
+      const dateStr = searchParams.get('date');
+      if (!dateStr) {
         await connection.end();
-        return NextResponse.json({ error: 'runId is required for daily export' }, { status: 400 });
+        return NextResponse.json({ error: 'date is required for daily export (YYYY-MM-DD)' }, { status: 400 });
       }
 
-      const params: any[] = [runId];
+      const params: any[] = [dateStr, dateStr];
       let whereClause = '';
       if (province) {
         whereClause = ' AND (s.ProvinceCode = ? OR s.ProvinceName LIKE ?)';
@@ -245,12 +245,52 @@ export async function GET(request: NextRequest) {
         params.push(regionPattern, regionPattern, regionPattern, regionPattern);
       }
 
-      // Select sensor + metric columns
       const metricCols = metricConfigs.map((m) => `m.${m.key}`).join(', ');
-      const query = `SELECT s.SensorNodeCode, s.SNShortName, s.Longitude, s.Latitude, ${metricCols}, DATE_FORMAT(DATE_ADD(m.fetched_at, INTERVAL 7 HOUR),'%Y-%m-%d %H:%i:%s') AS fetched_at FROM mekong_measurement m INNER JOIN mekong_sensor s ON s.SensorNodeCode = m.sensor_code WHERE m.fetch_run_id = ? ${whereClause} ORDER BY s.SensorNodeCode`;
+      
+      // We need to fetch data for the whole local day (00:00:00 to 23:59:59 local time).
+      // Since fetched_at is in UTC, and local time is UTC+7, we filter by DATE(DATE_ADD(fetched_at, INTERVAL 7 HOUR))
+      const query = `
+        SELECT 
+          s.SensorNodeCode, s.SNShortName, s.Longitude, s.Latitude, 
+          ${metricCols}, 
+          DATE_FORMAT(DATE_ADD(m.fetched_at, INTERVAL 7 HOUR),'%Y-%m-%d %H:%i:%s') AS fetched_at,
+          HOUR(DATE_ADD(m.fetched_at, INTERVAL 7 HOUR)) AS fetch_hour
+        FROM mekong_measurement m 
+        INNER JOIN mekong_sensor s ON s.SensorNodeCode = m.sensor_code 
+        WHERE DATE(DATE_ADD(m.fetched_at, INTERVAL 7 HOUR)) = ? 
+        ${whereClause} 
+        ORDER BY s.SensorNodeCode, m.fetched_at
+      `;
 
-      const [rows] = await connection.query(query, params);
-      // determine namePart for filename based on region or province
+      // The query uses DATE(...) = ? so we only pass dateStr once in params
+      // Let's rewrite params properly:
+      const dailyParams: any[] = [dateStr];
+      let dailyWhereClause = '';
+      if (province) {
+        dailyWhereClause += ' AND (s.ProvinceCode = ? OR s.ProvinceName LIKE ?)';
+        dailyParams.push(province, `%${province}%`);
+      }
+      if (region) {
+        const regionPattern = `% - ${region}%`;
+        dailyWhereClause += ` AND (UPPER(s.SNShortName) LIKE ? OR UPPER(s.SNDescription) LIKE ? OR UPPER(s.SNShortNameEN) LIKE ? OR UPPER(s.SNDescriptionEN) LIKE ?)`;
+        dailyParams.push(regionPattern, regionPattern, regionPattern, regionPattern);
+      }
+      
+      const queryStr = `
+        SELECT 
+          s.SensorNodeCode, s.SNShortName, s.Longitude, s.Latitude, 
+          ${metricCols}, 
+          DATE_FORMAT(DATE_ADD(m.fetched_at, INTERVAL 7 HOUR),'%Y-%m-%d %H:%i:%s') AS fetched_at,
+          HOUR(DATE_ADD(m.fetched_at, INTERVAL 7 HOUR)) as fetch_hour
+        FROM mekong_measurement m 
+        INNER JOIN mekong_sensor s ON s.SensorNodeCode = m.sensor_code 
+        WHERE DATE(DATE_ADD(m.fetched_at, INTERVAL 7 HOUR)) = ? 
+        ${dailyWhereClause} 
+        ORDER BY s.SensorNodeCode, m.fetched_at
+      `;
+
+      const [rows] = await connection.query(queryStr, dailyParams);
+
       let namePart = 'all';
       const REGION_MAP = { TV: 'TraVinh', BT: 'BenTre', VL: 'VinhLong' };
       if (region) {
@@ -269,35 +309,72 @@ export async function GET(request: NextRequest) {
         }
       }
 
-      const data = (rows as any[]).map((r: any) => {
-        const utm = toUtm48(r.Longitude, r.Latitude);
-        const base: Record<string, any> = {
-          ID: r.SensorNodeCode || '',
-          Address: r.SNShortName || '',
-          X: utm ? utm.x : '',
-          Y: utm ? utm.y : '',
-          fetched_at: r.fetched_at || '',
-        };
-        for (const m of metricConfigs) {
-          base[m.label] = formatMetricValue(r[m.key]);
-        }
-        return base;
-      });
-
       await connection.end();
 
-      if (isPreview) {
-        const headers = ['ID', 'Address', 'X', 'Y', 'fetched_at', ...metricConfigs.map((m) => m.label)];
-        return NextResponse.json({ headers, rows: data.slice(0, 200) });
+      const timeColumns = ['00h', '05h', '10h', '15h', '20h'];
+      // Create one sheet per metric, similar to monthly
+      const wb = XLSX.utils.book_new();
+      const previewSheets: any[] = [];
+      const BASE_COLUMNS = ['ID', 'Address', 'X', 'Y'];
+      const allColumns = [...BASE_COLUMNS, ...timeColumns];
+
+      for (const metricConfig of metricConfigs) {
+        const sensorMap = new Map<string, Record<string, any>>();
+        const dailyRows = rows as any[];
+
+        for (const row of dailyRows) {
+          const sensorCode = row.SensorNodeCode || 'UNKNOWN';
+
+          if (!sensorMap.has(sensorCode)) {
+            const utm = toUtm48(row.Longitude, row.Latitude);
+            sensorMap.set(sensorCode, {
+              ID: sensorCode,
+              Address: row.SNShortName || sensorCode,
+              X: utm ? utm.x : '',
+              Y: utm ? utm.y : '',
+            });
+          }
+
+          const hour = Number(row.fetch_hour);
+          // Snap hour to nearest expected time (0, 5, 10, 15, 20)
+          let timeCol = '';
+          if (hour >= 0 && hour < 3) timeCol = '00h';
+          else if (hour >= 3 && hour < 8) timeCol = '05h';
+          else if (hour >= 8 && hour < 13) timeCol = '10h';
+          else if (hour >= 13 && hour < 18) timeCol = '15h';
+          else if (hour >= 18 && hour < 24) timeCol = '20h';
+
+          if (timeCol) {
+            const sensor = sensorMap.get(sensorCode)!;
+            // Only update if it hasn't been set for this time slot yet (keep first/closest)
+            if (!sensor[timeCol]) {
+               sensor[timeCol] = formatMetricValue(row[metricConfig.key]);
+            }
+          }
+        }
+
+        const data = Array.from(sensorMap.values()).map((sensor) => {
+          const r: Record<string, any> = {};
+          for (const col of allColumns) {
+            r[col] = sensor[col] || '';
+          }
+          return r;
+        });
+
+        if (isPreview) {
+          previewSheets.push({ metric: metricConfig.label, columns: allColumns, rows: data.slice(0, 200) });
+        } else {
+          const ws = XLSX.utils.json_to_sheet(data, { header: allColumns });
+          XLSX.utils.book_append_sheet(wb, ws, metricConfig.label);
+        }
       }
 
-      const headers = ['ID', 'Address', 'X', 'Y', 'fetched_at', ...metricConfigs.map((m) => m.label)];
-      const ws = XLSX.utils.json_to_sheet(data, { header: headers });
-      const wb = XLSX.utils.book_new();
-      XLSX.utils.book_append_sheet(wb, ws, 'Snapshot');
+      if (isPreview) {
+        return NextResponse.json({ sheets: previewSheets });
+      }
 
       const buffer = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
-      const filename = `mekong-daily-${namePart}-${runId}.xlsx`;
+      const filename = `mekong-daily-${namePart}-${dateStr}.xlsx`;
 
       return new NextResponse(buffer, {
         headers: {
