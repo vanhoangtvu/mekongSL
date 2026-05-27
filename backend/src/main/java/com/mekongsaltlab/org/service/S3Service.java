@@ -8,12 +8,16 @@ import org.springframework.web.multipart.MultipartFile;
 import software.amazon.awssdk.core.sync.RequestBody;
 import software.amazon.awssdk.services.s3.S3Client;
 import software.amazon.awssdk.services.s3.model.*;
+import software.amazon.awssdk.services.s3.presigner.S3Presigner;
+import software.amazon.awssdk.services.s3.presigner.model.GetObjectPresignRequest;
+import software.amazon.awssdk.services.s3.presigner.model.PresignedGetObjectRequest;
 import com.mekongsaltlab.org.dto.S3FileResponse;
 
 import java.io.IOException;
 import java.io.InputStream;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
+import java.time.Duration;
 import java.util.List;
 import java.util.stream.Collectors;
 
@@ -23,6 +27,7 @@ import java.util.stream.Collectors;
 public class S3Service {
     
     private final S3Client s3Client;
+    private final S3Presigner s3Presigner;
     
     @Value("${s3.bucket}")
     private String bucketName;
@@ -143,6 +148,24 @@ public class S3Service {
      */
     public String getFileUrl(String key) {
         return String.format("https://backup.hci.vn/%s/%s", bucketName, key);
+    }
+
+    /**
+     * Generate a signed URL for downloading an object.
+     */
+    public String createSignedGetUrl(String key, Duration expiresIn) {
+        GetObjectRequest getObjectRequest = GetObjectRequest.builder()
+                .bucket(bucketName)
+                .key(key)
+                .build();
+
+        GetObjectPresignRequest presignRequest = GetObjectPresignRequest.builder()
+                .signatureDuration(expiresIn)
+                .getObjectRequest(getObjectRequest)
+                .build();
+
+        PresignedGetObjectRequest presignedRequest = s3Presigner.presignGetObject(presignRequest);
+        return presignedRequest.url().toString();
     }
     
     /**

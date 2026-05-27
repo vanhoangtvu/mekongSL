@@ -66,17 +66,12 @@ function formatMetricValue(value: unknown) {
     return '';
   }
 
-  const normalizedText = String(value).trim().replace(',', '.');
-  if (/^0+(?:\.0+)?$/.test(normalizedText)) {
-    return '';
+  const numericValue = Number(value);
+  if (!Number.isNaN(numericValue) && String(value).trim() !== '') {
+    return numericValue;
   }
 
-  const numericValue = Number(normalizedText);
-  if (!Number.isFinite(numericValue)) {
-    return String(value);
-  }
-
-  return numericValue.toFixed(2);
+  return String(value);
 }
 
 export async function GET(request: NextRequest) {

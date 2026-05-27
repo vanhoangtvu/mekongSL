@@ -1,6 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import React, { useState } from 'react';
 import { authService } from '../lib/auth';
+import { RefreshCw } from 'lucide-react';
 
 export const METRICS = [
   { key: 'salinity', label: 'Độ mặn' },
@@ -15,7 +16,6 @@ export default function DataExportModal({ open, onClose, timeframes, date }: { o
   const [year, setYear] = useState(now.getFullYear());
   const [month, setMonth] = useState(now.getMonth() + 1);
   const [province, setProvince] = useState('');
-  // region abbreviations used by UI filters (matches frontend logic: '- TV', '- BT', '- VL')
   const REGION_OPTIONS = [
     { value: '', label: '-- Tất cả vùng --' },
     { value: 'TV', label: 'TV' },
@@ -24,7 +24,6 @@ export default function DataExportModal({ open, onClose, timeframes, date }: { o
   ];
   const [provinces, setProvinces] = useState<Array<{ code: string; name: string }>>([]);
 
-  // internal timeframe list when selecting daily mode (load by date)
   const [selectedDate, setSelectedDate] = useState<string>(date || new Date().toISOString().slice(0,10));
 
   React.useEffect(() => {
@@ -46,6 +45,7 @@ export default function DataExportModal({ open, onClose, timeframes, date }: { o
   const [loading, setLoading] = useState(false);
   const [previewData, setPreviewData] = useState<any | null>(null);
   const [previewLoading, setPreviewLoading] = useState(false);
+  const [selectedSheetIndex, setSelectedSheetIndex] = useState(0);
 
   if (!open) return null;
 

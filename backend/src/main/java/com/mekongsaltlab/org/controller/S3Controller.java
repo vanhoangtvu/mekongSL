@@ -17,12 +17,14 @@ import java.util.Map;
 @RestController
 @RequestMapping("/api/s3")
 @RequiredArgsConstructor
+@Deprecated(since = "2026-05-26", forRemoval = true)
 public class S3Controller {
     
     private final S3Service s3Service;
     
     /**
      * Upload file to S3 (ADMIN + DATA_MANAGER only)
+     * @deprecated Use LayerObjectController for GIS layer files instead.
      */
     @PostMapping("/upload")
     @PreAuthorize("hasAnyRole('ADMIN', 'DATA_MANAGER')")

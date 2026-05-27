@@ -27,7 +27,7 @@ export function AppHeader() {
       <div className="app-header-content">
         <div className="app-header-left">
           <Link href="/" className="app-logo">
-            🌊 Mekong WebGIS
+            🌊 Mekong Salt Lab Data
           </Link>
         </div>
         <nav className="app-header-nav">

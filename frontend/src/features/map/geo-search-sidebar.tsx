@@ -5,6 +5,15 @@ import { AREA_TYPES, DATASETS } from "../../lib/constants/datasets";
 
 type TabType = "criteria" | "datasets" | "additional" | "results";
 
+type GeoSearchSidebarProps = {
+  activeTab: TabType;
+  onTabChange: (tab: TabType) => void;
+  startDateTime: string;
+  endDateTime: string;
+  onStartDateTimeChange: (value: string) => void;
+  onEndDateTimeChange: (value: string) => void;
+};
+
 type SearchTabsProps = {
   activeTab: TabType;
   onTabChange: (tab: TabType) => void;
@@ -45,9 +54,17 @@ export function SearchTabs({ activeTab, onTabChange }: SearchTabsProps) {
   );
 }
 
-export function GeoSearchSidebar({ activeTab, onTabChange }: { activeTab: TabType; onTabChange: (tab: TabType) => void }) {
+export function GeoSearchSidebar({
+  activeTab,
+  onTabChange,
+  startDateTime,
+  endDateTime,
+  onStartDateTimeChange,
+  onEndDateTimeChange,
+}: GeoSearchSidebarProps) {
   const [expandedCategories, setExpandedCategories] = useState<Set<string>>(new Set(["landsat"]));
   const [selectedDatasets, setSelectedDatasets] = useState<Set<string>>(new Set());
+  const [appliedDatasets, setAppliedDatasets] = useState<Set<string>>(new Set());
 
   const toggleCategory = (categoryId: string) => {
     setExpandedCategories((prev) => {
@@ -73,18 +90,22 @@ export function GeoSearchSidebar({ activeTab, onTabChange }: { activeTab: TabTyp
     });
   };
 
-  const countSelected = () => {
+  const countSelected = (datasets: Set<string>) => {
     let count = 0;
     DATASETS.forEach((cat) => {
       if (cat.children) {
         cat.children.forEach((child) => {
-          if (selectedDatasets.has(child.id)) count++;
+          if (datasets.has(child.id)) count++;
         });
       } else {
-        if (selectedDatasets.has(cat.id)) count++;
+        if (datasets.has(cat.id)) count++;
       }
     });
     return count;
+  };
+
+  const applyDatasets = () => {
+    setAppliedDatasets(new Set(selectedDatasets));
   };
 
   return (
@@ -114,35 +135,41 @@ export function GeoSearchSidebar({ activeTab, onTabChange }: { activeTab: TabTyp
           </section>
 
           <section className="geo-block">
-            <div className="geo-block-head">
-              <h3>Area Type</h3>
-              <span>Select 1</span>
-            </div>
-            <div className="geo-chip-grid">
-              {AREA_TYPES.map((item, index) => (
-                <button
-                  className={`geo-chip ${index === 2 ? "is-active" : ""}`}
-                  key={item}
-                  type="button"
-                >
-                  {item}
-                </button>
-              ))}
-            </div>
+            <label className="geo-label" htmlFor="data-type">
+              Data
+            </label>
+            <select id="data-type" className="geo-input">
+              <option value="salinity">Salinity</option>
+              <option value="temperature">Temperature</option>
+              <option value="ph">pH Level</option>
+              <option value="conductivity">Conductivity</option>
+            </select>
           </section>
 
           <section className="geo-block geo-grid-2">
             <div>
               <label className="geo-label" htmlFor="start-date">
-                Start Date
+                Start Date & Time
               </label>
-              <input id="start-date" className="geo-input" defaultValue="2026-05-01" type="date" />
+              <input
+                id="start-date"
+                className="geo-input"
+                onChange={(event) => onStartDateTimeChange(event.target.value)}
+                type="datetime-local"
+                value={startDateTime}
+              />
             </div>
             <div>
               <label className="geo-label" htmlFor="end-date">
-                End Date
+                End Date & Time
               </label>
-              <input id="end-date" className="geo-input" defaultValue="2026-05-24" type="date" />
+              <input
+                id="end-date"
+                className="geo-input"
+                onChange={(event) => onEndDateTimeChange(event.target.value)}
+                type="datetime-local"
+                value={endDateTime}
+              />
             </div>
           </section>
         </div>
@@ -162,7 +189,7 @@ export function GeoSearchSidebar({ activeTab, onTabChange }: { activeTab: TabTyp
           <section className="geo-block">
             <div className="geo-block-head">
               <h3>Data Sets</h3>
-              <span>{countSelected()} selected</span>
+              <span>{countSelected(selectedDatasets)} selected</span>
             </div>
             <div className="geo-dataset-tree">
               {DATASETS.map((category) => (
@@ -261,7 +288,7 @@ export function GeoSearchSidebar({ activeTab, onTabChange }: { activeTab: TabTyp
               <ul>
                 <li>Location: Vinh Long</li>
                 <li>Date Range: 2026-05-01 to 2026-05-24</li>
-                <li>Data Sets: {countSelected()} selected</li>
+                <li>Data Sets: {countSelected(appliedDatasets)} applied</li>
                 <li>Cloud Cover: ≤ 35%</li>
               </ul>
             </div>
@@ -271,30 +298,9 @@ export function GeoSearchSidebar({ activeTab, onTabChange }: { activeTab: TabTyp
 
       {/* Action Buttons */}
       <div className="geo-sidebar-actions">
-        {activeTab === "criteria" && (
-          <button className="geo-action" onClick={() => onTabChange("datasets")} type="button">
-            Data Sets →
-          </button>
-        )}
-        {activeTab === "datasets" && (
-          <button className="geo-action" onClick={() => onTabChange("additional")} type="button">
-            Additional Criteria →
-          </button>
-        )}
-        {activeTab === "additional" && (
-          <button className="geo-action" onClick={() => onTabChange("results")} type="button">
-            Results →
-          </button>
-        )}
-        {activeTab === "results" && (
-          <button
-            className="geo-action geo-action-secondary"
-            onClick={() => onTabChange("criteria")}
-            type="button"
-          >
-            ← New Search
-          </button>
-        )}
+        <button className="geo-action" onClick={applyDatasets} type="button">
+          Apply
+        </button>
       </div>
     </aside>
   );

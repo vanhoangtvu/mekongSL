@@ -7,8 +7,8 @@
 - **User**: mekong
 - **Quota**: 1TiB
 - **Role**: owner
-- **Access Key**: WGU85A069Z04ESKJXYHF
-- **Secret Key**: E9YWIUztSKCGxEtmETrxBPmzl4XCBadOnPMNxTYH
+- **Access Key**: <your-access-key>
+- **Secret Key**: <your-secret-key>
 - **Versioning**: Mode Compliance 7 days
 
 ## 🚀 API Endpoints
@@ -170,8 +170,8 @@ File: `backend/src/main/resources/application.yaml`
 s3:
   endpoint: https://backup.hci.vn
   bucket: c01-mekong-prod-01
-  access-key: ${S3_ACCESS_KEY:WGU85A069Z04ESKJXYHF}
-  secret-key: ${S3_SECRET_KEY:E9YWIUztSKCGxEtmETrxBPmzl4XCBadOnPMNxTYH}
+  access-key: ${S3_ACCESS_KEY}
+  secret-key: ${S3_SECRET_KEY}
   region: us-east-1
 ```
 

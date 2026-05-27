@@ -13,6 +13,8 @@ type TabType = "criteria" | "datasets" | "additional" | "results";
 export default function PublicHomePage() {
   const router = useRouter();
   const [activeTab, setActiveTab] = useState<TabType>("criteria");
+  const [startDateTime, setStartDateTime] = useState("2026-05-01T00:00");
+  const [endDateTime, setEndDateTime] = useState("2026-05-24T23:59");
 
   return (
     <div className="app-container public-home">
@@ -23,10 +25,17 @@ export default function PublicHomePage() {
         
         <div className="app-content">
           <ResizablePanel defaultWidth={360} minWidth={280} maxWidth={600} side="left">
-            <GeoSearchSidebar activeTab={activeTab} onTabChange={setActiveTab} />
+            <GeoSearchSidebar
+              activeTab={activeTab}
+              onTabChange={setActiveTab}
+              startDateTime={startDateTime}
+              endDateTime={endDateTime}
+              onStartDateTimeChange={setStartDateTime}
+              onEndDateTimeChange={setEndDateTime}
+            />
           </ResizablePanel>
           <div className="geo-panel">
-            <MapStage />
+            <MapStage startDateTime={startDateTime} endDateTime={endDateTime} />
           </div>
         </div>
       </main>

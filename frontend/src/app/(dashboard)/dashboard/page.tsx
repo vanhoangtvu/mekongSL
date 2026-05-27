@@ -21,10 +21,18 @@ import {
   loadDataTimeframes,
   refreshMonthlyExport,
   triggerDataFetch,
+  listGisLayers,
+  registerLayerObject,
+  listLayerFolderTree,
+  createLayerFolder,
+  deleteLayerFolder,
+  uploadLayerFile,
   type AdminRole,
   type AdminUser,
   type AdminUserForm,
   type S3FileItem,
+  type GisLayer,
+  type LayerFolderDto,
   updateAdminUser,
 } from "../../../lib/admin-api";
 import { DATA_SOURCE_OPTIONS, type DataSourceKey } from "../../../lib/constants/data-sources";
@@ -34,6 +42,9 @@ import {
   Database,
   Download,
   FolderOpen,
+  Folder,
+  FolderPlus,
+  File,
   RefreshCw,
   Search,
   Server,
@@ -82,9 +93,8 @@ function formatDate(value: string | null | undefined) {
 
 export default function DashboardPage() {
   const router = useRouter();
-  const [activeAdminTab, setActiveAdminTab] = useState<"overview" | "users" | "storage" | "data">("overview");
-  const [currentUser, setCurrentUser] = useState<AdminUser | null>(null);
-  const [users, setUsers] = useState<AdminUser[]>([]);
+  const [activeAdminTab, setActiveAdminTab] = useState<"overview" | "users" | "storage" | "data" | "gis">("overview");
+  const [currentUser, setCurrentUser] = useState<AdminUser | null>(null);  const [users, setUsers] = useState<AdminUser[]>([]);
   const [usersLoading, setUsersLoading] = useState(true);
   const [userSaving, setUserSaving] = useState(false);
   const [editingUserId, setEditingUserId] = useState<number | null>(null);
@@ -108,6 +118,11 @@ export default function DashboardPage() {
   const [monthlyYear, setMonthlyYear] = useState(new Date().getFullYear());
   const [monthlyMonth, setMonthlyMonth] = useState(new Date().getMonth() + 1);
   const [monthlyMetric, setMonthlyMetric] = useState("salinity");
+  const [layers, setLayers] = useState<GisLayer[]>([]);
+  const [selectedLayerId, setSelectedLayerId] = useState<number | null>(null);
+  const [folderTree, setFolderTree] = useState<LayerFolderDto[]>([]);
+  const [selectedFolderId, setSelectedFolderId] = useState<number | null>(null);
+  const [uploadCategory, setUploadCategory] = useState("default");
   const [message, setMessage] = useState<string | null>(null);
   const [messageKind, setMessageKind] = useState<"success" | "error" | "info">("info");
   const [busyAction, setBusyAction] = useState<string | null>(null);
@@ -135,10 +150,10 @@ export default function DashboardPage() {
     }
   };
 
-  const loadS3Files = async () => {
+  const loadS3Files = async (prefix?: string) => {
     setS3Loading(true);
     try {
-      setS3Files(await listS3Files(s3Prefix));
+      setS3Files(await listS3Files(prefix !== undefined ? prefix : s3Prefix));
     } catch (error) {
       pushMessage(error instanceof Error ? error.message : "Không tải được danh sách S3", "error");
     } finally {
@@ -200,8 +215,34 @@ export default function DashboardPage() {
     }
   };
 
+  const loadLayers = async () => {
+    try {
+      const data = await listGisLayers();
+      setLayers(data);
+    } catch {
+      setLayers([]);
+    }
+  };
+
+  const loadFolderTree = async (layerId: number) => {
+    try {
+      const data = await listLayerFolderTree(layerId);
+      setFolderTree(data);
+    } catch {
+      setFolderTree([]);
+    }
+  };
+
+  useEffect(() => {
+    if (selectedLayerId) {
+      void loadFolderTree(selectedLayerId);
+    } else {
+      setFolderTree([]);
+    }
+  }, [selectedLayerId]);
+
   const refreshAll = async () => {
-    await Promise.all([loadAccount(), loadUsers(), loadS3Files(), loadData(), loadSourceFilesData(), loadMonthlyFilesData()]);
+    await Promise.all([loadAccount(), loadUsers(), loadS3Files(), loadData(), loadSourceFilesData(), loadMonthlyFilesData(), loadLayers()]);
   };
 
   useEffect(() => {
@@ -294,6 +335,56 @@ export default function DashboardPage() {
     }
   };
 
+  const handleUnifiedUpload = async () => {
+    if (!uploadFile) {
+      pushMessage("Chọn file để upload", "error");
+      return;
+    }
+    if (!selectedLayerId) {
+      pushMessage("Chọn Layer để upload file bản đồ", "error");
+      return;
+    }
+
+    setBusyAction("upload-unified");
+    try {
+      await uploadLayerFile(selectedLayerId, uploadFile, selectedFolderId || undefined, uploadCategory);
+      pushMessage("Đã upload và ánh xạ file thành công", "success");
+      setUploadFile(null);
+      await loadS3Files(); // Refresh S3 list too
+    } catch (error) {
+      pushMessage(error instanceof Error ? error.message : "Upload thất bại", "error");
+    } finally {
+      setBusyAction(null);
+    }
+  };
+
+  const handleCreateFolder = async () => {
+    if (!selectedLayerId) return;
+    const name = window.prompt("Nhập tên thư mục mới:");
+    if (!name) return;
+
+    try {
+      await createLayerFolder(selectedLayerId, name, selectedFolderId || undefined);
+      pushMessage("Đã tạo thư mục", "success");
+      await loadFolderTree(selectedLayerId);
+    } catch (error) {
+      pushMessage(error instanceof Error ? error.message : "Tạo thư mục thất bại", "error");
+    }
+  };
+
+  const handleDeleteFolder = async (folderId: number) => {
+    if (!confirm("Xóa thư mục này và tất cả nội dung bên trong?")) return;
+
+    try {
+      await deleteLayerFolder(folderId);
+      pushMessage("Đã xóa thư mục", "success");
+      if (selectedFolderId === folderId) setSelectedFolderId(null);
+      if (selectedLayerId) await loadFolderTree(selectedLayerId);
+    } catch (error) {
+      pushMessage(error instanceof Error ? error.message : "Xóa thư mục thất bại", "error");
+    }
+  };
+
   const handleUpload = async () => {
     if (!uploadFile) {
       pushMessage("Chọn file để upload", "error");
@@ -332,6 +423,36 @@ export default function DashboardPage() {
     }
   };
 
+  const handleMapToLayer = async (file: S3FileItem) => {
+    if (layers.length === 0) {
+      pushMessage("Chưa có Layer nào trong hệ thống để ánh xạ.", "error");
+      return;
+    }
+
+    const layerIdStr = window.prompt(
+      `Chọn ID của Layer để ánh xạ file ${file.key}:\n\n` +
+      layers.map(l => `${l.id} - ${l.layerName} (${l.layerType})`).join('\n')
+    );
+
+    if (!layerIdStr) return;
+
+    const layerId = parseInt(layerIdStr, 10);
+    if (isNaN(layerId)) {
+      pushMessage("Layer ID không hợp lệ.", "error");
+      return;
+    }
+
+    setBusyAction(`map-layer-${file.key}`);
+    try {
+      await registerLayerObject(layerId, file.key, file.size || 0);
+      pushMessage("Ánh xạ file vào Layer thành công!", "success");
+    } catch (error) {
+      pushMessage(error instanceof Error ? error.message : "Ánh xạ thất bại", "error");
+    } finally {
+      setBusyAction(null);
+    }
+  };
+
   const handleDeleteS3 = async (key: string) => {
     if (!confirm(`Xóa file ${key}?`)) {
       return;
@@ -346,6 +467,16 @@ export default function DashboardPage() {
       pushMessage(error instanceof Error ? error.message : "Xóa file thất bại", "error");
     } finally {
       setBusyAction(null);
+    }
+  };
+
+  const handleCreateS3Folder = async () => {
+    const name = window.prompt("Nhập tên thư mục mới trên S3 (ví dụ: backups/2026/):");
+    if (name) {
+      const newPrefix = name.endsWith("/") ? name : `${name}/`;
+      setS3Prefix(newPrefix);
+      await loadS3Files(newPrefix);
+      pushMessage(`Đã chuyển sang thư mục: ${newPrefix}`, "info");
     }
   };
 
@@ -396,9 +527,9 @@ export default function DashboardPage() {
     { key: "overview" as const, label: "Tổng quan", icon: Activity },
     { key: "users" as const, label: "Người dùng", icon: Users },
     { key: "storage" as const, label: "S3", icon: Server },
+    { key: "gis" as const, label: "GIS Layers", icon: FolderOpen },
     { key: "data" as const, label: "Dữ liệu", icon: Database },
-  ];
-
+    ];
   return (
     <AuthGuard requiredRole="ADMIN">
       <div className="app-container admin-container">
@@ -499,6 +630,13 @@ export default function DashboardPage() {
                     <span>
                       <strong>S3</strong>
                       <em>Upload, tải xuống, xóa file</em>
+                    </span>
+                  </button>
+                  <button className="quick-action" type="button" onClick={() => setActiveAdminTab("gis")}>
+                    <FolderOpen size={18} />
+                    <span>
+                      <strong>GIS Layers</strong>
+                      <em>Quản lý bản đồ & thư mục</em>
                     </span>
                   </button>
                   <button className="quick-action" type="button" onClick={() => setActiveAdminTab("data")}>
@@ -650,7 +788,7 @@ export default function DashboardPage() {
                     <p className="card-kicker">S3 storage</p>
                     <h2>Quản lý file</h2>
                   </div>
-                  <button className="ghost-btn" onClick={loadS3Files} type="button" disabled={s3Loading}>
+                  <button className="ghost-btn" onClick={() => void loadS3Files()} type="button" disabled={s3Loading}>
                     <RefreshCw size={16} />
                     Làm mới
                   </button>
@@ -659,8 +797,19 @@ export default function DashboardPage() {
                 <div className="admin-form">
                   <div className="form-grid">
                     <label>
-                      Prefix
-                      <input value={s3Prefix} onChange={(event) => setS3Prefix(event.target.value)} />
+                      Prefix (Thư mục)
+                      <div style={{ display: "flex", gap: "8px" }}>
+                        <input
+                          value={s3Prefix}
+                          onChange={(event) => setS3Prefix(event.target.value)}
+                          style={{ flex: 1 }}
+                          placeholder="backups/"
+                        />
+                        <button type="button" className="ghost-btn" onClick={handleCreateS3Folder}>
+                          <FolderPlus size={16} />
+                          Tạo thư mục
+                        </button>
+                      </div>
                     </label>
                     <label>
                       Key tùy chỉnh
@@ -700,6 +849,14 @@ export default function DashboardPage() {
                             <td>{formatSize(file.size || 0)}</td>
                             <td>{formatDate(file.lastModified || file.modifiedAt)}</td>
                             <td className="row-actions">
+                              <button
+                                type="button"
+                                className="mini-btn"
+                                onClick={() => handleMapToLayer(file)}
+                                disabled={busyAction === `map-layer-${file.key}`}
+                              >
+                                Map to Layer
+                              </button>
                               <button type="button" className="mini-btn" onClick={() => void downloadS3File(file.key)}>
                                 Tải
                               </button>
@@ -722,9 +879,140 @@ export default function DashboardPage() {
             </section>
           )}
 
-          {activeAdminTab === "data" && (
+          {activeAdminTab === "gis" && (
             <section className="admin-tab-panel">
-              <div className="admin-grid">
+              <div className="admin-grid" style={{ gridTemplateColumns: "300px 1fr" }}>
+                <div className="admin-column">
+                  <article className="admin-card">
+                    <div className="admin-card-header">
+                      <div>
+                        <p className="card-kicker">Cấu trúc thư mục</p>
+                        <h2>Thư mục Layer</h2>
+                      </div>
+                    </div>
+                    <div className="admin-card-body">
+                      <div className="form-group">
+                        <label>Chọn Layer để quản lý thư mục</label>
+                        <select
+                          value={selectedLayerId || ""}
+                          onChange={(e) => setSelectedLayerId(Number(e.target.value) || null)}
+                          style={{ border: !selectedLayerId ? "2px solid #3b82f6" : undefined }}
+                        >
+                          <option value="">-- Chọn Layer --</option>
+                          {layers.map(l => (
+                            <option key={l.id} value={l.id}>{l.layerName}</option>
+                          ))}
+                        </select>
+                      </div>
+
+                      <div className="folder-tree" style={{ marginTop: "16px", minHeight: "200px" }}>
+                        {!selectedLayerId ? (
+                          <div className="empty-state" style={{ padding: "20px", textAlign: "center", color: "#64748b" }}>
+                            <Folder size={32} style={{ marginBottom: "12px", opacity: 0.5 }} />
+                            <p>Vui lòng chọn một Layer bên trên để quản lý cấu trúc thư mục.</p>
+                          </div>
+                        ) : (
+                          <>
+                            <div
+                              className={`folder-item ${selectedFolderId === null ? "active" : ""}`}
+                              onClick={() => setSelectedFolderId(null)}
+                            >
+                              <Folder size={16} /> <span>Root (Gốc)</span>
+                            </div>
+                            <div className="folder-list" style={{ marginLeft: "12px" }}>
+                              {folderTree.map(folder => (
+                                <div key={folder.id} className="folder-node">
+                                  <div
+                                    className={`folder-item ${selectedFolderId === folder.id ? "active" : ""}`}
+                                    onClick={() => setSelectedFolderId(folder.id)}
+                                  >
+                                    <Folder size={16} /> <span>{folder.name}</span>
+                                    <button
+                                      className="mini-btn danger"
+                                      onClick={(e) => { e.stopPropagation(); handleDeleteFolder(folder.id); }}
+                                    >
+                                      x
+                                    </button>
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                            <button
+                              className="ghost-btn"
+                              style={{ marginTop: "12px", width: "100%", justifyContent: "center" }}
+                              onClick={handleCreateFolder}
+                            >
+                              <FolderPlus size={16} /> <span>Tạo thư mục mới</span>
+                            </button>
+                          </>
+                        )}
+                      </div>
+                    </div>
+                  </article>
+                </div>
+
+                <div className="admin-column">
+                  <article className="admin-card">
+                    <div className="admin-card-header">
+                      <div>
+                        <p className="card-kicker">Quản lý file</p>
+                        <h2>File trong thư mục</h2>
+                      </div>
+                    </div>
+                    <div className="admin-card-body">
+                      {!selectedLayerId ? (
+                        <div className="empty-state">Vui lòng chọn một Layer để quản lý file</div>
+                      ) : (
+                        <>
+                          <div className="upload-box" style={{ marginBottom: "24px", padding: "16px", background: "#f9fafb", borderRadius: "8px" }}>
+                            <h3>Upload file mới vào {selectedFolderId ? "thư mục đã chọn" : "Root"}</h3>
+                            <div className="form-grid" style={{ display: "grid", gridTemplateColumns: "1fr 1fr auto", gap: "12px", marginTop: "12px" }}>
+                              <div className="form-group">
+                                <label>Chọn file bản đồ (.tif, .zip...)</label>
+                                <input type="file" onChange={(e) => setUploadFile(e.target.files?.[0] || null)} />
+                              </div>
+                              <div className="form-group">
+                                <label>Category (loại dữ liệu)</label>
+                                <select value={uploadCategory} onChange={(e) => setUploadCategory(e.target.value)}>
+                                  <option value="default">Mặc định</option>
+                                  <option value="raster">Raster / Map</option>
+                                  <option value="vector">Vector / Shape</option>
+                                  <option value="document">Tài liệu</option>
+                                  <option value="backup">Backup</option>
+                                </select>
+                              </div>
+                              <div className="form-group" style={{ alignSelf: "end" }}>
+                                <button
+                                  className="primary-btn"
+                                  onClick={handleUnifiedUpload}
+                                  disabled={busyAction === "upload-unified" || !uploadFile}
+                                >
+                                  <Upload size={16} /> <span>Upload</span>
+                                </button>
+                              </div>
+                            </div>
+                          </div>
+
+                          <div className="file-info-note" style={{ fontSize: "0.85rem", color: "#666", marginBottom: "12px" }}>
+                            Sử dụng <strong>backend-controlled storage</strong>: Path S3 sẽ được backend tự động sinh dựa trên cấu trúc thư mục bạn chọn.
+                          </div>
+
+                          {/* List of files mapped to this layer/folder could go here by calling GET /api/gis/layers/{id}/objects */}
+                          <div className="empty-state">
+                            Tính năng liệt kê file theo thư mục đang được đồng bộ...
+                            <br />
+                            Bạn có thể xem các file đã upload trong tab &quot;Dữ liệu&quot; hoặc &quot;S3&quot;.                          </div>
+                        </>
+                      )}
+                    </div>
+                  </article>
+                </div>
+              </div>
+            </section>
+          )}
+
+          {activeAdminTab === "data" && (
+            <section className="admin-tab-panel">              <div className="admin-grid">
                 <div className="admin-column">
                   <article className="admin-card">
                     <div className="admin-card-header">

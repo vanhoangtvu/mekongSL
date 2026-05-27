@@ -102,8 +102,8 @@ spring:
 s3:
   endpoint: https://backup.hci.vn
   bucket: c01-mekong-prod-01
-  access-key: WGU85A069Z04ESKJXYHF
-  secret-key: E9YWIUztSKCGxEtmETrxBPmzl4XCBadOnPMNxTYH
+  access-key: ${S3_ACCESS_KEY}
+  secret-key: ${S3_SECRET_KEY}
 ```
 
 ---

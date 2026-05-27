@@ -17,8 +17,17 @@ fi
 
 cd "$SCRIPT_DIR"
 
+# Source environment variables
+if [ -f "$SCRIPT_DIR/../.env" ]; then
+  export $(grep -v '^#' "$SCRIPT_DIR/../.env" | xargs)
+fi
+
+# Cấu hình temp dir cho Jansi để tránh lỗi thư mục /tmp bị noexec
+export MAVEN_OPTS="-Djansi.tmpdir=$SCRIPT_DIR/target/tmp"
+mkdir -p "$SCRIPT_DIR/target/tmp"
+
 echo "Compiling backend..."
-./mvnw -q -DskipTests compile
+./mvnw -q clean compile -DskipTests
 
 echo "Starting backend on 0.0.0.0:8084..."
 nohup ./mvnw spring-boot:run > "$LOG_FILE" 2>&1 &

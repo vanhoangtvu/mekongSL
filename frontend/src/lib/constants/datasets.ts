@@ -70,6 +70,16 @@ export const DATASETS: DatasetItem[] = [
       { id: "baseline-salinity", name: "Salinity Intrusion", source: "Province/Other Dataset" },
     ],
   },
+  {
+    id: "ecology",
+    name: "Ecology",
+    children: [
+      { id: "ecology-biodiversity", name: "Biodiversity", scale: "Province" },
+      { id: "ecology-vegetation", name: "Vegetation Index", source: "Landsat GIS Interpretation" },
+      { id: "ecology-habitat", name: "Habitat Mapping", scale: "Province" },
+      { id: "ecology-species", name: "Species Distribution" },
+    ],
+  },
 ];
 
 export const AREA_TYPES = ["Point", "Line", "Polygon", "Grid"];

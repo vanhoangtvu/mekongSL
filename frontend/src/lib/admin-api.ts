@@ -98,6 +98,75 @@ export async function deleteAdminUser(id: number) {
   });
 }
 
+export interface LayerFolderDto {
+  id: number;
+  layerId: number;
+  parentId: number | null;
+  name: string;
+  logicalPath: string;
+  createdAt: string;
+  children?: LayerFolderDto[];
+}
+
+export async function listLayerFolderTree(layerId: number) {
+  return requestJson<LayerFolderDto[]>(getBackendAdminUrl(`/gis/layers/${layerId}/folders/tree`));
+}
+
+export async function createLayerFolder(layerId: number, name: string, parentId?: number) {
+  return requestJson<LayerFolderDto>(getBackendAdminUrl('/gis/folders'), {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ layerId, name, parentId }),
+  });
+}
+
+export async function deleteLayerFolder(folderId: number) {
+  return fetch(getBackendAdminUrl(`/gis/folders/${folderId}`), {
+    method: 'DELETE',
+    headers: getHeaders(),
+  });
+}
+
+export async function uploadLayerFile(layerId: number, file: File, folderId?: number, category?: string) {
+  const formData = new FormData();
+  formData.set('file', file);
+  if (folderId) formData.set('folderId', String(folderId));
+  if (category) formData.set('category', category);
+
+  return requestJson<Record<string, unknown>>(getBackendAdminUrl(`/gis/layers/${layerId}/upload-file`), {
+    method: 'POST',
+    body: formData,
+  });
+}
+
+export interface GisLayer {
+  id: number;
+  layerName: string;
+  layerType: string;
+}
+
+export async function listGisLayers() {
+  const payload = await requestJson<{ content: GisLayer[] }>(getBackendAdminUrl('/gis/layers?size=100'));
+  return payload.content || [];
+}
+
+export async function registerLayerObject(layerId: number, s3Key: string, sizeBytes: number = 0) {
+  return requestJson<Record<string, unknown>>(getBackendAdminUrl(`/gis/layers/${layerId}/objects`), {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      s3Key,
+      sizeBytes,
+      contentType: s3Key.endsWith('.tif') || s3Key.endsWith('.tiff') ? 'image/tiff' : 'application/octet-stream',
+      role: 'SOURCE'
+    }),
+  });
+}
+
 export async function listS3Files(prefix = '') {
   const url = new URL(getBackendAdminUrl('/s3/list'));
   if (prefix) {

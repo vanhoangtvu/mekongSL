@@ -171,11 +171,11 @@ async function ensureMysqlTable(connection, databaseName, tableName, columnDefin
 
   const existingColumnNames = new Set(existingColumns.map((row) => row.COLUMN_NAME));
   const existingIndexes = await getExistingIndexes(connection, databaseName, tableName);
-  const normalizedUniqueDefinitions = uniqueKeyColumns.map((columns) => ({
-    name: `uniq_${columns.join('_')}`,
-    columns,
+  const normalizedUniqueDefinitions = uniqueKeyColumns.length > 0 ? [{
+    name: `uniq_${uniqueKeyColumns.join('_')}`,
+    columns: uniqueKeyColumns,
     unique: true,
-  }));
+  }] : [];
   const normalizedIndexDefinitions = indexDefinitions.map((indexDefinition) => ({
     name: indexDefinition.name,
     columns: indexDefinition.columns,
