@@ -359,6 +359,12 @@ export function MapStage({ startDateTime, endDateTime }: MapStageProps) {
   const [pbError, setPbError] = useState("");
   const videoRef = useRef<HTMLVideoElement | null>(null);
 
+  // Custom playback controls
+  const [isPlaying, setIsPlaying] = useState(true);
+  const [currentTime, setCurrentTime] = useState(0);
+  const [duration, setDuration] = useState(0);
+  const [playbackSpeed, setPlaybackSpeed] = useState(1);
+
   const handleOpenPlayback = () => {
     setPbStartDate("");
     setPbEndDate("");
@@ -377,8 +383,63 @@ export function MapStage({ startDateTime, endDateTime }: MapStageProps) {
     }
     setShowPlaybackPicker(false);
     setShowVideoModal(true);
-    // Auto-play after modal opens (via ref in useEffect below)
-    setTimeout(() => { videoRef.current?.play(); }, 300);
+    
+    // Reset control states
+    setIsPlaying(true);
+    setCurrentTime(0);
+    setDuration(0);
+    setPlaybackSpeed(1);
+
+    // Auto-play after modal opens
+    setTimeout(() => { 
+      if (videoRef.current) {
+        videoRef.current.playbackRate = 1;
+        videoRef.current.play().catch(() => {}); 
+      }
+    }, 300);
+  };
+
+  const handleTogglePlay = () => {
+    if (!videoRef.current) return;
+    if (isPlaying) {
+      videoRef.current.pause();
+    } else {
+      videoRef.current.play().catch(() => {});
+    }
+  };
+
+  const handleSliderChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (!videoRef.current) return;
+    const newTime = parseFloat(e.target.value);
+    videoRef.current.currentTime = newTime;
+    setCurrentTime(newTime);
+  };
+
+  const handleSpeedChange = () => {
+    if (!videoRef.current) return;
+    let nextSpeed = 1;
+    if (playbackSpeed === 1) nextSpeed = 1.5;
+    else if (playbackSpeed === 1.5) nextSpeed = 2;
+    
+    videoRef.current.playbackRate = nextSpeed;
+    setPlaybackSpeed(nextSpeed);
+  };
+
+  // Date interpolation for scrubber/ruler
+  const getCurrentPlaybackDate = () => {
+    if (!pbStartDate || !pbEndDate || duration === 0) return pbStartDate || "";
+    const start = new Date(pbStartDate).getTime();
+    const end = new Date(pbEndDate).getTime();
+    if (isNaN(start) || isNaN(end)) return pbStartDate || "";
+    
+    const progress = currentTime / duration;
+    const currentMillis = start + progress * (end - start);
+    const currentDate = new Date(currentMillis);
+    
+    const yyyy = currentDate.getFullYear();
+    const mm = String(currentDate.getMonth() + 1).padStart(2, '0');
+    const dd = String(currentDate.getDate()).padStart(2, '0');
+    return `${yyyy}-${mm}-${dd}`;
   };
 
   const confirmAddLayer = (id: string, _layerType: "raster" | "vector") => {
@@ -1098,69 +1159,71 @@ export function MapStage({ startDateTime, endDateTime }: MapStageProps) {
             </div>
           )}
 
-          {/* Playback Button — outside timeline, right side */}
-          <button
-            className="map-playback-btn"
-            onClick={handleOpenPlayback}
-            type="button"
-            title="Open playback"
-          >
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
-              <path d="M8 5v14l11-7L8 5z"/>
-            </svg>
-            <span>Playback</span>
-          </button>
-        </div>
+          {/* Time-Lapse Button & Dropdown Control */}
+          <div className="map-playback-control">
+            <button
+              className="map-playback-btn"
+              onClick={handleOpenPlayback}
+              type="button"
+              title="Time-lapse map animation"
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M8 5v14l11-7L8 5z"/>
+              </svg>
+              <span>Time-Lapse</span>
+            </button>
 
-        {/* Date Picker Popup */}
-        {showPlaybackPicker && (
-          <div className="pb-picker-overlay" onClick={() => setShowPlaybackPicker(false)}>
-            <div className="pb-picker-panel" onClick={e => e.stopPropagation()}>
-              <div className="pb-picker-header">
-                <div className="pb-picker-title">
-                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <circle cx="12" cy="12" r="10"/>
-                    <polyline points="12 6 12 12 16 14"/>
-                  </svg>
-                  Set Playback Period
-                </div>
-                <button className="pb-picker-close" onClick={() => setShowPlaybackPicker(false)} type="button">×</button>
-              </div>
+            {showPlaybackPicker && (
+              <>
+                <div className="pb-picker-backdrop" onClick={() => setShowPlaybackPicker(false)} />
+                <div className="pb-picker-panel">
+                  <div className="pb-picker-header">
+                    <div className="pb-picker-title">
+                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                        <circle cx="12" cy="12" r="10"/>
+                        <polyline points="12 6 12 12 16 14"/>
+                      </svg>
+                      Set Time-Lapse Period
+                    </div>
+                    <button className="pb-picker-close" onClick={() => setShowPlaybackPicker(false)} type="button">×</button>
+                  </div>
 
-              <div className="pb-picker-body">
-                <div className="pb-field">
-                  <label className="pb-label">Start Date</label>
-                  <input
-                    className="pb-input"
-                    type="date"
-                    value={pbStartDate}
-                    onChange={e => { setPbStartDate(e.target.value); setPbError(""); }}
-                  />
-                </div>
-                <div className="pb-field">
-                  <label className="pb-label">End Date</label>
-                  <input
-                    className="pb-input"
-                    type="date"
-                    value={pbEndDate}
-                    onChange={e => { setPbEndDate(e.target.value); setPbError(""); }}
-                  />
-                </div>
-                {pbError && <div className="pb-error">{pbError}</div>}
-              </div>
+                  <div className="pb-picker-body">
+                    <div className="pb-field">
+                      <label className="pb-label">Start Date</label>
+                      <input
+                        className="pb-input"
+                        type="date"
+                        value={pbStartDate}
+                        onChange={e => { setPbStartDate(e.target.value); setPbError(""); }}
+                      />
+                    </div>
+                    <div className="pb-field">
+                      <label className="pb-label">End Date</label>
+                      <input
+                        className="pb-input"
+                        type="date"
+                        value={pbEndDate}
+                        onChange={e => { setPbEndDate(e.target.value); setPbError(""); }}
+                      />
+                    </div>
+                    {pbError && <div className="pb-error">{pbError}</div>}
+                  </div>
 
-              <div className="pb-picker-footer">
-                <button className="pb-btn-cancel" onClick={() => setShowPlaybackPicker(false)} type="button">Cancel</button>
-                <button className="pb-btn-play" onClick={handleStartPlayback} type="button">
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
-                    <path d="M8 5v14l11-7L8 5z"/>
-                  </svg>
-                  Play
-                </button>
-              </div>
-            </div>
+                  <div className="pb-picker-footer">
+                    <button className="pb-btn-cancel" onClick={() => setShowPlaybackPicker(false)} type="button">Cancel</button>
+                    <button className="pb-btn-play" onClick={handleStartPlayback} type="button">
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+                        <path d="M8 5v14l11-7L8 5z"/>
+                      </svg>
+                      Play
+                    </button>
+                  </div>
+                </div>
+              </>
+            )}
           </div>
-        )}
+        </div>
 
         {/* Video Playback Modal */}
         {showVideoModal && (
@@ -1171,7 +1234,7 @@ export function MapStage({ startDateTime, endDateTime }: MapStageProps) {
                   <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
                     <path d="M8 5v14l11-7L8 5z"/>
                   </svg>
-                  Playback
+                  Time-Lapse Playback
                   {pbStartDate && pbEndDate && (
                     <span className="pb-video-period">{pbStartDate} → {pbEndDate}</span>
                   )}
@@ -1179,29 +1242,86 @@ export function MapStage({ startDateTime, endDateTime }: MapStageProps) {
                 <button className="pb-video-close" onClick={() => { setShowVideoModal(false); videoRef.current?.pause(); }} type="button">×</button>
               </div>
               <div className="pb-video-body">
-                <video
-                  ref={videoRef}
-                  className="pb-video-player"
-                  controls
-                  autoPlay
-                  loop
-                  playsInline
-                >
-                  <source src="/api/playback" type="video/mp4" />
-                  Your browser does not support video playback.
-                </video>
-                <div className="pb-video-info">
-                  <div className="pb-video-stat">
-                    <span className="pb-stat-label">Start</span>
-                    <span className="pb-stat-value">{pbStartDate || '—'}</span>
+                <div className="pb-video-container">
+                  <video
+                    ref={videoRef}
+                    className="pb-video-player"
+                    controls={false}
+                    autoPlay
+                    loop
+                    playsInline
+                    onTimeUpdate={(e) => setCurrentTime(e.currentTarget.currentTime)}
+                    onLoadedMetadata={(e) => setDuration(e.currentTarget.duration)}
+                    onPlay={() => setIsPlaying(true)}
+                    onPause={() => setIsPlaying(false)}
+                  >
+                    <source src="/api/playback" type="video/mp4" />
+                    Your browser does not support time-lapse playback.
+                  </video>
+
+                  {/* Map Scale Bar Overlay (Cây thước tỷ lệ) */}
+                  <div className="pb-video-map-scale">
+                    <span className="scale-label">50 km</span>
+                    <div className="scale-bar-line" />
                   </div>
-                  <div className="pb-video-stat">
-                    <span className="pb-stat-label">End</span>
-                    <span className="pb-stat-value">{pbEndDate || '—'}</span>
+                </div>
+
+                {/* Date Scrubber / Timeline Ruler (Thước thời gian) */}
+                <div className="pb-video-timeline-container">
+                  <div className="pb-video-timeline-ruler">
+                    <input
+                      type="range"
+                      min="0"
+                      max={duration || 100}
+                      step="0.05"
+                      value={currentTime}
+                      onChange={handleSliderChange}
+                      className="pb-video-timeline-slider"
+                      style={{
+                        background: `linear-gradient(to right, #2563a8 0%, #2563a8 ${(currentTime / (duration || 100)) * 100}%, #e2e8f0 ${(currentTime / (duration || 100)) * 100}%, #e2e8f0 100%)`
+                      }}
+                    />
+                    <div className="pb-video-timeline-ticks">
+                      <span className="pb-timeline-tick-label start">{pbStartDate}</span>
+                      <span className="pb-timeline-tick-label current">{getCurrentPlaybackDate()}</span>
+                      <span className="pb-timeline-tick-label end">{pbEndDate}</span>
+                    </div>
                   </div>
-                  <div className="pb-video-stat">
-                    <span className="pb-stat-label">Status</span>
-                    <span className="pb-stat-value pb-stat-live">● Live</span>
+                </div>
+
+                {/* Custom Control Buttons Row */}
+                <div className="pb-video-controls-row">
+                  <button className="pb-video-control-btn play-pause" onClick={handleTogglePlay} type="button" title={isPlaying ? "Pause" : "Play"}>
+                    {isPlaying ? (
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+                        <rect x="6" y="4" width="4" height="16" />
+                        <rect x="14" y="4" width="4" height="16" />
+                      </svg>
+                    ) : (
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+                        <path d="M8 5v14l11-7z" />
+                      </svg>
+                    )}
+                  </button>
+
+                  <div className="pb-video-controls-divider" />
+
+                  {/* Time display */}
+                  <div className="pb-video-time-display">
+                    {Math.floor(currentTime / 60)}:{String(Math.floor(currentTime % 60)).padStart(2, '0')} / {Math.floor(duration / 60)}:{String(Math.floor(duration % 60)).padStart(2, '0')}
+                  </div>
+
+                  <div style={{ flexGrow: 1 }} />
+
+                  {/* Speed Selector */}
+                  <button className="pb-video-control-btn speed" onClick={handleSpeedChange} type="button">
+                    {playbackSpeed}x Speed
+                  </button>
+
+                  <div className="pb-video-controls-divider" />
+
+                  <div className="pb-video-stat pb-video-stat-live">
+                    <span className="pb-stat-live">● Live Simulation</span>
                   </div>
                 </div>
               </div>
