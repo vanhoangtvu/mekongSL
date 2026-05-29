@@ -164,7 +164,68 @@ export async function GET(request: NextRequest) {
         queryParams = dateParam ? [dateRange!.startUtc, dateRange!.endUtc] : [];
       }
     } else {
-      query = `SELECT * FROM \`${tableName}\` ORDER BY fetched_at DESC LIMIT 100`;
+      const localFetchedAt = "DATE_ADD(fetched_at, INTERVAL 7 HOUR)";
+      const dateRange = dateParam ? getLocalDateRange(dateParam) : null;
+      const deviceIdParam = request.nextUrl.searchParams.get('deviceId');
+      const view = viewParam || 'latest';
+
+      // Detect if device_id column exists (compatible with old data)
+      const [colCheck] = await pool.query(
+        `SELECT COUNT(*) AS cnt FROM INFORMATION_SCHEMA.COLUMNS
+         WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'ecowitt' AND COLUMN_NAME = 'device_id'`,
+      );
+      const hasDeviceId = Number((colCheck as Array<Record<string, unknown>>)[0]?.cnt) > 0;
+
+      const did = (col: string) => hasDeviceId ? col : "''";
+      const devFilter = (alias: string) => hasDeviceId && deviceIdParam ? `AND ${alias}.device_id = ?` : '';
+      const ordDev = hasDeviceId ? "COALESCE(device_id, '')" : "'0'";
+
+      if (view === 'devices') {
+        if (!hasDeviceId) {
+          query = `SELECT DISTINCT '0' AS device_id FROM ecowitt LIMIT 0`;
+        } else {
+          query = `SELECT DISTINCT device_id FROM ecowitt WHERE device_id IS NOT NULL AND device_id != '' ORDER BY device_id ASC`;
+        }
+        queryParams = [];
+      } else if (view === 'timeframes' && dateParam) {
+        const deviceFilter = hasDeviceId && deviceIdParam ? 'AND device_id = ?' : '';
+        query = `
+          SELECT DISTINCT
+            ${hasDeviceId ? "CONCAT(fetched_at, '_', COALESCE(device_id, 'unknown'))" : 'fetched_at'} AS fetch_run_id,
+            ${did('device_id')} AS device_id,
+            DATE_FORMAT(${localFetchedAt}, '%Y-%m-%d %H:%i:%s') AS fetched_at
+          FROM ecowitt
+          WHERE fetched_at >= ? AND fetched_at < ? ${deviceFilter}
+          ORDER BY fetched_at DESC${hasDeviceId ? ', device_id' : ''}
+        `;
+        queryParams = deviceIdParam
+          ? [dateRange!.startUtc, dateRange!.endUtc, deviceIdParam]
+          : [dateRange!.startUtc, dateRange!.endUtc];
+      } else if (runIdParam) {
+        const deviceFilter = hasDeviceId && deviceIdParam ? 'AND device_id = ?' : '';
+        query = `
+          SELECT *
+          FROM ecowitt
+          WHERE fetched_at = LEFT(?, 19) ${deviceFilter}
+          ORDER BY ${ordDev}, record_time ASC
+        `;
+        queryParams = deviceIdParam ? [runIdParam, deviceIdParam] : [runIdParam];
+      } else if (dateParam) {
+        const deviceFilter = hasDeviceId && deviceIdParam ? 'AND device_id = ?' : '';
+        query = `
+          SELECT *
+          FROM ecowitt
+          WHERE fetched_at >= ? AND fetched_at < ? ${deviceFilter}
+          ORDER BY fetched_at DESC, ${ordDev}, record_time ASC
+        `;
+        queryParams = deviceIdParam
+          ? [dateRange!.startUtc, dateRange!.endUtc, deviceIdParam]
+          : [dateRange!.startUtc, dateRange!.endUtc];
+      } else {
+        const deviceFilter = hasDeviceId && deviceIdParam ? 'WHERE device_id = ?' : '';
+        query = `SELECT * FROM ecowitt ${deviceFilter} ORDER BY fetched_at DESC LIMIT 100`;
+        queryParams = deviceIdParam ? [deviceIdParam] : [];
+      }
     }
 
     const [rows] = await pool.query(query, queryParams);

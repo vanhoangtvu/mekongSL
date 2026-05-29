@@ -5,7 +5,7 @@ import TileLayer from "ol/layer/Tile";
 import WebGLTileLayer from "ol/layer/WebGLTile";
 import Map from "ol/Map";
 import View from "ol/View";
-import { fromLonLat, transformExtent } from "ol/proj";
+import { fromLonLat, transformExtent, toLonLat } from "ol/proj";
 import OSM from "ol/source/OSM";
 import XYZ from "ol/source/XYZ";
 import GeoTIFF from "ol/source/GeoTIFF";
@@ -329,14 +329,32 @@ function buildTimelineUnits(startDate: Date, endDate: Date, mode: TimelineResolv
   return { mode, units };
 }
 
+// Helper functions to translate layer names and legend labels to English dynamically
+function translateLayerName(name: string): string {
+  if (!name) return "";
+  return name
+    .replace(/Độ mặn vùng/g, "Salinity Region")
+    .replace(/Độ mặn/g, "Salinity")
+    .replace(/vùng/g, "Region");
+}
+
+function translateLegendLabel(label: string): string {
+  if (!label) return "";
+  return label
+    .replace(/Độ mặn/g, "Salinity")
+    .replace(/Độ sâu ngập/g, "Flooding Depth")
+    .replace(/Độ sâu/g, "Depth");
+}
+
 export function MapStage({ startDateTime, endDateTime }: MapStageProps) {
   const mapContainerRef = useRef<HTMLDivElement | null>(null);
+  const scrollerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<Map | null>(null);
   const baseLayerRef = useRef<TileLayer | null>(null);
   const rasterLayerRef = useRef<WebGLTileLayer | null>(null);
   const [selectedLayer, setSelectedLayer] = useState<RasterLayerManifest | null>(null);
   const [rasterUrl, setRasterUrl] = useState<string | null>(null);
-  const [loadStatus, setLoadStatus] = useState("Đang tải lớp raster...");
+  const [loadStatus, setLoadStatus] = useState("Loading raster layer...");
   const [pixelValue, setPixelValue] = useState<number | null>(null);
   const [mouseCoords, setMouseCoords] = useState<[number, number] | null>(null);
   const [activeBaseLayer, setActiveBaseLayer] = useState<BaseLayerType>("osm");
@@ -488,8 +506,8 @@ export function MapStage({ startDateTime, endDateTime }: MapStageProps) {
   const timelineUnitOptions: Array<{ value: TimelineUnitMode; label: string }> = [
     { value: "auto", label: "Auto" },
     { value: "hour4", label: "4h" },
-    { value: "day", label: "Ngày" },
-    { value: "month", label: "Tháng" },
+    { value: "day", label: "Day" },
+    { value: "month", label: "Month" },
   ];
 
   useEffect(() => {
@@ -504,6 +522,29 @@ export function MapStage({ startDateTime, endDateTime }: MapStageProps) {
     setTimelineIndex((currentIndex) => Math.min(currentIndex, timelineUnits.length - 1));
   }, [timelineUnits.length]);
 
+  // Auto-scroll the timeline scroller when the active thumb approaches the edges
+  useEffect(() => {
+    const scroller = scrollerRef.current;
+    if (!scroller || timelineUnits.length <= 1) return;
+
+    const totalWidth = scroller.scrollWidth;
+    const visibleWidth = scroller.clientWidth;
+    if (totalWidth <= visibleWidth) return;
+
+    // Calculate approximate position of the active thumb
+    const ratio = timelineIndex / (timelineUnits.length - 1);
+    const thumbX = ratio * totalWidth;
+
+    const scrollLeft = scroller.scrollLeft;
+    const padding = 60; // Comfortable margin to trigger scrolling
+
+    if (thumbX > scrollLeft + visibleWidth - padding) {
+      scroller.scrollLeft = thumbX - visibleWidth + padding;
+    } else if (thumbX < scrollLeft + padding) {
+      scroller.scrollLeft = thumbX - padding;
+    }
+  }, [timelineIndex, timelineUnits.length]);
+
   useEffect(() => {
     let isActive = true;
 
@@ -511,7 +552,7 @@ export function MapStage({ startDateTime, endDateTime }: MapStageProps) {
       try {
         const response = await fetch("/api/layers", { cache: "no-store" });
         if (!response.ok) {
-          throw new Error(`Không thể tải danh sách lớp raster (${response.status})`);
+          throw new Error(`Unable to load raster layers list (${response.status})`);
         }
 
         const payload: { layers?: RasterLayerManifest[] } = await response.json();
@@ -519,12 +560,12 @@ export function MapStage({ startDateTime, endDateTime }: MapStageProps) {
 
         if (isActive) {
           setSelectedLayer(nextLayer);
-          setLoadStatus(nextLayer ? `Đã chọn ${nextLayer.name}` : "Chưa có lớp raster nào");
+          setLoadStatus(nextLayer ? `Selected ${translateLayerName(nextLayer.name)}` : "No raster layers available");
         }
       } catch (error) {
         if (isActive) {
           setSelectedLayer(null);
-          setLoadStatus(error instanceof Error ? error.message : "Không thể tải lớp raster");
+          setLoadStatus(error instanceof Error ? error.message : "Failed to load raster layer");
         }
       }
     }
@@ -548,7 +589,7 @@ export function MapStage({ startDateTime, endDateTime }: MapStageProps) {
       if (selectedLayer.previewUrl.endsWith(".tif") || selectedLayer.previewUrl.endsWith(".tiff")) {
         if (isActive) {
           setRasterUrl(selectedLayer.previewUrl);
-          setLoadStatus(`Đang hiển thị ${selectedLayer.name}`);
+          setLoadStatus(`Displaying ${translateLayerName(selectedLayer.name)}`);
         }
 
         return;
@@ -557,18 +598,18 @@ export function MapStage({ startDateTime, endDateTime }: MapStageProps) {
       try {
         const response = await fetch(selectedLayer.previewUrl, { cache: "no-store" });
         if (!response.ok) {
-          throw new Error(`Không thể lấy URL render raster (${response.status})`);
+          throw new Error(`Unable to fetch raster render URL (${response.status})`);
         }
 
         const payload: { url?: string } = await response.json();
         if (isActive) {
           setRasterUrl(payload.url ?? null);
-          setLoadStatus(payload.url ? `Đang hiển thị ${selectedLayer.name}` : "Thiếu URL render raster");
+          setLoadStatus(payload.url ? `Displaying ${translateLayerName(selectedLayer.name)}` : "Missing raster render URL");
         }
       } catch (error) {
         if (isActive) {
           setRasterUrl(null);
-          setLoadStatus(error instanceof Error ? error.message : "Không thể lấy URL render raster");
+          setLoadStatus(error instanceof Error ? error.message : "Failed to get raster render URL");
         }
       }
     }
@@ -837,7 +878,15 @@ export function MapStage({ startDateTime, endDateTime }: MapStageProps) {
   return (
     <section className="geo-map">
       <div className="geo-map-canvas">
-        <div ref={mapContainerRef} className="geo-map-viewport" aria-label="OpenLayers Map" />
+        <div 
+          ref={mapContainerRef} 
+          className="geo-map-viewport" 
+          aria-label="OpenLayers Map" 
+          onMouseLeave={() => {
+            setMouseCoords(null);
+            setPixelValue(null);
+          }}
+        />
 
         {/* Base Layer Switcher */}
         <div className="map-layer-switcher">
@@ -1107,6 +1156,7 @@ export function MapStage({ startDateTime, endDateTime }: MapStageProps) {
               </div>
               
               <div 
+                ref={scrollerRef}
                 className="map-timeline-scroller" 
                 onClick={(event) => event.stopPropagation()}
                 onMouseMove={(e) => {
@@ -1130,7 +1180,7 @@ export function MapStage({ startDateTime, endDateTime }: MapStageProps) {
                   }
                 }}
               >
-                <div className="map-timeline-inner" style={{ width: `${Math.max(600, timelineUnits.length * 40)}px` }}>
+                <div className="map-timeline-inner" style={{ width: `${Math.max(600, timelineUnits.length * 20)}px` }}>
                   <div className="map-timeline-track-wrap">
                     <input
                       className="map-timeline-slider"
@@ -1329,10 +1379,48 @@ export function MapStage({ startDateTime, endDateTime }: MapStageProps) {
           </div>
         )}
 
-        {pixelValue !== null && (
-          <div className="geo-map-overlay geo-map-overlay-bottom">
-            <div>
-              <strong>Value at cursor: {pixelValue.toFixed(2)}</strong>
+        {pixelValue !== null && mouseCoords !== null && (
+          <div className="geo-map-inspector">
+            <div className="geo-map-inspector-header">
+              <div className="geo-map-inspector-indicator" />
+              <span>Map Inspector</span>
+            </div>
+            <div className="geo-map-inspector-body">
+              {selectedLayer && (
+                <div className="geo-map-inspector-row">
+                  <span className="geo-map-inspector-label">Active Layer:</span>
+                  <span className="geo-map-inspector-val">{translateLayerName(selectedLayer.name)}</span>
+                </div>
+              )}
+              <div className="geo-map-inspector-row">
+                <span className="geo-map-inspector-label">Coordinates:</span>
+                <span className="geo-map-inspector-val">
+                  {(() => {
+                    const lonLat = toLonLat(mouseCoords);
+                    return `${lonLat[1].toFixed(4)}° N, ${lonLat[0].toFixed(4)}° E`;
+                  })()}
+                </span>
+              </div>
+              {selectedLayer && (
+                <div className="geo-map-inspector-row highlighted">
+                  <span className="geo-map-inspector-label">
+                    {(() => {
+                      const label = translateLegendLabel(selectedLayer.style.legendLabel);
+                      const match = label.match(/^([^(]+)/);
+                      return match ? match[1].trim() : label;
+                    })()}:
+                  </span>
+                  <span className="geo-map-inspector-val value-highlight">
+                    {pixelValue !== null
+                      ? `${pixelValue.toFixed(2)} ${(() => {
+                          const label = translateLegendLabel(selectedLayer.style.legendLabel);
+                          const match = label.match(/\(([^)]+)\)/);
+                          return match ? match[1] : "";
+                        })()}`
+                      : "No Data"}
+                  </span>
+                </div>
+              )}
             </div>
           </div>
         )}

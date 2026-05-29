@@ -9,6 +9,7 @@ async function runFetch(request: NextRequest) {
     await requireRoleFromRequest(request, ['DATA_MANAGER', 'ADMIN']);
 
     const source = normalizeDataSource(request.nextUrl.searchParams.get('source'));
+    const deviceIdParam = request.nextUrl.searchParams.get('deviceId');
     
     const scriptMap: Record<string, string> = {
       mekong: resolve(process.cwd(), '../datacenter/mekong/fetch-mekong-data.mjs'),
@@ -20,9 +21,14 @@ async function runFetch(request: NextRequest) {
       return NextResponse.json({ message: 'Invalid data source' }, { status: 400 });
     }
 
+    const scriptArgs = [fetchScript];
+    if (source === 'ecowitt' && deviceIdParam) {
+      scriptArgs.push('--device-id', deviceIdParam);
+    }
+
     // Run fetch script (saves directly to MySQL)
     const result = await new Promise<{ recordCount: number; insertedRows: number }>((resolve, reject) => {
-      const fetchProcess = spawn('node', [fetchScript], {
+      const fetchProcess = spawn('node', scriptArgs, {
         cwd: process.cwd(),
         stdio: ['pipe', 'pipe', 'pipe']
       });

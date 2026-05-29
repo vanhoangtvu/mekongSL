@@ -6,22 +6,32 @@ import crypto from 'node:crypto';
 import {
   buildMysqlColumnDefinitions,
   collectRowColumns,
+  deleteRowsByDate,
   formatMysqlDateTime,
   remapRowsForMysql,
-  syncRowsToMysql,
+  upsertRowsToMysql,
   writeCsvSnapshot,
 } from '../lib/persistence.mjs';
 
-const DEFAULT_PAYLOAD = {
-  device_id: '281727',
+const DEFAULT_DEVICE_IDS = ['281727', '323414'];
+
+function todayDateString() {
+  const now = new Date();
+  const y = now.getFullYear();
+  const m = String(now.getMonth() + 1).padStart(2, '0');
+  const d = String(now.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+}
+
+const DEFAULT_PAYLOAD_TEMPLATE = () => ({
   is_list: '0',
   mode: '0',
-  sdate: '2026-05-12 00:00',
-  edate: '2026-05-12 23:59',
+  sdate: `${todayDateString()} 00:00`,
+  edate: `${todayDateString()} 23:59`,
   page: '1',
   sortList: '1|3|4|5|6',
   hideList: '',
-};
+});
 
 const DEFAULT_LOGIN_PAYLOAD = {
   account: process.env.ECOWITT_ACCOUNT || 'lethuy2026n@gmail.com',
@@ -94,11 +104,13 @@ function buildCsvPath(outputPath) {
   return resolve(process.cwd(), String(outputPath)).replace(/\.json$/i, '.csv');
 }
 
-function buildEcowittRows(data, fetchedAt) {
+function buildEcowittRows(data, fetchedAt, deviceId) {
   const times = Array.isArray(data?.times) ? data.times : [];
   const rows = times.map((time, index) => ({
     fetched_at: fetchedAt,
+    fetch_run_id: fetchedAt,
     source: 'ecowitt',
+    device_id: deviceId,
     record_index: index + 1,
     record_time: time,
   }));
@@ -130,9 +142,11 @@ function buildEcowittColumnDefinitions(rows) {
   const columns = collectRowColumns(rows);
   return buildMysqlColumnDefinitions(columns, {
     fetched_at: 'DATETIME NOT NULL',
+    fetch_run_id: 'VARCHAR(32) NULL',
     source: 'VARCHAR(32) NOT NULL',
+    device_id: 'VARCHAR(32) NOT NULL',
     record_index: 'INT NOT NULL',
-    record_time: 'VARCHAR(32) NULL',
+    record_time: 'VARCHAR(32) NOT NULL',
   });
 }
 
@@ -330,72 +344,113 @@ async function main() {
     cookie = loginResult.cookie;
   }
 
-  const payload = {
-    ...DEFAULT_PAYLOAD,
-    ...(args.deviceId ? { device_id: String(args.deviceId) } : {}),
-    ...(args.isList ? { is_list: String(args.isList) } : {}),
-    ...(args.mode ? { mode: String(args.mode) } : {}),
-    ...(args.sdate ? { sdate: String(args.sdate) } : {}),
-    ...(args.edate ? { edate: String(args.edate) } : {}),
-    ...(args.page ? { page: String(args.page) } : {}),
-    ...(args.sortList ? { sortList: String(args.sortList) } : {}),
-    ...(args.hideList !== undefined ? { hideList: String(args.hideList) } : {}),
-  };
-
-  const requestPath = '/index/get_data';
-  const body = buildRequestBody(payload, requestPath);
-
-  const response = await fetch('https://www.ecowitt.net/index/get_data', {
-    method: 'POST',
-    headers: {
-      Accept: 'application/json, text/plain, */*',
-      'Accept-EcowittLang': 'en',
-      'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
-      'Web-Version': '1',
-      ...(cookie ? { Cookie: cookie } : {}),
-    },
-    body,
-  });
-
-  const data = await readBody(response);
-
-  if (!response.ok) {
-    throw new Error(`Ecowitt request failed (${response.status} ${response.statusText}): ${stringify(data)}`);
-  }
-
-  if (data && typeof data === 'object' && 'errcode' in data && String(data.errcode) !== '0') {
-    throw new Error(`Ecowitt returned ${String(data.errcode)}: ${stringify(data)}`);
-  }
-
-  const output = {
-    login: loginResult,
-    request: payload,
-    data,
-  };
+  const deviceIds = args.deviceId
+    ? String(args.deviceId).split(',').map((id) => id.trim()).filter(Boolean)
+    : DEFAULT_DEVICE_IDS;
 
   const fetchedAt = formatMysqlDateTime();
-  const rows = buildEcowittRows(data, fetchedAt);
+  let allRows = [];
+  const deviceOutputs = [];
+
+  for (const deviceId of deviceIds) {
+    const payload = {
+      ...DEFAULT_PAYLOAD_TEMPLATE(),
+      device_id: deviceId,
+      ...(args.isList ? { is_list: String(args.isList) } : {}),
+      ...(args.mode ? { mode: String(args.mode) } : {}),
+      ...(args.sdate ? { sdate: String(args.sdate) } : {}),
+      ...(args.edate ? { edate: String(args.edate) } : {}),
+      ...(args.page ? { page: String(args.page) } : {}),
+      ...(args.sortList ? { sortList: String(args.sortList) } : {}),
+      ...(args.hideList !== undefined ? { hideList: String(args.hideList) } : {}),
+    };
+
+    const requestPath = '/index/get_data';
+    const body = buildRequestBody(payload, requestPath);
+
+    const response = await fetch('https://www.ecowitt.net/index/get_data', {
+      method: 'POST',
+      headers: {
+        Accept: 'application/json, text/plain, */*',
+        'Accept-EcowittLang': 'en',
+        'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
+        'Web-Version': '1',
+        ...(cookie ? { Cookie: cookie } : {}),
+      },
+      body,
+    });
+
+    const data = await readBody(response);
+
+    if (!response.ok) {
+      console.error(`Device ${deviceId}: request failed (${response.status}): ${stringify(data)}`);
+      continue;
+    }
+
+    if (data && typeof data === 'object' && 'errcode' in data && String(data.errcode) !== '0') {
+      console.error(`Device ${deviceId}: returned error ${String(data.errcode)}: ${stringify(data)}`);
+      continue;
+    }
+
+    const rows = buildEcowittRows(data, fetchedAt, deviceId);
+    allRows = allRows.concat(rows);
+
+    deviceOutputs.push({
+      deviceId,
+      request: payload,
+      data,
+      rows: rows.length,
+    });
+
+    console.log(`Device ${deviceId}: fetched ${rows.length} rows`);
+  }
+
+  if (!allRows.length) {
+    console.log(JSON.stringify({ devices: deviceOutputs, totalRows: 0 }));
+    return;
+  }
+
   const csvPath = buildCsvPath(args.output);
-  const csvColumns = collectRowColumns(rows);
+  const csvColumns = collectRowColumns(allRows);
 
-  await writeCsvSnapshot(csvPath, rows, csvColumns);
+  await writeCsvSnapshot(csvPath, allRows, csvColumns);
 
-  if (rows.length) {
-    const columnDefinitions = buildEcowittColumnDefinitions(rows);
-    const mysqlRows = remapRowsForMysql(rows, columnDefinitions);
+  if (allRows.length) {
+    const columnDefinitions = buildEcowittColumnDefinitions(allRows);
+    const mysqlRows = remapRowsForMysql(allRows, columnDefinitions);
 
-    await syncRowsToMysql({
+    // Clean old rows for today before upserting to prevent duplicates
+    for (const devId of deviceIds) {
+      await deleteRowsByDate({
+        mysqlConfig: MYSQL_CONFIG,
+        databaseName: MYSQL_CONFIG.database,
+        tableName: 'ecowitt',
+        dateColumn: 'fetched_at',
+        dateValue: todayDateString(),
+        whereClause: 'device_id = ?',
+        whereParams: [devId],
+      });
+    }
+
+    await upsertRowsToMysql({
       mysqlConfig: MYSQL_CONFIG,
       databaseName: MYSQL_CONFIG.database,
       tableName: 'ecowitt',
       rows: mysqlRows,
       columnDefinitions,
+      uniqueKeyColumns: ['device_id', 'record_time'],
       indexDefinitions: [
         { name: 'idx_ecowitt_fetched_at', columns: ['fetched_at'] },
-        { name: 'idx_ecowitt_record_time', columns: ['record_time'] },
+        { name: 'idx_ecowitt_device_id', columns: ['device_id'] },
       ],
     });
   }
+
+  const output = {
+    login: loginResult,
+    devices: deviceOutputs,
+    totalRows: allRows.length,
+  };
 
   if (args.output) {
     const absolutePath = resolve(process.cwd(), String(args.output));

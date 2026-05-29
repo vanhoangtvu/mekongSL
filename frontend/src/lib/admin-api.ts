@@ -222,7 +222,7 @@ export async function downloadS3File(key: string) {
   URL.revokeObjectURL(url);
 }
 
-export async function loadDataRows(source: DataSourceKey = DEFAULT_DATA_SOURCE, date?: string, runId?: string) {
+export async function loadDataRows(source: DataSourceKey = DEFAULT_DATA_SOURCE, date?: string, runId?: string, deviceId?: string) {
   const url = new URL('/api/mysql', window.location.origin);
   url.searchParams.set('source', source);
   if (date) {
@@ -230,6 +230,9 @@ export async function loadDataRows(source: DataSourceKey = DEFAULT_DATA_SOURCE, 
   }
   if (runId) {
     url.searchParams.set('runId', runId);
+  }
+  if (deviceId) {
+    url.searchParams.set('deviceId', deviceId);
   }
 
   const response = await fetch(url.toString(), {
@@ -245,11 +248,32 @@ export async function loadDataRows(source: DataSourceKey = DEFAULT_DATA_SOURCE, 
   return (payload.data || []) as DataRecord[];
 }
 
-export async function loadDataTimeframes(source: DataSourceKey = DEFAULT_DATA_SOURCE, date: string) {
+export async function loadDataDevices(source: DataSourceKey = DEFAULT_DATA_SOURCE) {
+  const url = new URL('/api/mysql', window.location.origin);
+  url.searchParams.set('source', source);
+  url.searchParams.set('view', 'devices');
+
+  const response = await fetch(url.toString(), {
+    headers: getHeaders(),
+  });
+
+  if (!response.ok) {
+    const payload = await response.json().catch(() => null);
+    throw new Error(payload?.error || 'Không tải được danh sách thiết bị');
+  }
+
+  const payload = await response.json();
+  return (payload.data || []) as Array<{ device_id: string }>;
+}
+
+export async function loadDataTimeframes(source: DataSourceKey = DEFAULT_DATA_SOURCE, date: string, deviceId?: string) {
   const url = new URL('/api/mysql', window.location.origin);
   url.searchParams.set('source', source);
   url.searchParams.set('date', date);
   url.searchParams.set('view', 'timeframes');
+  if (deviceId) {
+    url.searchParams.set('deviceId', deviceId);
+  }
 
   const response = await fetch(url.toString(), {
     headers: getHeaders(),
@@ -261,7 +285,7 @@ export async function loadDataTimeframes(source: DataSourceKey = DEFAULT_DATA_SO
   }
 
   const payload = await response.json();
-  return (payload.data || []) as Array<{ fetch_run_id: string; fetched_at: string }>;
+  return (payload.data || []) as Array<{ fetch_run_id: string; fetched_at: string; device_id?: string }>;
 }
 
 export async function triggerDataFetch(source: DataSourceKey = DEFAULT_DATA_SOURCE) {

@@ -17,6 +17,7 @@ import {
   listS3Files,
   listSourceFiles,
   loadCurrentAccount,
+  loadDataDevices,
   loadDataRows,
   loadDataTimeframes,
   refreshMonthlyExport,
@@ -35,7 +36,7 @@ import {
   type LayerFolderDto,
   updateAdminUser,
 } from "../../../lib/admin-api";
-import { DATA_SOURCE_OPTIONS, type DataSourceKey } from "../../../lib/constants/data-sources";
+import { DATA_SOURCE_OPTIONS, ECOWITT_DEVICES, type DataSourceKey, type EcowittDevice } from "../../../lib/constants/data-sources";
 import { collectRecordKeys, formatRecordValue, type DataRecord } from "../../../lib/utils/record-utils";
 import {
   Activity,
@@ -105,10 +106,12 @@ export default function DashboardPage() {
   const [uploadFile, setUploadFile] = useState<File | null>(null);
   const [uploadKey, setUploadKey] = useState("");
   const [dataSource, setDataSource] = useState<DataSourceKey>("mekong");
+  const [deviceId, setDeviceId] = useState("");
+  const [ecowittDevices, setEcowittDevices] = useState<EcowittDevice[]>([]);
   const [dataDate, setDataDate] = useState("");
   const [dataRows, setDataRows] = useState<DataRecord[]>([]);
   const [dataLoading, setDataLoading] = useState(true);
-  const [timeframes, setTimeframes] = useState<Array<{ fetch_run_id: string; fetched_at: string }>>([]);
+  const [timeframes, setTimeframes] = useState<Array<{ fetch_run_id: string; fetched_at: string; device_id?: string }>>([]);
   const [timeframesLoading, setTimeframesLoading] = useState(false);
   const [selectedRunId, setSelectedRunId] = useState("");
   const [sourceFiles, setSourceFiles] = useState<Array<{ name: string; modifiedAt: string; size: number }>>([]);
@@ -170,7 +173,7 @@ export default function DashboardPage() {
 
       setDataLoading(true);
       try {
-        setDataRows(await loadDataRows(dataSource, dataDate || undefined, runId));
+        setDataRows(await loadDataRows(dataSource, dataDate || undefined, runId, deviceId || undefined));
       } catch (error) {
         pushMessage(error instanceof Error ? error.message : "Không tải được dữ liệu", "error");
         setDataRows([]);
@@ -178,7 +181,7 @@ export default function DashboardPage() {
         setDataLoading(false);
       }
     },
-    [dataDate, dataSource],
+    [dataDate, dataSource, deviceId],
   );
 
   const loadSourceFilesData = async () => {
@@ -263,7 +266,7 @@ export default function DashboardPage() {
       setSelectedRunId("");
       setDataRows([]);
       try {
-        const fetchedTimeframes = await loadDataTimeframes(dataSource, dataDate);
+        const fetchedTimeframes = await loadDataTimeframes(dataSource, dataDate, deviceId || undefined);
         setTimeframes(fetchedTimeframes);
         setSelectedRunId((currentRunId) =>
           fetchedTimeframes.some((timeframe) => timeframe.fetch_run_id === currentRunId) ? currentRunId : "",
@@ -278,10 +281,23 @@ export default function DashboardPage() {
     };
 
     void fetchTimeframes();
-  }, [dataDate, dataSource]);
+  }, [dataDate, dataSource, deviceId]);
 
   useEffect(() => {
     void loadData(selectedRunId);
+
+    // Load device list from DB for ecowitt
+    if (dataSource === "ecowitt") {
+      loadDataDevices("ecowitt")
+        .then((devices) => {
+          if (devices.length > 0) {
+            setEcowittDevices(devices.map((d) => ({ id: d.device_id, name: `Trạm ${d.device_id}` })));
+          } else {
+            setEcowittDevices([...ECOWITT_DEVICES]);
+          }
+        })
+        .catch(() => setEcowittDevices([...ECOWITT_DEVICES]));
+    }
   }, [loadData, selectedRunId]);
 
   const handleUserSubmit = async (event: React.FormEvent) => {
@@ -1038,6 +1054,19 @@ export default function DashboardPage() {
                             ))}
                           </select>
                         </label>
+                        {dataSource === 'ecowitt' && (
+                          <label>
+                            Thiết bị
+                            <select value={deviceId} onChange={(event) => setDeviceId(event.target.value)}>
+                              <option value="">Tất cả</option>
+                              {(ecowittDevices.length > 0 ? ecowittDevices : ECOWITT_DEVICES).map((d) => (
+                                <option key={d.id} value={d.id}>
+                                  {d.name}
+                                </option>
+                              ))}
+                            </select>
+                          </label>
+                        )}
                         <label>
                           Ngày lọc
                           <input type="date" value={dataDate} onChange={(event) => setDataDate(event.target.value)} />

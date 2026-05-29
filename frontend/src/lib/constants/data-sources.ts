@@ -45,3 +45,10 @@ export function getDataSourceOption(source: string | null | undefined): DataSour
 export function inferDataSourceFromFilename(filename: string): DataSourceKey {
   return filename.toLowerCase().startsWith('ecowitt') ? 'ecowitt' : 'mekong';
 }
+
+export const ECOWITT_DEVICES = [
+  { id: '281727', name: 'Trạm 281727' },
+  { id: '323414', name: 'EasyWeatherPro-E01304' },
+] as const;
+
+export type EcowittDevice = { id: string; name: string };
