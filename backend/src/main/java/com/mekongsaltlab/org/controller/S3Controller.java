@@ -11,11 +11,15 @@ import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.io.InputStream;
+import java.time.Duration;
+import java.time.Instant;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
+import software.amazon.awssdk.core.ResponseInputStream;
 import software.amazon.awssdk.services.s3.model.CommonPrefix;
+import software.amazon.awssdk.services.s3.model.GetObjectResponse;
 import software.amazon.awssdk.services.s3.model.ListObjectsV2Response;
 import software.amazon.awssdk.services.s3.model.S3Object;
 
@@ -23,21 +27,39 @@ import software.amazon.awssdk.services.s3.model.S3Object;
 @RequestMapping("/api/s3")
 @RequiredArgsConstructor
 public class S3Controller {
+
+    private static final List<String> ALLOWED_S3_PREFIXES = List.of(
+        "gis-data/", "station-data/", "monitoring-data/"
+    );
     
     private final S3Service s3Service;
     
     /**
      * Upload file to S3 (ADMIN + DATA_MANAGER only)
-     * @deprecated Use LayerObjectController for GIS layer files instead.
+     * Validates key prefix (must be gis-data/, station-data/, or monitoring-data/) and file size.
      */
     @PostMapping("/upload")
     @PreAuthorize("hasAnyRole('ADMIN', 'DATA_MANAGER')")
-    public ResponseEntity<Map<String, String>> uploadFile(@RequestParam("file") MultipartFile file, @RequestParam(value = "key", required = false) String key) throws Exception {
+    public ResponseEntity<Map<String, Object>> uploadFile(
+        @RequestParam("file") MultipartFile file,
+        @RequestParam(value = "key", required = false) String key
+    ) throws Exception {
+        // Validate key prefix when custom key is provided
+        if (key != null && !key.isBlank()) {
+            String trimmedKey = key.trim();
+            boolean validPrefix = ALLOWED_S3_PREFIXES.stream().anyMatch(trimmedKey::startsWith);
+            if (!validPrefix) {
+                Map<String, Object> error = new HashMap<>();
+                error.put("error", "Invalid S3 key prefix. Key must start with one of: " + ALLOWED_S3_PREFIXES);
+                return ResponseEntity.badRequest().body(error);
+            }
+        }
+
         String uploadedKey = key != null && !key.isBlank()
                 ? s3Service.uploadFile(key.trim(), file)
                 : s3Service.uploadFile(file);
 
-        Map<String, String> response = new HashMap<>();
+        Map<String, Object> response = new HashMap<>();
         response.put("key", uploadedKey);
         response.put("url", s3Service.getFileUrl(uploadedKey));
         response.put("message", "File uploaded successfully");
@@ -51,10 +73,12 @@ public class S3Controller {
     @GetMapping("/download/{*key}")
     @PreAuthorize("isAuthenticated()")
     public ResponseEntity<InputStreamResource> downloadFile(@PathVariable String key) {
-        InputStream inputStream = s3Service.downloadFile(key);
+        String cleanKey = key.startsWith("/") ? key.substring(1) : key;
+        InputStream inputStream = s3Service.downloadFile(cleanKey);
+        String filename = cleanKey.contains("/") ? cleanKey.substring(cleanKey.lastIndexOf("/") + 1) : cleanKey;
 
         return ResponseEntity.ok()
-                .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + key + "\"")
+                .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + filename + "\"")
                 .contentType(MediaType.APPLICATION_OCTET_STREAM)
                 .body(new InputStreamResource(inputStream));
     }
@@ -84,9 +108,10 @@ public class S3Controller {
      * Delete file from S3 (ADMIN + DATA_MANAGER only)
      */
     @DeleteMapping("/delete/{*key}")
-    @PreAuthorize("hasAnyRole('ADMIN', 'DATA_MANAGER')")
+    @PreAuthorize("hasRole('ADMIN')")
     public ResponseEntity<Map<String, String>> deleteFile(@PathVariable String key) {
-        s3Service.deleteFile(key);
+        String cleanKey = key.startsWith("/") ? key.substring(1) : key;
+        s3Service.deleteFile(cleanKey);
 
         Map<String, String> response = new HashMap<>();
         response.put("message", "File deleted successfully");
@@ -100,7 +125,8 @@ public class S3Controller {
     @GetMapping("/exists/{*key}")
     @PreAuthorize("isAuthenticated()")
     public ResponseEntity<Map<String, Boolean>> fileExists(@PathVariable String key) {
-        boolean exists = s3Service.fileExists(key);
+        String cleanKey = key.startsWith("/") ? key.substring(1) : key;
+        boolean exists = s3Service.fileExists(cleanKey);
         
         Map<String, Boolean> response = new HashMap<>();
         response.put("exists", exists);
@@ -212,6 +238,87 @@ public class S3Controller {
         response.put("newPrefix", newPrefix);
 
         return ResponseEntity.ok(response);
+    }
+
+    /**
+     * Generate a signed GET URL for an S3 key.
+     * Unlike /objects/{id}/signed-url, this works with any S3 key without requiring a DB entity.
+     */
+    @GetMapping("/signed-url")
+    @PreAuthorize("isAuthenticated()")
+    public ResponseEntity<Map<String, Object>> getSignedUrl(
+        @RequestParam String key,
+        @RequestParam(defaultValue = "3600") long expires
+    ) {
+        try {
+            String url = s3Service.createSignedGetUrl(key, Duration.ofSeconds(expires));
+            Map<String, Object> response = new HashMap<>();
+            response.put("url", url);
+            response.put("expiresAt", Instant.now().plus(Duration.ofSeconds(expires)).toString());
+            response.put("key", key);
+            return ResponseEntity.ok(response);
+        } catch (Exception e) {
+            Map<String, Object> error = new HashMap<>();
+            error.put("error", e.getMessage());
+            return ResponseEntity.badRequest().body(error);
+        }
+    }
+
+    /**
+     * Serve GeoTIFF file inline (no auth required, restricted to gis-data/ prefix).
+     * Supports HTTP Range requests for partial content (required by geotiff.js).
+     * Forwards S3's native range support including Content-Range and 206 status.
+     */
+    @GetMapping("/render")
+    public ResponseEntity<?> renderFile(
+        @RequestParam String key,
+        @RequestHeader(value = "Range", required = false) String range
+    ) {
+        try {
+            String cleanKey = key.startsWith("/") ? key.substring(1) : key;
+            if (!cleanKey.startsWith("gis-data/")) {
+                return ResponseEntity.badRequest().body(Map.of("error", "Only gis-data/ prefix allowed"));
+            }
+
+            System.out.println("[RenderFile] Requested key: " + key + " (cleaned: " + cleanKey + "), Range: " + range);
+
+            String contentType = cleanKey.endsWith(".tif") || cleanKey.endsWith(".tiff")
+                ? "image/tiff" : "application/octet-stream";
+
+            ResponseInputStream<GetObjectResponse> s3Stream = s3Service.downloadFileRange(cleanKey, range);
+            GetObjectResponse s3Meta = s3Stream.response();
+
+            // Forward the exact HTTP status from S3 (206 for range, 200 for full)
+            int httpStatus = s3Meta.sdkHttpResponse().statusCode();
+            System.out.println("[RenderFile] S3 response status: " + httpStatus + ", Content-Length: " + s3Meta.contentLength());
+            s3Meta.sdkHttpResponse().headers().forEach((k, v) -> System.out.println("  S3 response header: " + k + " = " + v));
+
+            // Forward Content-Range header from S3 if present
+            String contentRange = s3Meta.sdkHttpResponse()
+                .firstMatchingHeader(HttpHeaders.CONTENT_RANGE)
+                .orElse(null);
+
+            ResponseEntity.BodyBuilder builder = ResponseEntity.status(httpStatus)
+                .contentType(MediaType.valueOf(contentType))
+                .contentLength(s3Meta.contentLength())
+                .header(HttpHeaders.ACCEPT_RANGES, "bytes");
+
+            if (contentRange != null) {
+                builder.header(HttpHeaders.CONTENT_RANGE, contentRange);
+            }
+
+            final long totalLength = s3Meta.contentLength();
+            return builder.body(new InputStreamResource(s3Stream) {
+                @Override
+                public long contentLength() {
+                    return totalLength;
+                }
+            });
+        } catch (Exception e) {
+            System.err.println("[RenderFile] Error rendering file: " + e.getMessage());
+            e.printStackTrace();
+            return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
+        }
     }
 
     /**

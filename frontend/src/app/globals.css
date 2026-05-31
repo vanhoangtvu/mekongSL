@@ -1360,6 +1360,38 @@ html[data-theme="light"] .geo-settings-panel {
   height: 100%;
 }
 
+/* Status notification overlay on map */
+.map-status-overlay {
+  position: absolute;
+  top: 1rem;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 50;
+  padding: 0.5rem 1.25rem;
+  border-radius: 6px;
+  font-size: 0.85rem;
+  font-weight: 500;
+  white-space: nowrap;
+  pointer-events: none;
+  background: rgba(0, 0, 0, 0.75);
+  color: #e2e8f0;
+  backdrop-filter: blur(8px);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  transition: opacity 0.3s ease;
+}
+.map-status-overlay.is-success {
+  background: rgba(16, 185, 129, 0.85);
+  color: #fff;
+}
+.map-status-overlay.is-error {
+  background: rgba(239, 68, 68, 0.85);
+  color: #fff;
+}
+.map-status-overlay.is-loading {
+  background: rgba(59, 130, 246, 0.85);
+  color: #fff;
+}
+
 .geo-map-iframe {
   position: absolute;
   inset: 0;

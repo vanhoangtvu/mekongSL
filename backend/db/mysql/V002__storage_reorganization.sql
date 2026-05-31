@@ -2,21 +2,12 @@
 -- Adds slug to dataset, category/year/gis_data_type to layer
 -- Creates station, monitoring_station tables
 
--- Dataset: add unique slug for S3 path
-ALTER TABLE dataset ADD COLUMN slug VARCHAR(255) NOT NULL DEFAULT '' AFTER description;
-UPDATE dataset SET slug = LOWER(REPLACE(TRIM(name), ' ', '-'));
-ALTER TABLE dataset ADD UNIQUE KEY uniq_dataset_slug (slug);
-
--- Layer: add category, year, gis_data_type for S3 path generation
-ALTER TABLE layer ADD COLUMN category VARCHAR(255) DEFAULT NULL AFTER dataset_id;
-ALTER TABLE layer ADD COLUMN year INT DEFAULT NULL AFTER category;
-ALTER TABLE layer ADD COLUMN gis_data_type VARCHAR(16) DEFAULT NULL AFTER year;
-ALTER TABLE layer ADD KEY idx_layer_category (category);
-ALTER TABLE layer ADD KEY idx_layer_year (year);
+-- Columns already added by Hibernate ddl-auto: update
+-- Only create new tables here
 
 -- Station metadata table
 CREATE TABLE IF NOT EXISTS station (
-  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
   station_code VARCHAR(64) NOT NULL UNIQUE,
   name VARCHAR(255) NOT NULL,
   name_en VARCHAR(255) DEFAULT NULL,
@@ -34,7 +25,7 @@ CREATE TABLE IF NOT EXISTS station (
 
 -- Monitoring station metadata table
 CREATE TABLE IF NOT EXISTS monitoring_station (
-  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
   monitoring_code VARCHAR(64) NOT NULL UNIQUE,
   name VARCHAR(255) NOT NULL,
   description TEXT DEFAULT NULL,
@@ -52,13 +43,13 @@ CREATE TABLE IF NOT EXISTS monitoring_station (
 
 -- Station data files stored in S3 (reference metadata)
 CREATE TABLE IF NOT EXISTS station_data_file (
-  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
-  station_id BIGINT UNSIGNED NOT NULL,
+  id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  station_id BIGINT NOT NULL,
   parameter VARCHAR(64) NOT NULL,
   data_year INT NOT NULL,
   data_month INT NOT NULL,
   data_day INT NOT NULL,
-  s3_object_id BIGINT UNSIGNED NOT NULL,
+  s3_object_id BIGINT NOT NULL,
   file_format VARCHAR(16) NOT NULL DEFAULT 'CSV',
   record_count INT DEFAULT NULL,
   data_start_at TIMESTAMP NULL DEFAULT NULL,
@@ -73,13 +64,13 @@ CREATE TABLE IF NOT EXISTS station_data_file (
 
 -- Monitoring data files stored in S3 (reference metadata)
 CREATE TABLE IF NOT EXISTS monitoring_data_file (
-  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
-  monitoring_station_id BIGINT UNSIGNED NOT NULL,
+  id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  monitoring_station_id BIGINT NOT NULL,
   parameter VARCHAR(64) NOT NULL,
   data_year INT NOT NULL,
   data_month INT NOT NULL,
   data_day INT NOT NULL,
-  s3_object_id BIGINT UNSIGNED NOT NULL,
+  s3_object_id BIGINT NOT NULL,
   file_format VARCHAR(16) NOT NULL DEFAULT 'CSV',
   record_count INT DEFAULT NULL,
   data_start_at TIMESTAMP NULL DEFAULT NULL,

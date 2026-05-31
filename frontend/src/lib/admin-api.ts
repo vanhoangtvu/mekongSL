@@ -250,6 +250,13 @@ export async function renameS3Folder(oldPrefix: string, newPrefix: string) {
   });
 }
 
+export async function getS3SignedUrl(key: string, expires: number = 3600) {
+  const url = new URL(getBackendAdminUrl('/s3/signed-url'));
+  url.searchParams.set('key', key);
+  url.searchParams.set('expires', String(expires));
+  return requestJson<{ url: string; expiresAt: string; key: string }>(url);
+}
+
 export async function downloadS3File(key: string) {
   const token = authService.getToken();
   const response = await fetch(getBackendAdminUrl(`/s3/download/${key}`), {

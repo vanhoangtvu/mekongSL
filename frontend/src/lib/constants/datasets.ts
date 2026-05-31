@@ -124,30 +124,44 @@ export function buildGisS3Path(
   categoryId: string,
   year: number,
   dataType: 'raster' | 'vector',
-  filename: string
+  filename: string,
+  month?: number,
+  day?: number,
+  time?: string
 ): string {
   const dsSlug = getDatasetSlug(datasetId) || datasetId;
   const catSlug = getDatasetSlug(categoryId) || categoryId;
+  let path = `gis-data/${dsSlug}/${catSlug}/${year}`;
 
-  if (dsSlug === 'hydrology') {
-    return `gis-data/hydrology/${catSlug}/${year}/raster/${filename}`;
+  if (month !== undefined) {
+    path += `/${String(month).padStart(2, '0')}`;
+    if (day !== undefined) {
+      path += `/${String(day).padStart(2, '0')}`;
+      if (time) {
+        path += `/${time.replace(':', '-')}`;
+      }
+    }
   }
 
-  return `gis-data/${dsSlug}/${catSlug}/${year}/${dataType}/${filename}`;
+  path += `/${dataType}/${filename}`;
+  return path;
 }
 
 export function buildStationS3Path(
+  stationDataType: string,
   stationCode: string,
   parameter: string,
   year: number,
   month: number,
   day: number,
+  time: string,
   filename: string
 ): string {
   const y = String(year);
   const m = String(month).padStart(2, '0');
   const d = String(day).padStart(2, '0');
-  return `station-data/${stationCode}/${parameter}/${y}/${m}/${d}/${filename}`;
+  const t = time ? time.replace(':', '-') : '00-00';
+  return `station-data/${stationDataType}/${stationCode}/${parameter}/${y}/${m}/${d}/${t}/${filename}`;
 }
 
 export function buildMonitoringS3Path(
@@ -156,12 +170,14 @@ export function buildMonitoringS3Path(
   year: number,
   month: number,
   day: number,
+  time: string,
   filename: string
 ): string {
   const y = String(year);
   const m = String(month).padStart(2, '0');
   const d = String(day).padStart(2, '0');
-  return `monitoring-data/${monitoringCode}/${parameter}/${y}/${m}/${d}/${filename}`;
+  const t = time ? time.replace(':', '-') : '00-00';
+  return `monitoring-data/${monitoringCode}/${parameter}/${y}/${m}/${d}/${t}/${filename}`;
 }
 
 export const AREA_TYPES = ["Point", "Line", "Polygon", "Grid"];

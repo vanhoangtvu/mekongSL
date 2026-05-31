@@ -28,4 +28,5 @@ s3:
   bucket: c01-mekong-prod-01
   access-key: ${S3_ACCESS_KEY:dummy-access-key}
   secret-key: ${S3_SECRET_KEY:dummy-secret-key}
-  region: us-e
+  region: us-east-1
+  max-file-size: 104857600 # 100MB

@@ -1,6 +1,7 @@
 package com.mekongsaltlab.org.controller.gis;
 
 import com.mekongsaltlab.org.dto.gis.MonitoringDataResponse;
+import com.mekongsaltlab.org.dto.gis.SignedUrlResponse;
 import com.mekongsaltlab.org.service.gis.MonitoringDataService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.format.annotation.DateTimeFormat;
@@ -24,16 +25,25 @@ public class MonitoringDataController {
         @RequestParam String monitoringCode,
         @RequestParam String parameter,
         @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate date,
+        @RequestParam(defaultValue = "00-00") String time,
         @RequestParam("file") MultipartFile file
     ) {
         try {
-            MonitoringDataResponse response = monitoringDataService.uploadData(monitoringCode, parameter, file, date);
+            MonitoringDataResponse response = monitoringDataService.uploadData(
+                monitoringCode, parameter, file, date, time);
             return ResponseEntity.ok(response);
         } catch (IllegalArgumentException e) {
             return ResponseEntity.badRequest().body(e.getMessage());
         } catch (IOException e) {
             return ResponseEntity.internalServerError().body("Failed to upload file: " + e.getMessage());
         }
+    }
+
+    @GetMapping("/{id}")
+    public ResponseEntity<MonitoringDataResponse> getById(@PathVariable Long id) {
+        MonitoringDataResponse response = monitoringDataService.getById(id);
+        if (response == null) return ResponseEntity.notFound().build();
+        return ResponseEntity.ok(response);
     }
 
     @GetMapping("/list/{monitoringCode}")
@@ -45,5 +55,21 @@ public class MonitoringDataController {
             return ResponseEntity.ok(monitoringDataService.listData(monitoringCode, parameter));
         }
         return ResponseEntity.ok(monitoringDataService.listAllData(monitoringCode));
+    }
+
+    @GetMapping("/{id}/download")
+    public ResponseEntity<SignedUrlResponse> download(@PathVariable Long id,
+                                                      @RequestParam(defaultValue = "300") long expires) {
+        SignedUrlResponse response = monitoringDataService.getSignedUrl(id, expires);
+        if (response == null) return ResponseEntity.notFound().build();
+        return ResponseEntity.ok(response);
+    }
+
+    @DeleteMapping("/{id}")
+    public ResponseEntity<Void> delete(@PathVariable Long id) {
+        if (!monitoringDataService.deleteById(id)) {
+            return ResponseEntity.notFound().build();
+        }
+        return ResponseEntity.noContent().build();
     }
 }

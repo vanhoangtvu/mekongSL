@@ -16,9 +16,8 @@ public class StoragePathService {
     private static final String STATION_PREFIX = "station-data";
     private static final String MONITORING_PREFIX = "monitoring-data";
 
-    private static final String HYDROLOGY_SLUG = "hydrology";
-
-    public String buildGisPath(Layer layer, String filename) {
+    public String buildGisPath(Layer layer, String filename,
+                               Integer month, Integer day, String time) {
         Dataset dataset = layer.getDataset();
         String datasetSlug = dataset.getSlug();
         String category = layer.getCategory();
@@ -29,63 +28,97 @@ public class StoragePathService {
         if (year == null) year = ZonedDateTime.now(ZoneId.of("UTC")).getYear();
         if (dataType == null) dataType = GisDataType.RASTER;
 
-        String sanitizedCategory = sanitize(category);
-        String sanitizedDataset = sanitize(datasetSlug);
-        String sanitizedFilename = sanitizeFilename(filename);
+        return buildGisPath(
+            datasetSlug, category, year, month, day, time,
+            dataType.name().toLowerCase(), filename);
+    }
 
-        if (HYDROLOGY_SLUG.equals(datasetSlug)) {
-            return buildHydrologyPath(sanitizedCategory, year, layer.getObsTimeStart(), sanitizedFilename);
+    public String buildGisPath(Layer layer, String filename) {
+        return buildGisPath(layer, filename, null, null, null);
+    }
+
+    public String buildGisPath(String datasetSlug, String category,
+                               int year, Integer month, Integer day, String time,
+                               String dataType, String filename) {
+        String sanitizedDataset = sanitize(datasetSlug);
+        String sanitizedCategory = sanitize(category);
+        String sanitizedFilename = sanitizeFilename(filename);
+        String sanitizedDataType = sanitizeDataType(dataType);
+
+        StringBuilder sb = new StringBuilder();
+        sb.append(GIS_PREFIX).append("/")
+            .append(sanitizedDataset).append("/")
+            .append(sanitizedCategory).append("/")
+            .append(year);
+
+        if (month != null) {
+            sb.append("/").append(String.format("%02d", month));
+            if (day != null) {
+                sb.append("/").append(String.format("%02d", day));
+                if (time != null && !time.isEmpty()) {
+                    sb.append("/").append(formatTime(time));
+                }
+            }
         }
 
-        return String.format("%s/%s/%s/%d/%s/%s",
-            GIS_PREFIX, sanitizedDataset, sanitizedCategory, year,
-            dataType.name().toLowerCase(), sanitizedFilename);
+        sb.append("/").append(sanitizedDataType);
+        sb.append("/").append(sanitizedFilename);
+
+        return sb.toString();
     }
 
-    public String buildHydrologyPath(String category, int year, Instant obsTime, String filename) {
-        ZonedDateTime dt = obsTime != null
-            ? obsTime.atZone(ZoneId.of("UTC"))
-            : ZonedDateTime.now(ZoneId.of("UTC"));
-
-        int month = dt.getMonthValue();
-        int day = dt.getDayOfMonth();
-        int hour = dt.getHour();
-        int minute = dt.getMinute();
-        String time = String.format("%02d%02d", hour, minute);
-
-        String sanitizedCategory = sanitize(category);
-
-        return String.format("%s/hydrology/%s/%d/%02d/%02d/%s/%s",
-            GIS_PREFIX, sanitizedCategory, year, month, day, time, filename);
-    }
-
-    public String buildStationPath(String stationCode, String parameter, int year, int month, int day, String filename) {
+    public String buildStationPath(String stationDataType, String stationCode,
+                                   String parameter, int year, int month, int day,
+                                   String time, String filename) {
+        String sanitizedDataType = sanitize(stationDataType);
         String sanitizedCode = sanitize(stationCode);
         String sanitizedParam = sanitizeParameter(parameter);
         String sanitizedFilename = sanitizeFilename(filename);
+        String sanitizedTime = formatTime(time);
 
-        return String.format("%s/%s/%s/%d/%02d/%02d/%s",
-            STATION_PREFIX, sanitizedCode, sanitizedParam, year, month, day, sanitizedFilename);
+        return String.format("%s/%s/%s/%s/%d/%02d/%02d/%s/%s",
+            STATION_PREFIX, sanitizedDataType, sanitizedCode, sanitizedParam,
+            year, month, day, sanitizedTime, sanitizedFilename);
     }
 
-    public String buildMonitoringPath(String monitoringCode, String parameter, int year, int month, int day, String filename) {
+    public String buildStationPath(String stationCode, String parameter,
+                                   int year, int month, int day, String filename) {
+        return buildStationPath("default", stationCode, parameter,
+            year, month, day, "00-00", filename);
+    }
+
+    public String buildMonitoringPath(String monitoringCode, String parameter,
+                                      int year, int month, int day,
+                                      String time, String filename) {
         String sanitizedCode = sanitize(monitoringCode);
         String sanitizedParam = sanitizeParameter(parameter);
         String sanitizedFilename = sanitizeFilename(filename);
+        String sanitizedTime = formatTime(time);
 
-        return String.format("%s/%s/%s/%d/%02d/%02d/%s",
-            MONITORING_PREFIX, sanitizedCode, sanitizedParam, year, month, day, sanitizedFilename);
+        return String.format("%s/%s/%s/%d/%02d/%02d/%s/%s",
+            MONITORING_PREFIX, sanitizedCode, sanitizedParam,
+            year, month, day, sanitizedTime, sanitizedFilename);
     }
 
-    public String buildStationFolderPath(String stationCode, String parameter, int year, int month, int day) {
+    public String buildMonitoringPath(String monitoringCode, String parameter,
+                                      int year, int month, int day, String filename) {
+        return buildMonitoringPath(monitoringCode, parameter,
+            year, month, day, "00-00", filename);
+    }
+
+    public String buildStationFolderPath(String stationDataType, String stationCode,
+                                         String parameter, int year, int month, int day) {
+        String sanitizedDataType = sanitize(stationDataType);
         String sanitizedCode = sanitize(stationCode);
         String sanitizedParam = sanitizeParameter(parameter);
 
-        return String.format("%s/%s/%s/%d/%02d/%02d/",
-            STATION_PREFIX, sanitizedCode, sanitizedParam, year, month, day);
+        return String.format("%s/%s/%s/%s/%d/%02d/%02d/",
+            STATION_PREFIX, sanitizedDataType, sanitizedCode, sanitizedParam,
+            year, month, day);
     }
 
-    public String buildMonitoringFolderPath(String monitoringCode, String parameter, int year, int month, int day) {
+    public String buildMonitoringFolderPath(String monitoringCode, String parameter,
+                                            int year, int month, int day) {
         String sanitizedCode = sanitize(monitoringCode);
         String sanitizedParam = sanitizeParameter(parameter);
 
@@ -93,7 +126,7 @@ public class StoragePathService {
             MONITORING_PREFIX, sanitizedCode, sanitizedParam, year, month, day);
     }
 
-    public String buildGisFolderPath(Layer layer) {
+    public String buildGisFolderPath(Layer layer, Integer month, Integer day, String time) {
         Dataset dataset = layer.getDataset();
         String datasetSlug = dataset.getSlug();
         String category = layer.getCategory();
@@ -104,31 +137,33 @@ public class StoragePathService {
         if (year == null) year = ZonedDateTime.now(ZoneId.of("UTC")).getYear();
         if (dataType == null) dataType = GisDataType.RASTER;
 
-        String sanitizedCategory = sanitize(category);
         String sanitizedDataset = sanitize(datasetSlug);
+        String sanitizedCategory = sanitize(category);
+        String sanitizedDataType = dataType.name().toLowerCase();
 
-        if (HYDROLOGY_SLUG.equals(datasetSlug)) {
-            return buildHydrologyFolderPath(sanitizedCategory, year, layer.getObsTimeStart());
+        StringBuilder sb = new StringBuilder();
+        sb.append(GIS_PREFIX).append("/")
+            .append(sanitizedDataset).append("/")
+            .append(sanitizedCategory).append("/")
+            .append(year);
+
+        if (month != null) {
+            sb.append("/").append(String.format("%02d", month));
+            if (day != null) {
+                sb.append("/").append(String.format("%02d", day));
+                if (time != null && !time.isEmpty()) {
+                    sb.append("/").append(formatTime(time));
+                }
+            }
         }
 
-        return String.format("%s/%s/%s/%d/%s/",
-            GIS_PREFIX, sanitizedDataset, sanitizedCategory, year,
-            dataType.name().toLowerCase());
+        sb.append("/").append(sanitizedDataType).append("/");
+        return sb.toString();
     }
 
-    public String buildHydrologyFolderPath(String category, int year, Instant obsTime) {
-        ZonedDateTime dt = obsTime != null
-            ? obsTime.atZone(ZoneId.of("UTC"))
-            : ZonedDateTime.now(ZoneId.of("UTC"));
-
-        int month = dt.getMonthValue();
-        int day = dt.getDayOfMonth();
-        int hour = dt.getHour();
-        int minute = dt.getMinute();
-        String time = String.format("%02d%02d", hour, minute);
-
-        return String.format("%s/hydrology/%s/%d/%02d/%02d/%s/",
-            GIS_PREFIX, sanitize(category), year, month, day, time);
+    private String formatTime(String time) {
+        if (time == null || time.isEmpty()) return "00-00";
+        return time.replace(":", "-");
     }
 
     private String sanitize(String segment) {
@@ -149,5 +184,11 @@ public class StoragePathService {
         return parameter.trim().toLowerCase()
             .replaceAll("[^a-z0-9_\\-]", "")
             .replaceAll("-+", "-");
+    }
+
+    private String sanitizeDataType(String dataType) {
+        if (dataType == null) return "raster";
+        return dataType.trim().toLowerCase()
+            .replaceAll("[^a-z]", "");
     }
 }

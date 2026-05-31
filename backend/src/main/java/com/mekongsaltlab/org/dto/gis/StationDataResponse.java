@@ -16,6 +16,7 @@ public class StationDataResponse {
     private Integer dataDay;
     private String s3Key;
     private Long sizeBytes;
+    private String contentType;
     private String fileFormat;
     private Integer recordCount;
     private Instant createdAt;

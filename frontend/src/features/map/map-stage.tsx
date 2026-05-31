@@ -1,24 +1,22 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import TileLayer from "ol/layer/Tile";
 import VectorLayer from "ol/layer/Vector";
-import WebGLTileLayer from "ol/layer/WebGLTile";
 import Map from "ol/Map";
 import View from "ol/View";
-import { fromLonLat, transformExtent, toLonLat } from "ol/proj";
+import { fromLonLat, toLonLat } from "ol/proj";
 import OSM from "ol/source/OSM";
 import XYZ from "ol/source/XYZ";
 import VectorSource from "ol/source/Vector";
-import GeoTIFF from "ol/source/GeoTIFF";
 import Feature from "ol/Feature";
 import Point from "ol/geom/Point";
 import { Style, Circle, Fill, Stroke, Text } from "ol/style";
 import proj4 from "proj4";
 import { register } from "ol/proj/proj4";
-import type { GisLayer, GisLayerRender } from "../../lib/gis-types";
 import { DATASETS } from "../../lib/constants/datasets";
 import { ECOWITT_DEVICES } from "../../lib/constants/data-sources";
+import { useS3DatasetLayers } from "./useS3DatasetLayers";
 
 // Register UTM 48N projection
 proj4.defs("EPSG:32648", "+proj=utm +zone=48 +datum=WGS84 +units=m +no_defs");
@@ -146,6 +144,10 @@ function buildWorldFileExtent(worldFile: WorldFile, pixelExtent: [number, number
 }
 
 function buildWorldFileCandidates(rasterUrl: string) {
+  // Proxy URLs won't have a .tif extension; skip world file lookup
+  if (rasterUrl.startsWith("/api/")) {
+    return [];
+  }
   const absolute = rasterUrl.startsWith("http")
     ? new URL(rasterUrl)
     : new URL(rasterUrl, window.location.origin);
@@ -250,6 +252,7 @@ type MapStageProps = {
   startDateTime: string;
   endDateTime: string;
   ecowittEnabled?: boolean;
+  appliedDatasets?: string[];
 };
 
 function parseDateTimeLocal(value: string) {
@@ -380,15 +383,6 @@ function buildTimelineUnits(startDate: Date, endDate: Date, mode: TimelineResolv
   return { mode, units };
 }
 
-// Helper functions to translate layer names and legend labels to English dynamically
-function translateLayerName(name: string): string {
-  if (!name) return "";
-  return name
-    .replace(/Độ mặn vùng/g, "Salinity Region")
-    .replace(/Độ mặn/g, "Salinity")
-    .replace(/vùng/g, "Region");
-}
-
 function translateLegendLabel(label: string): string {
   if (!label) return "";
   return label
@@ -397,25 +391,16 @@ function translateLegendLabel(label: string): string {
     .replace(/Độ sâu/g, "Depth");
 }
 
-export function MapStage({ startDateTime, endDateTime, ecowittEnabled }: MapStageProps) {
+export function MapStage({ startDateTime, endDateTime, ecowittEnabled, appliedDatasets }: MapStageProps) {
   const mapContainerRef = useRef<HTMLDivElement | null>(null);
   const scrollerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<Map | null>(null);
   const ecowittLayerRef = useRef<VectorLayer<VectorSource> | null>(null);
   const baseLayerRef = useRef<TileLayer | null>(null);
-  const rasterLayerRef = useRef<WebGLTileLayer | null>(null);
-  const [selectedLayer, setSelectedLayer] = useState<{
-    id: number;
-    name: string;
-    bbox: [number, number, number, number];
-    nodata: number;
-    legendLabel: string;
-    signedUrl: string | null;
-  } | null>(null);
-  const [rasterUrl, setRasterUrl] = useState<string | null>(null);
-  const [loadStatus, setLoadStatus] = useState("Loading raster layer...");
   const [pixelValue, setPixelValue] = useState<number | null>(null);
   const [mouseCoords, setMouseCoords] = useState<[number, number] | null>(null);
+
+  const { renderedLayers, layerRefs } = useS3DatasetLayers(appliedDatasets, mapRef);
   const [activeBaseLayer, setActiveBaseLayer] = useState<BaseLayerType>("osm");
   const [showLayerMenu, setShowLayerMenu] = useState(false);
   const [showTimeline, setShowTimeline] = useState(true);
@@ -612,86 +597,6 @@ export function MapStage({ startDateTime, endDateTime, ecowittEnabled }: MapStag
   }, [timelineIndex, timelineUnits.length]);
 
   useEffect(() => {
-    let isActive = true;
-
-    async function loadLayers() {
-      try {
-        const response = await fetch("/api/layers?page=0&size=100", { cache: "no-store" });
-        if (!response.ok) {
-          throw new Error(`Unable to load layers (${response.status})`);
-        }
-
-        const page: { content?: GisLayer[] } = await response.json();
-        const first = page.content?.[0] ?? null;
-
-        if (!isActive) return;
-
-        if (!first) {
-          setSelectedLayer(null);
-          setLoadStatus("No raster layers available");
-          return;
-        }
-
-        setLoadStatus(`Selected ${translateLayerName(first.name)}`);
-
-        // Fetch render URL for the first layer
-        try {
-          const renderRes = await fetch(`/api/layers/${first.id}/url`, { cache: "no-store" });
-          if (!renderRes.ok) {
-            throw new Error(`Render fetch failed (${renderRes.status})`);
-          }
-
-          const renderData: GisLayerRender = await renderRes.json();
-
-          if (!isActive) return;
-
-          const bbox: [number, number, number, number] = [
-            renderData.bboxMinLon ?? 594885,
-            renderData.bboxMinLat ?? 1052655,
-            renderData.bboxMaxLon ?? 688485,
-            renderData.bboxMaxLat ?? 1117455,
-          ];
-
-          setSelectedLayer({
-            id: renderData.id,
-            name: renderData.name,
-            bbox,
-            nodata: -9999,
-            legendLabel: renderData.name,
-            signedUrl: renderData.signedUrl,
-          });
-
-          if (renderData.signedUrl) {
-            setRasterUrl(renderData.signedUrl);
-            setLoadStatus(`Displaying ${translateLayerName(renderData.name)}`);
-          } else {
-            setRasterUrl(null);
-            setLoadStatus("No signed URL for raster layer");
-          }
-        } catch {
-          if (isActive) {
-            setSelectedLayer(null);
-            setRasterUrl(null);
-            setLoadStatus("Failed to get render URL for layer");
-          }
-        }
-      } catch (error) {
-        if (isActive) {
-          setSelectedLayer(null);
-          setRasterUrl(null);
-          setLoadStatus(error instanceof Error ? error.message : "Failed to load raster layer");
-        }
-      }
-    }
-
-    void loadLayers();
-
-    return () => {
-      isActive = false;
-    };
-  }, []);
-
-  useEffect(() => {
     if (!mapContainerRef.current || mapRef.current) {
       return;
     }
@@ -781,28 +686,30 @@ export function MapStage({ startDateTime, endDateTime, ecowittEnabled }: MapStag
       const coordinate = evt.coordinate;
       setMouseCoords(coordinate as [number, number]);
 
-      const layer = rasterLayerRef.current;
-      if (!layer) {
-        setPixelValue(null);
-        return;
+      let pixelData: number | null = null;
+      const layers = layerRefs.current;
+      if (layers && typeof layers === 'object') {
+        for (const [, layer] of Object.entries(layers)) {
+          try {
+            const buf = layer.getData(evt.pixel);
+            if (buf && !(buf instanceof DataView) && buf.length > 0 && buf[0] > 0) {
+              pixelData = buf[0];
+              break;
+            }
+          } catch { /* skip layer */ }
+        }
       }
-
-      const data = layer.getData(evt.pixel);
-      if (!data || data instanceof DataView) {
-        setPixelValue(null);
-        return;
-      }
-
-      if (data.length > 0) {
-        const value = data[0];
-        setPixelValue(value > 0 ? value : null);
-      } else {
-        setPixelValue(null);
-      }
+      setPixelValue(pixelData);
     });
 
     return () => {
-      rasterLayerRef.current = null;
+      const layers = layerRefs.current;
+      if (layers && typeof layers === 'object') {
+        for (const layer of Object.values(layers)) {
+          layer.getSource()?.dispose?.();
+        }
+      }
+      layerRefs.current = {};
       ecowittLayerRef.current = null;
       baseLayerRef.current = null;
       map.setTarget(undefined);
@@ -894,153 +801,6 @@ export function MapStage({ startDateTime, endDateTime, ecowittEnabled }: MapStag
     map.getLayers().insertAt(0, newBaseLayer);
     baseLayerRef.current = newBaseLayer;
   }, [activeBaseLayer]);
-
-  useEffect(() => {
-    const map = mapRef.current;
-    if (!map) {
-      return;
-    }
-
-    if (rasterLayerRef.current) {
-      map.removeLayer(rasterLayerRef.current);
-      rasterLayerRef.current = null;
-    }
-
-    if (!selectedLayer || !rasterUrl) {
-      console.log("No layer or URL:", { selectedLayer, rasterUrl });
-      return;
-    }
-
-    console.log("Creating GeoTIFF source with URL:", rasterUrl);
-
-    const absoluteUrl = rasterUrl.startsWith("http") ? rasterUrl : `${window.location.origin}${rasterUrl}`;
-
-    console.log("Absolute GeoTIFF URL:", absoluteUrl);
-
-    const source = new GeoTIFF({
-      sources: [
-        {
-          url: absoluteUrl,
-          nodata: selectedLayer.nodata,
-        },
-      ],
-      convertToRGB: false,
-      normalize: false,
-      interpolate: false,
-      projection: "EPSG:32648",
-    });
-
-    source.on("change", () => {
-      console.log("GeoTIFF source state:", source.getState());
-    });
-
-    const nodataValue = selectedLayer.nodata;
-    const rasterLayer = new WebGLTileLayer({
-      opacity: 0.7,
-      source,
-      style: {
-        color: [
-          "case",
-          ["<=", ["band", 1], nodataValue], [0, 0, 0, 0],
-          ["<=", ["band", 1], 0], [0, 0, 0, 0],
-          ["<", ["band", 1], 0.06], [0, 0, 0, 0],
-          [
-            "interpolate",
-            ["linear"],
-            ["band", 1],
-            0.06, [0, 0, 255, 1],
-            5, [0, 255, 255, 1],
-            10, [0, 255, 0, 1],
-            15, [255, 255, 0, 1],
-            20, [255, 165, 0, 1],
-            21, [255, 0, 0, 1],
-          ],
-        ],
-      },
-    });
-
-    console.log("Adding raster layer to map");
-    rasterLayer.setZIndex(100);
-    map.addLayer(rasterLayer);
-    rasterLayerRef.current = rasterLayer;
-
-    rasterLayer.on("error", (event) => {
-      console.error("Raster layer error:", event);
-    });
-
-    void (async () => {
-      const worldFile = await loadWorldFile(absoluteUrl);
-      return source.getView().then((viewOptions) => ({ viewOptions, worldFile }));
-    })()
-      .then(({ viewOptions, worldFile }) => {
-        console.log("GeoTIFF viewOptions:", viewOptions);
-        console.log("GeoTIFF extent:", viewOptions.extent);
-        console.log("GeoTIFF projection:", viewOptions.projection);
-        console.log("GeoTIFF resolutions:", viewOptions.resolutions);
-
-        if (!mapRef.current) {
-          return;
-        }
-
-        if (viewOptions.extent && viewOptions.projection) {
-          const view = map.getView();
-          const sourceProjection =
-            typeof viewOptions.projection === "string"
-              ? viewOptions.projection
-              : viewOptions.projection.getCode();
-
-          console.log("Source projection code:", sourceProjection);
-
-          const transformedExtent = transformExtent(viewOptions.extent, sourceProjection, "EPSG:3857");
-          console.log("Transformed extent (EPSG:3857):", transformedExtent);
-
-          view.fit(transformedExtent, {
-            padding: [48, 48, 48, 48],
-            duration: 300,
-            maxZoom: 15,
-          });
-
-          console.log("✅ Map fitted to GeoTIFF extent");
-          return;
-        }
-
-        const view = map.getView();
-        const pixelExtent =
-          viewOptions.extent && viewOptions.extent.length === 4
-            ? (viewOptions.extent as [number, number, number, number])
-            : null;
-        const worldExtent = worldFile && pixelExtent ? buildWorldFileExtent(worldFile, pixelExtent) : null;
-        const resolvedExtent = worldExtent ?? selectedLayer.bbox;
-
-        if (worldExtent) {
-          console.log("✅ Map fitted to world file extent");
-        } else {
-          console.warn("⚠️ No extent/projection in GeoTIFF; using fallback extent");
-        }
-
-        const transformedExtent = transformExtent(resolvedExtent, "EPSG:32648", "EPSG:3857");
-        console.log("Resolved transformed extent:", transformedExtent);
-
-        view.fit(transformedExtent, {
-          padding: [48, 48, 48, 48],
-          duration: 300,
-          maxZoom: 15,
-        });
-      })
-      .catch((error) => {
-        console.error("❌ Error reading GeoTIFF view:", error);
-        console.error("Error stack:", error.stack);
-
-        const view = map.getView();
-        const transformedExtent = transformExtent(selectedLayer.bbox, "EPSG:32648", "EPSG:3857");
-
-        view.fit(transformedExtent, {
-          padding: [48, 48, 48, 48],
-          duration: 300,
-          maxZoom: 15,
-        });
-      });
-  }, [rasterUrl, selectedLayer]);
 
   return (
     <section className="geo-map">
@@ -1815,10 +1575,12 @@ export function MapStage({ startDateTime, endDateTime, ecowittEnabled }: MapStag
               <span>Map Inspector</span>
             </div>
             <div className="geo-map-inspector-body">
-              {selectedLayer && (
+              {Object.keys(renderedLayers).length > 0 && (
                 <div className="geo-map-inspector-row">
-                  <span className="geo-map-inspector-label">Active Layer:</span>
-                  <span className="geo-map-inspector-val">{translateLayerName(selectedLayer.name)}</span>
+                  <span className="geo-map-inspector-label">Active Layers:</span>
+                  <span className="geo-map-inspector-val">
+                    {Object.values(renderedLayers).map(l => l.name).join(', ')}
+                  </span>
                 </div>
               )}
               <div className="geo-map-inspector-row">
@@ -1830,26 +1592,25 @@ export function MapStage({ startDateTime, endDateTime, ecowittEnabled }: MapStag
                   })()}
                 </span>
               </div>
-              {selectedLayer && (
-                <div className="geo-map-inspector-row highlighted">
-                  <span className="geo-map-inspector-label">
-                    {(() => {
-                      const label = translateLegendLabel(selectedLayer.legendLabel);
-                      const match = label.match(/^([^(]+)/);
-                      return match ? match[1].trim() : label;
-                    })()}:
-                  </span>
-                  <span className="geo-map-inspector-val value-highlight">
-                    {pixelValue !== null
-                      ? `${pixelValue.toFixed(2)} ${(() => {
-                          const label = translateLegendLabel(selectedLayer.legendLabel);
-                          const match = label.match(/\(([^)]+)\)/);
-                          return match ? match[1] : "";
-                        })()}`
-                      : "No Data"}
-                  </span>
-                </div>
-              )}
+              {(() => {
+                const firstLayer = Object.values(renderedLayers)[0];
+                if (!firstLayer) return null;
+                const label = translateLegendLabel(firstLayer.name);
+                const nameMatch = label.match(/^([^(]+)/);
+                const unitMatch = label.match(/\(([^)]+)\)/);
+                return (
+                  <div className="geo-map-inspector-row highlighted">
+                    <span className="geo-map-inspector-label">
+                      {nameMatch ? nameMatch[1].trim() : label}:
+                    </span>
+                    <span className="geo-map-inspector-val value-highlight">
+                      {pixelValue !== null
+                        ? `${pixelValue.toFixed(2)} ${unitMatch ? unitMatch[1] : ""}`
+                        : "No Data"}
+                    </span>
+                  </div>
+                );
+              })()}
             </div>
           </div>
         )}

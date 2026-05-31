@@ -14,6 +14,7 @@ type GeoSearchSidebarProps = {
   onEndDateTimeChange: (value: string) => void;
   ecowittEnabled?: boolean;
   onEcowittToggle?: (enabled: boolean) => void;
+  onApply?: (datasets: string[]) => void;
 };
 
 type SearchTabsProps = {
@@ -65,6 +66,7 @@ export function GeoSearchSidebar({
   onEndDateTimeChange,
   ecowittEnabled,
   onEcowittToggle,
+  onApply,
 }: GeoSearchSidebarProps) {
   const [expandedCategories, setExpandedCategories] = useState<Set<string>>(new Set(["landsat"]));
   const [selectedDatasets, setSelectedDatasets] = useState<Set<string>>(new Set());
@@ -109,7 +111,9 @@ export function GeoSearchSidebar({
   };
 
   const applyDatasets = () => {
-    setAppliedDatasets(new Set(selectedDatasets));
+    const selected = new Set(selectedDatasets);
+    setAppliedDatasets(selected);
+    onApply?.(Array.from(selected));
   };
 
   return (

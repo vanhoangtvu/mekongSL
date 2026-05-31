@@ -16,6 +16,11 @@ export default function PublicHomePage() {
   const [startDateTime, setStartDateTime] = useState("2026-05-01T00:00");
   const [endDateTime, setEndDateTime] = useState("2026-05-24T23:59");
   const [ecowittEnabled, setEcowittEnabled] = useState(false);
+  const [appliedDatasets, setAppliedDatasets] = useState<string[]>([]);
+
+  const handleApplyDatasets = (datasets: string[]) => {
+    setAppliedDatasets(datasets);
+  };
 
   return (
     <div className="app-container public-home">
@@ -35,10 +40,11 @@ export default function PublicHomePage() {
               onEndDateTimeChange={setEndDateTime}
               ecowittEnabled={ecowittEnabled}
               onEcowittToggle={setEcowittEnabled}
+              onApply={handleApplyDatasets}
             />
           </ResizablePanel>
           <div className="geo-panel">
-            <MapStage startDateTime={startDateTime} endDateTime={endDateTime} ecowittEnabled={ecowittEnabled} />
+            <MapStage startDateTime={startDateTime} endDateTime={endDateTime} ecowittEnabled={ecowittEnabled} appliedDatasets={appliedDatasets} />
           </div>
         </div>
       </main>

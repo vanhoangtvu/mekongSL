@@ -19,8 +19,8 @@ CREDENTIALS.md
 Datacenter/CREDENTIALS.md
 
 # Data & Output
-data/
-output/
+/data/
+/output/
 *.json
 !package.json
 !package-lock.json

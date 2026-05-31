@@ -4,22 +4,28 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
 import software.amazon.awssdk.core.sync.RequestBody;
+import software.amazon.awssdk.core.ResponseInputStream;
 import software.amazon.awssdk.services.s3.S3Client;
 import software.amazon.awssdk.services.s3.model.*;
 import software.amazon.awssdk.services.s3.presigner.S3Presigner;
 import software.amazon.awssdk.services.s3.presigner.model.GetObjectPresignRequest;
 import software.amazon.awssdk.services.s3.presigner.model.PresignedGetObjectRequest;
 import com.mekongsaltlab.org.dto.S3FileResponse;
+import com.mekongsaltlab.org.entity.gis.S3Object;
+import com.mekongsaltlab.org.repository.gis.S3ObjectRepository;
 
 import java.io.IOException;
 import java.io.InputStream;
+import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 import java.util.stream.Collectors;
 
 @Service
@@ -29,14 +35,27 @@ public class S3Service {
     
     private final S3Client s3Client;
     private final S3Presigner s3Presigner;
+    private final S3ObjectRepository s3ObjectRepository;
     
     @Value("${s3.bucket}")
     private String bucketName;
     
+    @Value("${s3.max-file-size:104857600}")
+    private long maxFileSize;
+    
     /**
-     * Upload file to S3
+     * Upload file to S3 with validation and DB tracking
      */
+    @Transactional
     public String uploadFile(String key, MultipartFile file) throws IOException {
+        if (file.getSize() > maxFileSize) {
+            throw new RuntimeException("File size exceeds maximum allowed: " + maxFileSize + " bytes");
+        }
+
+        if (fileExists(key)) {
+            throw new RuntimeException("File already exists at S3 key: " + key + ". Delete the existing file first or use a different key.");
+        }
+
         try {
             PutObjectRequest putObjectRequest = PutObjectRequest.builder()
                     .bucket(bucketName)
@@ -44,13 +63,44 @@ public class S3Service {
                     .contentType(file.getContentType())
                     .build();
             
-            s3Client.putObject(putObjectRequest, RequestBody.fromInputStream(file.getInputStream(), file.getSize()));
-            
+            PutObjectResponse putResponse = s3Client.putObject(
+                putObjectRequest,
+                RequestBody.fromInputStream(file.getInputStream(), file.getSize())
+            );
+
+            // Upsert S3Object record in DB
+            upsertS3Object(key, file, putResponse);
+
             log.info("Uploaded file to S3: {}", key);
             return key;
         } catch (S3Exception e) {
-            log.error("Failed to upload file to S3: {}", e.getMessage());
-            throw new RuntimeException("Failed to upload file: " + e.getMessage());
+            var err = e.awsErrorDetails();
+            log.error("Failed to upload file to S3: status={}, code={}, message={}", e.statusCode(), err != null ? err.errorCode() : "null", err != null ? err.errorMessage() : e.getMessage());
+            throw new RuntimeException("Failed to upload file: " + (err != null ? err.errorMessage() : e.getMessage()));
+        }
+    }
+
+    private void upsertS3Object(String key, MultipartFile file, PutObjectResponse putResponse) {
+        try {
+            Optional<S3Object> existing = s3ObjectRepository.findByBucketAndS3Key(bucketName, key);
+            S3Object s3Object = existing.orElse(new S3Object());
+
+            s3Object.setBucket(bucketName);
+            s3Object.setS3Key(key);
+            s3Object.setSizeBytes(file.getSize());
+            s3Object.setContentType(file.getContentType());
+            s3Object.setEtag(putResponse.eTag());
+            s3Object.setIsDeleted(false);
+            s3Object.setDeletedAt(null);
+            if (existing.isEmpty()) {
+                s3Object.setCreatedAt(Instant.now());
+            }
+            s3Object.setUploadedAt(Instant.now());
+
+            s3ObjectRepository.save(s3Object);
+            log.debug("Upserted S3Object record for key: {}", key);
+        } catch (Exception e) {
+            log.error("Failed to upsert S3Object record for key: {}, error: {}", key, e.getMessage());
         }
     }
     
@@ -58,8 +108,14 @@ public class S3Service {
      * Upload file with auto-generated key (timestamp-based)
      */
     public String uploadFile(MultipartFile file) throws IOException {
+        if (file.getSize() > maxFileSize) {
+            throw new RuntimeException("File size exceeds maximum allowed: " + maxFileSize + " bytes");
+        }
+
         String timestamp = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMdd_HHmmss"));
-        String originalFilename = file.getOriginalFilename();
+        String originalFilename = file.getOriginalFilename() != null
+            ? file.getOriginalFilename().replaceAll("[^a-zA-Z0-9_\\-\\.]", "_")
+            : "unknown";
         String key = String.format("uploads/%s_%s", timestamp, originalFilename);
         return uploadFile(key, file);
     }
@@ -79,8 +135,9 @@ public class S3Service {
             log.info("Uploaded file to S3: {}", key);
             return key;
         } catch (S3Exception e) {
-            log.error("Failed to upload file to S3: {}", e.getMessage());
-            throw new RuntimeException("Failed to upload file: " + e.getMessage());
+            var err = e.awsErrorDetails();
+            log.error("Failed to upload file to S3: status={}, code={}, message={}", e.statusCode(), err != null ? err.errorCode() : "null", err != null ? err.errorMessage() : e.getMessage());
+            throw new RuntimeException("Failed to upload file: " + (err != null ? err.errorMessage() : e.getMessage()));
         }
     }
     
@@ -97,6 +154,25 @@ public class S3Service {
             return s3Client.getObject(getObjectRequest);
         } catch (S3Exception e) {
             log.error("Failed to download file from S3: {}", e.getMessage());
+            throw new RuntimeException("Failed to download file: " + e.getMessage());
+        }
+    }
+
+    /**
+     * Download file with HTTP Range support (for partial content / 206 responses).
+     * Returns the S3 response stream which includes metadata like content length.
+     */
+    public ResponseInputStream<GetObjectResponse> downloadFileRange(String key, String range) {
+        try {
+            GetObjectRequest.Builder builder = GetObjectRequest.builder()
+                    .bucket(bucketName)
+                    .key(key);
+            if (range != null && !range.isEmpty()) {
+                builder.range(range);
+            }
+            return s3Client.getObject(builder.build());
+        } catch (S3Exception e) {
+            log.error("Failed to download file range from S3: {}", e.getMessage());
             throw new RuntimeException("Failed to download file: " + e.getMessage());
         }
     }
