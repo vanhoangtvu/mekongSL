@@ -17,7 +17,7 @@ export type RenderedLayer = {
 };
 
 export function useS3DatasetLayers(
-  appliedDatasets: string[] | undefined,
+  appliedDatasets: Array<{ id: string; type: string }> | undefined,
   mapRef: React.MutableRefObject<Map | null>
 ) {
   const layerRefs = useRef<Record<string, WebGLTileLayer>>({});
@@ -26,7 +26,8 @@ export function useS3DatasetLayers(
   // ── Applied datasets: smart diff — keep existing, remove stale, fetch new ──
   useEffect(() => {
     console.warn("[AppliedDatasets] effect triggered with:", appliedDatasets);
-    const next = new Set(appliedDatasets ?? []);
+    const filtered = (appliedDatasets ?? []).filter((d) => d.type === "raster").map((d) => d.id);
+    const next = new Set(filtered);
     const prevKeys = Object.keys(renderedLayers);
     const prev = new Set(prevKeys);
     const toRemove = prevKeys.filter((id) => !next.has(id));

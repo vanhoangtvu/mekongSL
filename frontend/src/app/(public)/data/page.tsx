@@ -216,7 +216,6 @@ function S3FlatFileList({ prefix, onPreviewFile }: { prefix: string; onPreviewFi
     setError('');
     try {
       const data = await listS3Files(prefix);
-      // Sort by lastModified desc by default (newest uploads first)
       data.sort((a, b) => {
         const dateA = a.lastModified ? new Date(a.lastModified).getTime() : 0;
         const dateB = b.lastModified ? new Date(b.lastModified).getTime() : 0;
@@ -273,6 +272,15 @@ function S3FlatFileList({ prefix, onPreviewFile }: { prefix: string; onPreviewFi
     return Number.isNaN(d.getTime()) ? dateStr : d.toLocaleString('vi-VN');
   };
 
+  const getFileIcon = (key: string) => {
+    const ext = key.substring(key.lastIndexOf('.')).toLowerCase();
+    if (['.tif', '.tiff'].includes(ext)) return { icon: Layers, color: '#0d6efd', type: 'Raster' };
+    if (['.geojson', '.kml', '.shp', '.gpkg'].includes(ext)) return { icon: MapPin, color: '#198754', type: 'Vector' };
+    if (ext === '.csv') return { icon: FileSpreadsheet, color: '#6f42c1', type: 'CSV' };
+    if (['.png', '.jpg', '.jpeg', '.gif'].includes(ext)) return { icon: FileCode, color: '#fd7e14', type: 'Image' };
+    return { icon: FileCode, color: 'var(--text-muted)', type: ext || 'File' };
+  };
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px' }}>
@@ -280,7 +288,7 @@ function S3FlatFileList({ prefix, onPreviewFile }: { prefix: string; onPreviewFi
           <Search size={16} style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
           <input
             type="text"
-            placeholder="Tìm kiếm theo đường dẫn, tên tệp..."
+            placeholder="Tìm kiếm tên tệp..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             style={{
@@ -325,76 +333,88 @@ function S3FlatFileList({ prefix, onPreviewFile }: { prefix: string; onPreviewFi
       )}
 
       <div style={{ overflowX: 'auto', borderRadius: 'var(--radius-lg)', border: '1px solid var(--border)' }}>
-        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.9rem', textAlign: 'left' }}>
+        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.88rem', textAlign: 'left' }}>
           <thead>
             <tr style={{ background: 'var(--surface-strong)', borderBottom: '1px solid var(--border)' }}>
-              <th style={{ padding: '12px 16px', color: 'var(--text-muted)', fontWeight: '600' }}>Đường dẫn S3</th>
-              <th style={{ padding: '12px 16px', color: 'var(--text-muted)', fontWeight: '600', width: '120px' }}>Kích thước</th>
-              <th style={{ padding: '12px 16px', color: 'var(--text-muted)', fontWeight: '600', width: '180px' }}>Ngày tải lên</th>
-              <th style={{ padding: '12px 16px', color: 'var(--text-muted)', fontWeight: '600', width: '100px', textAlign: 'center' }}>Thao tác</th>
+              <th style={{ padding: '12px 16px', color: 'var(--text-muted)', fontWeight: '600', width: '50px' }}>Loại</th>
+              <th style={{ padding: '12px 16px', color: 'var(--text-muted)', fontWeight: '600' }}>Tên tệp tin</th>
+              <th style={{ padding: '12px 16px', color: 'var(--text-muted)', fontWeight: '600', width: '100px' }}>Kích thước</th>
+              <th style={{ padding: '12px 16px', color: 'var(--text-muted)', fontWeight: '600', width: '160px' }}>Ngày tải lên</th>
+              <th style={{ padding: '12px 16px', color: 'var(--text-muted)', fontWeight: '600', width: '90px', textAlign: 'center' }}>Thao tác</th>
             </tr>
           </thead>
           <tbody>
             {loading ? (
               <tr>
-                <td colSpan={4} style={{ padding: '32px', textAlign: 'center', color: 'var(--text-muted)' }}>
+                <td colSpan={5} style={{ padding: '32px', textAlign: 'center', color: 'var(--text-muted)' }}>
                   <RefreshCw size={24} className="animate-spin" style={{ margin: '0 auto 12px auto' }} />
-                  Đang tải danh sách tệp tin...
+                  <p style={{ margin: 0, fontSize: '0.9rem' }}>Đang tải danh sách tệp tin...</p>
                 </td>
               </tr>
             ) : filteredFiles.length === 0 ? (
               <tr>
-                <td colSpan={4} style={{ padding: '32px', textAlign: 'center', color: 'var(--text-muted)' }}>
-                  Không tìm thấy tệp tin nào đã tải lên.
+                <td colSpan={5} style={{ padding: '40px', textAlign: 'center', color: 'var(--text-muted)' }}>
+                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '8px' }}>
+                    <FileCode size={36} color="var(--border)" />
+                    <p style={{ margin: 0, fontWeight: '500', fontSize: '0.95rem' }}>Chưa có tệp tin nào</p>
+                    <p style={{ margin: 0, fontSize: '0.82rem' }}>Tải tệp lên để bắt đầu</p>
+                  </div>
                 </td>
               </tr>
             ) : (
-              filteredFiles.map((file) => (
-                <tr key={file.key} style={{ borderBottom: '1px solid var(--border)' }} className="hover-bg-surface-strong">
-                  <td 
-                    onClick={() => onPreviewFile?.(file)}
-                    style={{ 
-                      padding: '12px 16px', 
-                      fontFamily: 'monospace', 
-                      color: '#38bdf8', 
-                      wordBreak: 'break-all',
-                      cursor: onPreviewFile ? 'pointer' : 'default',
-                      textDecoration: onPreviewFile ? 'underline' : 'none'
-                    }}
-                    title={onPreviewFile ? "Click để xem trước tệp tin" : undefined}
-                  >
-                    {file.key}
-                  </td>
-                  <td style={{ padding: '12px 16px', color: 'var(--text)' }}>
-                    {formatBytes(file.size)}
-                  </td>
-                  <td style={{ padding: '12px 16px', color: 'var(--text-muted)' }}>
-                    {formatDate(file.lastModified)}
-                  </td>
-                  <td style={{ padding: '12px 16px', textAlign: 'center' }}>
-                    <div style={{ display: 'flex', justifyContent: 'center', gap: '8px' }}>
-                      <button
-                        onClick={() => void handleDownload(file.key)}
-                        style={{ border: 'none', background: 'none', cursor: 'pointer', color: 'var(--accent)', padding: '6px', borderRadius: '4px' }}
-                        className="hover-bg-accent-10"
-                        title="Tải xuống"
-                      >
-                        <Download size={16} />
-                      </button>
-                      {isAdmin && (
+              filteredFiles.map((file) => {
+                const { icon: FileIcon, color, type } = getFileIcon(file.key);
+                const filename = file.key.split('/').pop() || file.key;
+                return (
+                  <tr key={file.key} style={{ borderBottom: '1px solid var(--border)' }} className="hover-bg-surface-strong">
+                    <td style={{ padding: '10px 16px', textAlign: 'center' }}>
+                      <span style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: '32px', height: '32px', borderRadius: '8px', background: `${color}12`, color }}>
+                        <FileIcon size={16} />
+                      </span>
+                    </td>
+                    <td 
+                      onClick={() => onPreviewFile?.(file)}
+                      style={{ 
+                        padding: '10px 16px',
+                        cursor: onPreviewFile ? 'pointer' : 'default',
+                      }}
+                    >
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                        <span style={{ color: 'var(--text)', fontWeight: '500', fontSize: '0.9rem' }}>{filename}</span>
+                        <span style={{ color: 'var(--text-muted)', fontSize: '0.75rem', fontFamily: 'monospace' }}>{file.key}</span>
+                      </div>
+                    </td>
+                    <td style={{ padding: '10px 16px', color: 'var(--text)', fontSize: '0.85rem', whiteSpace: 'nowrap' }}>
+                      {formatBytes(file.size)}
+                    </td>
+                    <td style={{ padding: '10px 16px', color: 'var(--text-muted)', fontSize: '0.82rem', whiteSpace: 'nowrap' }}>
+                      {formatDate(file.lastModified)}
+                    </td>
+                    <td style={{ padding: '10px 16px', textAlign: 'center' }}>
+                      <div style={{ display: 'flex', justifyContent: 'center', gap: '6px' }}>
                         <button
-                          onClick={() => void handleDelete(file.key)}
-                          style={{ border: 'none', background: 'none', cursor: 'pointer', color: '#dc3545', padding: '6px', borderRadius: '4px' }}
-                          className="hover-bg-danger-10"
-                          title="Xóa tệp"
+                          onClick={() => void handleDownload(file.key)}
+                          style={{ border: 'none', background: 'none', cursor: 'pointer', color: 'var(--accent)', padding: '6px', borderRadius: '6px' }}
+                          className="hover-bg-accent-10"
+                          title="Tải xuống"
                         >
-                          <Trash2 size={16} />
+                          <Download size={15} />
                         </button>
-                      )}
-                    </div>
-                  </td>
-                </tr>
-              ))
+                        {isAdmin && (
+                          <button
+                            onClick={() => void handleDelete(file.key)}
+                            style={{ border: 'none', background: 'none', cursor: 'pointer', color: '#dc3545', padding: '6px', borderRadius: '6px' }}
+                            className="hover-bg-danger-10"
+                            title="Xóa tệp"
+                          >
+                            <Trash2 size={15} />
+                          </button>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })
             )}
           </tbody>
         </table>
@@ -1517,19 +1537,38 @@ export default function DataPage() {
     }
   };
 
+  const autoDetectType = (fileName: string) => {
+    const ext = fileName.substring(fileName.lastIndexOf('.')).toLowerCase();
+    const rasterExts = ['.tif', '.tiff', '.cog', '.png', '.jpg', '.jpeg', '.rst'];
+    const vectorExts = ['.geojson', '.shp', '.kml', '.gpkg', '.zip', '.vtc', '.vct'];
+    
+    if (uploadGroup === 'gis') {
+      if (rasterExts.includes(ext)) {
+        setGisDataType('raster');
+      } else if (vectorExts.includes(ext)) {
+        setGisDataType('vector');
+      }
+    }
+  };
+
   const validateFile = (file: File): { valid: boolean; message?: string } => {
     const ext = file.name.substring(file.name.lastIndexOf('.')).toLowerCase();
     
     if (uploadGroup === 'gis') {
       if (gisDataType === 'raster') {
-        const allowed = ['.tif', '.tiff', '.cog', '.png', '.jpg', '.jpeg'];
+        const allowed = ['.tif', '.tiff', '.cog', '.png', '.jpg', '.jpeg', '.rst'];
         if (!allowed.includes(ext)) {
           return { valid: false, message: `File Raster không hợp lệ. Chỉ cho phép các định dạng: ${allowed.join(', ')}` };
         }
-      } else {
-        const allowed = ['.geojson', '.shp', '.kml', '.gpkg', '.zip'];
+      } else if (gisDataType === 'vector') {
+        const allowed = ['.geojson', '.shp', '.kml', '.gpkg', '.zip', '.vtc', '.vct'];
         if (!allowed.includes(ext)) {
           return { valid: false, message: `File Vector không hợp lệ. Chỉ cho phép các định dạng: ${allowed.join(', ')}` };
+        }
+      } else {
+        const allowed = ['.tif', '.tiff', '.cog', '.png', '.jpg', '.jpeg', '.rst', '.geojson', '.shp', '.kml', '.gpkg', '.zip', '.vtc', '.vct'];
+        if (!allowed.includes(ext)) {
+          return { valid: false, message: `File GIS không hợp lệ. Chỉ cho phép các định dạng: ${allowed.join(', ')}` };
         }
       }
     } else {
@@ -2518,6 +2557,7 @@ export default function DataPage() {
                       const file = e.dataTransfer.files[0];
                       const val = validateFile(file);
                       if (val.valid) {
+                        autoDetectType(file.name);
                         setUploadFile(file);
                         setUploadStatus('idle');
                       } else {
@@ -2535,8 +2575,10 @@ export default function DataPage() {
                     accept={
                       uploadGroup === 'gis'
                         ? gisDataType === 'raster'
-                          ? '.tif,.tiff,.cog,.png,.jpg,.jpeg'
-                          : '.geojson,.shp,.kml,.gpkg,.zip'
+                          ? '.tif,.tiff,.cog,.png,.jpg,.jpeg,.rst'
+                          : gisDataType === 'vector'
+                            ? '.geojson,.shp,.kml,.gpkg,.zip,.vtc,.vct'
+                            : '.tif,.tiff,.cog,.png,.jpg,.jpeg,.rst,.geojson,.shp,.kml,.gpkg,.zip,.vtc,.vct'
                         : '.csv'
                     }
                     onChange={(e) => {
@@ -2544,6 +2586,7 @@ export default function DataPage() {
                         const file = e.target.files[0];
                         const val = validateFile(file);
                         if (val.valid) {
+                          autoDetectType(file.name);
                           setUploadFile(file);
                           setUploadStatus('idle');
                         } else {
@@ -2566,8 +2609,10 @@ export default function DataPage() {
                     <p style={{ margin: '0', fontSize: '0.8rem', color: 'var(--text-muted)' }}>
                       {uploadGroup === 'gis'
                         ? gisDataType === 'raster'
-                          ? 'Raster: .tif, .tiff, .cog, .png, .jpg, .jpeg (Tối đa 100MB)'
-                          : 'Vector: .geojson, .shp, .kml, .gpkg, .zip (Tối đa 100MB)'
+                          ? 'Raster: .tif, .tiff, .cog, .png, .jpg, .jpeg, .rst (Tối đa 100MB)'
+                          : gisDataType === 'vector'
+                            ? 'Vector: .geojson, .shp, .kml, .gpkg, .zip, .vtc, .vct (Tối đa 100MB)'
+                            : 'Hỗ trợ: Raster (.tif, .rst...) và Vector (.geojson, .vtc...) (Tối đa 100MB)'
                         : 'Bảng dữ liệu: .csv (Tối đa 100MB)'}
                     </p>
                   </div>

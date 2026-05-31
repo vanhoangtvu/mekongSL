@@ -14,7 +14,7 @@ type GeoSearchSidebarProps = {
   onEndDateTimeChange: (value: string) => void;
   ecowittEnabled?: boolean;
   onEcowittToggle?: (enabled: boolean) => void;
-  onApply?: (datasets: string[]) => void;
+  onApply?: (datasets: Array<{ id: string; type: "raster" | "vector" }>) => void;
 };
 
 type SearchTabsProps = {
@@ -69,8 +69,10 @@ export function GeoSearchSidebar({
   onApply,
 }: GeoSearchSidebarProps) {
   const [expandedCategories, setExpandedCategories] = useState<Set<string>>(new Set(["landsat"]));
-  const [selectedDatasets, setSelectedDatasets] = useState<Set<string>>(new Set());
-  const [appliedDatasets, setAppliedDatasets] = useState<Set<string>>(new Set());
+  const [selectedLayers, setSelectedLayers] = useState<Record<string, "raster" | "vector">>({});
+  const [showTypePicker, setShowTypePicker] = useState<string | null>(null);
+  const [appliedCount, setAppliedCount] = useState(0);
+  const [selectionOrder, setSelectionOrder] = useState<string[]>([]);
 
   const toggleCategory = (categoryId: string) => {
     setExpandedCategories((prev) => {
@@ -84,36 +86,83 @@ export function GeoSearchSidebar({
     });
   };
 
-  const toggleDataset = (datasetId: string) => {
-    setSelectedDatasets((prev) => {
-      const next = new Set(prev);
-      if (next.has(datasetId)) {
-        next.delete(datasetId);
-      } else {
-        next.add(datasetId);
-      }
-      return next;
-    });
+  /** Check if a parent has all its children selected */
+  const getParentState = (categoryId: string): "all" | "some" | "none" => {
+    const cat = DATASETS.find((c) => c.id === categoryId);
+    if (!cat?.children || cat.children.length === 0) return selectedLayers[categoryId] ? "all" : "none";
+    const checked = cat.children.filter((c) => selectedLayers[c.id]).length;
+    if (checked === 0) return "none";
+    if (checked === cat.children.length) return "all";
+    return "some";
   };
 
-  const countSelected = (datasets: Set<string>) => {
+  const toggleDataset = (datasetId: string) => {
+    // If this ID is a parent category with children → toggle all children, skip parent itself
+    const category = DATASETS.find((c) => c.id === datasetId);
+    if (category?.children) {
+      const allChildIds = category.children.map((c) => c.id);
+      const state = getParentState(datasetId);
+      if (state === "all") {
+        setSelectedLayers((prev) => {
+          const next = { ...prev };
+          for (const cid of allChildIds) delete next[cid];
+          return next;
+        });
+        setSelectionOrder((prev) => prev.filter((id) => !allChildIds.includes(id)));
+      } else {
+        setExpandedCategories((prev) => { const n = new Set(prev); n.add(datasetId); return n; });
+        setSelectedLayers((prev) => {
+          const next = { ...prev };
+          for (const cid of allChildIds) next[cid] = "raster";
+          return next;
+        });
+        setSelectionOrder((prev) => {
+          const existing = prev.filter((id) => !allChildIds.includes(id));
+          return [...existing, ...allChildIds];
+        });
+      }
+      return;
+    }
+
+    if (selectedLayers[datasetId]) {
+      setSelectedLayers((prev) => {
+        const next = { ...prev };
+        delete next[datasetId];
+        return next;
+      });
+      setSelectionOrder((prev) => prev.filter((id) => id !== datasetId));
+    } else {
+      setShowTypePicker(datasetId);
+      setSelectedLayers((prev) => ({ ...prev, [datasetId]: "raster" }));
+      setSelectionOrder((prev) => [...prev.filter((id) => id !== datasetId), datasetId]);
+    }
+  };
+
+  const selectLayerType = (datasetId: string, type: "raster" | "vector") => {
+    setSelectedLayers((prev) => ({ ...prev, [datasetId]: type }));
+    setShowTypePicker(null);
+  };
+
+  const countSelected = () => {
     let count = 0;
     DATASETS.forEach((cat) => {
       if (cat.children) {
         cat.children.forEach((child) => {
-          if (datasets.has(child.id)) count++;
+          if (selectedLayers[child.id]) count++;
         });
       } else {
-        if (datasets.has(cat.id)) count++;
+        if (selectedLayers[cat.id]) count++;
       }
     });
     return count;
   };
 
   const applyDatasets = () => {
-    const selected = new Set(selectedDatasets);
-    setAppliedDatasets(selected);
-    onApply?.(Array.from(selected));
+    const list = selectionOrder
+      .filter((id) => selectedLayers[id])
+      .map((id) => ({ id, type: selectedLayers[id] }));
+    setAppliedCount(list.length);
+    onApply?.(list);
   };
 
   return (
@@ -197,12 +246,12 @@ export function GeoSearchSidebar({
           <section className="geo-block">
             <div className="geo-block-head">
               <h3>Data Sets</h3>
-              <span>{countSelected(selectedDatasets)} selected</span>
+              <span>{countSelected()} selected</span>
             </div>
             <div className="geo-dataset-tree">
               {DATASETS.map((category) => (
                 <div key={category.id} className="geo-dataset-category">
-                  <div className="geo-dataset-category-header">
+                  <div className="geo-dataset-category-header" style={{ position: "relative" }}>
                     {category.children ? (
                       <button
                         className="geo-dataset-toggle"
@@ -228,26 +277,56 @@ export function GeoSearchSidebar({
                     <label className="geo-dataset-label">
                       <input
                         type="checkbox"
-                        checked={selectedDatasets.has(category.id)}
+                        checked={getParentState(category.id) === "all"}
                         onChange={() => toggleDataset(category.id)}
+                        ref={(el) => {
+                          if (el) el.indeterminate = getParentState(category.id) === "some";
+                        }}
                       />
                       <span className="geo-dataset-name">{category.name}</span>
                     </label>
+                    {/* Only GIS leaf datasets need type picker/badge */}
+                    {!category.children && category.gisData !== false && (
+                      <div className="geo-layer-type-col">
+                        {showTypePicker === category.id ? (
+                          <div className="geo-layer-type-picker">
+                            <button className={`geo-layer-type-opt${selectedLayers[category.id] === "raster" ? " is-selected" : ""}`} onClick={() => selectLayerType(category.id, "raster")} type="button">Raster</button>
+                            <button className={`geo-layer-type-opt${selectedLayers[category.id] === "vector" ? " is-selected" : ""}`} onClick={() => selectLayerType(category.id, "vector")} type="button">Vector</button>
+                          </div>
+                        ) : selectedLayers[category.id] ? (
+                          <span className="geo-layer-type-badge" onClick={() => setShowTypePicker(category.id)}>{selectedLayers[category.id]}</span>
+                        ) : null}
+                      </div>
+                    )}
                   </div>
 
                   {category.children && expandedCategories.has(category.id) && (
                     <div className="geo-dataset-children">
                       {category.children.map((child) => (
-                        <label key={child.id} className="geo-dataset-child">
-                          <input
-                            type="checkbox"
-                            checked={selectedDatasets.has(child.id)}
-                            onChange={() => toggleDataset(child.id)}
-                          />
-                          <span className="geo-dataset-child-content">
-                            <span className="geo-dataset-child-name">{child.name}</span>
-                          </span>
-                        </label>
+                        <div key={child.id} className="geo-dataset-child-wrap">
+                          <label className="geo-dataset-child">
+                            <input
+                              type="checkbox"
+                              checked={!!selectedLayers[child.id]}
+                              onChange={() => toggleDataset(child.id)}
+                            />
+                            <span className="geo-dataset-child-content">
+                              <span className="geo-dataset-child-name">{child.name}</span>
+                            </span>
+                          </label>
+                          {child.gisData !== false && (
+                            <div className="geo-layer-type-col">
+                              {showTypePicker === child.id ? (
+                                <div className="geo-layer-type-picker">
+                                  <button className={`geo-layer-type-opt${selectedLayers[child.id] === "raster" ? " is-selected" : ""}`} onClick={() => selectLayerType(child.id, "raster")} type="button">Raster</button>
+                                  <button className={`geo-layer-type-opt${selectedLayers[child.id] === "vector" ? " is-selected" : ""}`} onClick={() => selectLayerType(child.id, "vector")} type="button">Vector</button>
+                                </div>
+                              ) : selectedLayers[child.id] ? (
+                                <span className="geo-layer-type-badge" onClick={() => setShowTypePicker(child.id)}>{selectedLayers[child.id]}</span>
+                              ) : null}
+                            </div>
+                          )}
+                        </div>
                       ))}
                     </div>
                   )}
@@ -310,7 +389,7 @@ export function GeoSearchSidebar({
               <ul>
                 <li>Location: Vinh Long</li>
                 <li>Date Range: 2026-05-01 to 2026-05-24</li>
-                <li>Data Sets: {countSelected(appliedDatasets)} applied</li>
+                <li>Data Sets: {appliedCount} applied</li>
                 <li>Cloud Cover: ≤ 35%</li>
               </ul>
             </div>

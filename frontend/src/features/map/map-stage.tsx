@@ -72,13 +72,22 @@ function parseEcowittPopupData(ecowittData: Record<string, unknown>): EcowittPop
 // Parent categories with children → each child becomes one layer entry.
 // Parent categories without children → the parent itself becomes a layer entry.
 // ---------------------------------------------------------------------------
-const ALL_AVAILABLE_LAYERS = DATASETS.flatMap((cat) =>
+type PlayerLayer = {
+  id: string;
+  name: string;
+  categoryId: string;
+  categoryName: string;
+  added: boolean;
+  type?: string;
+};
+
+const ALL_AVAILABLE_LAYERS: PlayerLayer[] = DATASETS.flatMap((cat) =>
   cat.children
     ? cat.children.map((child) => ({
         id: child.id,
         name: child.name,
-        categoryId: cat.id,       // used for CSS class: map-player-item-type--{categoryId}
-        categoryName: cat.name,   // displayed in badge
+        categoryId: cat.id,
+        categoryName: cat.name,
         added: false,
       }))
     : [{
@@ -252,7 +261,7 @@ type MapStageProps = {
   startDateTime: string;
   endDateTime: string;
   ecowittEnabled?: boolean;
-  appliedDatasets?: string[];
+  appliedDatasets?: Array<{ id: string; type: string }>;
 };
 
 function parseDateTimeLocal(value: string) {
@@ -408,10 +417,62 @@ export function MapStage({ startDateTime, endDateTime, ecowittEnabled, appliedDa
   const [showUnitMenu, setShowUnitMenu] = useState(false);
   const [hoverTime, setHoverTime] = useState<string | null>(null);
   const [tooltipPos, setHoverPos] = useState({ x: 0, y: 0 });
-  const [playerLayers, setPlayerLayers] = useState(
-    () => ALL_AVAILABLE_LAYERS.map((l) => ({ ...l }))
-  );  // Which layer id is waiting for layer-type selection
+  const [playerLayers, setPlayerLayers] = useState<PlayerLayer[]>(() =>
+    ALL_AVAILABLE_LAYERS.map((l) => ({ ...l }))
+  );
   const [pendingLayerId, setPendingLayerId] = useState<string | null>(null);
+
+  // Sync playerLayers from appliedDatasets: selected ones on top (reversed order = last=first), unselected below
+  useEffect(() => {
+    const selectedLookup = new Set((appliedDatasets ?? []).map((ds) => ds.id));
+    const selected: PlayerLayer[] = [];
+    const unselected: PlayerLayer[] = [];
+    // First build selected in reverse click order (last clicked = top)
+    const reversed = [...(appliedDatasets ?? [])].reverse();
+    for (const ds of reversed) {
+      const child = ALL_AVAILABLE_LAYERS.find((l) => l.id === ds.id);
+      if (child) {
+        selected.push({ ...child, added: true, type: ds.type });
+      } else {
+        const cat = DATASETS.find((c) => c.id === ds.id || c.children?.some((ch) => ch.id === ds.id));
+        const item = cat?.children?.find((ch) => ch.id === ds.id) || cat;
+        selected.push({
+          id: ds.id,
+          name: item?.name || ds.id,
+          categoryId: cat?.id || ds.id,
+          categoryName: cat?.name || ds.id,
+          added: true,
+          type: ds.type,
+        });
+      }
+    }
+    // Then append unselected in original ALL_AVAILABLE_LAYERS order
+    for (const al of ALL_AVAILABLE_LAYERS) {
+      if (!selectedLookup.has(al.id)) {
+        unselected.push({ ...al, added: false });
+      }
+    }
+    setPlayerLayers([...selected, ...unselected]);
+  }, [appliedDatasets]);
+
+  // Sync map layer z-order and visibility with playerLayers
+  useEffect(() => {
+    const layers = layerRefs.current;
+    playerLayers.forEach((pl) => {
+      const olLayer = layers[pl.id];
+      if (olLayer) {
+        olLayer.setVisible(pl.added);
+      }
+    });
+    // z-order: first in list = on top
+    playerLayers.forEach((pl, idx) => {
+      const olLayer = layers[pl.id];
+      if (olLayer) {
+        const z = 100 + (playerLayers.length - idx);
+        olLayer.setZIndex(z);
+      }
+    });
+  }, [playerLayers, renderedLayers]);
 
   // Playback feature state
   const [showPlaybackPicker, setShowPlaybackPicker] = useState(false);
@@ -923,6 +984,11 @@ export function MapStage({ startDateTime, endDateTime, ecowittEnabled, appliedDa
                     {/* Layer name */}
                     <span className="map-player-item-name">{layer.name}</span>
 
+                    {/* Layer type badge */}
+                    {layer.type && (
+                      <span className="map-player-item-type-badge">{layer.type}</span>
+                    )}
+
                     {/* Add / Added button */}
                     {layer.added ? (
                       <button
@@ -940,7 +1006,14 @@ export function MapStage({ startDateTime, endDateTime, ecowittEnabled, appliedDa
                         className={`map-player-item-tick ${pendingLayerId === layer.id ? "is-pending" : ""}`}
                         title="Add layer"
                         type="button"
-                        onClick={() => setPendingLayerId(pendingLayerId === layer.id ? null : layer.id)}
+                        onClick={() => {
+                          if (layer.type) {
+                            // Already has type from sidebar — add directly
+                            confirmAddLayer(layer.id, layer.type as "raster" | "vector");
+                          } else {
+                            setPendingLayerId(pendingLayerId === layer.id ? null : layer.id);
+                          }
+                        }}
                       >
                         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
                           <line x1="12" y1="5" x2="12" y2="19"/>

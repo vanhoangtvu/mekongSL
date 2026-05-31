@@ -5,6 +5,7 @@ export type DatasetItem = {
   children?: DatasetItem[];
   source?: string;
   scale?: string;
+  gisData?: boolean;
 };
 
 export const DATASETS: DatasetItem[] = [
@@ -72,10 +73,10 @@ export const DATASETS: DatasetItem[] = [
     name: "Weather",
     slug: "weather",
     children: [
-      { id: "weather-rain", name: "Rain Monitoring", slug: "rain-monitoring" },
-      { id: "weather-wind", name: "Wind", slug: "wind" },
-      { id: "weather-humidity", name: "Humidity", slug: "humidity" },
-      { id: "weather-sun", name: "Sun Radiation", slug: "sun-radiation" },
+      { id: "weather-rain", name: "Rain Monitoring", slug: "rain-monitoring", gisData: false },
+      { id: "weather-wind", name: "Wind", slug: "wind", gisData: false },
+      { id: "weather-humidity", name: "Humidity", slug: "humidity", gisData: false },
+      { id: "weather-sun", name: "Sun Radiation", slug: "sun-radiation", gisData: false },
     ],
   },
   {

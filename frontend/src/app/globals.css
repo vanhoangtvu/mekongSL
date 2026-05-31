@@ -1228,6 +1228,12 @@ html[data-theme="light"] .geo-settings-panel {
   line-height: 1.4;
 }
 
+.geo-dataset-child-wrap {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
 .geo-dataset-children {
   display: flex;
   flex-direction: column;
@@ -1248,6 +1254,8 @@ html[data-theme="light"] .geo-settings-panel {
   cursor: pointer;
   transition: background 120ms ease;
   position: relative;
+  flex: 1;
+  min-width: 0;
 }
 
 .geo-dataset-child::before {
@@ -1341,6 +1349,59 @@ html[data-theme="light"] .geo-settings-panel {
 .geo-action:active {
   transform: translateY(0);
   box-shadow: var(--shadow-sm);
+}
+
+/* Layer type column + picker buttons + badge */
+.geo-layer-type-col {
+  flex-shrink: 0;
+  min-width: 100px;
+  text-align: right;
+  margin-left: auto;
+}
+.geo-layer-type-picker {
+  display: inline-flex;
+  border-radius: 4px;
+  overflow: hidden;
+  border: 1px solid var(--border-color, #334155);
+  background: var(--surface);
+}
+.geo-layer-type-opt {
+  font-size: 0.72rem;
+  padding: 2px 8px;
+  border: none;
+  background: transparent;
+  color: var(--text-secondary, #94a3b8);
+  cursor: pointer;
+  transition: background 0.12s, color 0.12s;
+  line-height: 1.5;
+}
+.geo-layer-type-opt:hover {
+  background: var(--accent, #3b82f6);
+  color: #fff;
+}
+.geo-layer-type-opt.is-selected {
+  background: var(--accent-dim, #1e40af);
+  color: #fff;
+  font-weight: 600;
+}
+.geo-layer-type-badge {
+  display: inline-block;
+  font-size: 0.7rem;
+  padding: 2px 8px;
+  border-radius: 4px;
+  background: var(--accent, #3b82f6);
+  color: #fff;
+  text-transform: uppercase;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+  cursor: pointer;
+  user-select: none;
+  min-width: 40px;
+  text-align: center;
+  line-height: 1.5;
+}
+.geo-layer-type-badge:hover {
+  background: var(--accent-dim, #1e40af);
 }
 
 .geo-map-canvas {
@@ -2369,6 +2430,17 @@ html[data-theme="dark"] .map-player-item-type--ecology       { color: #86efac; b
   overflow: hidden;
   text-overflow: ellipsis;
   min-width: 0;
+}
+.map-player-item-type-badge {
+  flex-shrink: 0;
+  font-size: 0.65rem;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: var(--accent, #3b82f6);
+  color: #fff;
+  text-transform: uppercase;
+  font-weight: 600;
+  letter-spacing: 0.5px;
 }
 
 /* The "+" / "✓" tick button */

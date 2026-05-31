@@ -16,9 +16,9 @@ export default function PublicHomePage() {
   const [startDateTime, setStartDateTime] = useState("2026-05-01T00:00");
   const [endDateTime, setEndDateTime] = useState("2026-05-24T23:59");
   const [ecowittEnabled, setEcowittEnabled] = useState(false);
-  const [appliedDatasets, setAppliedDatasets] = useState<string[]>([]);
+  const [appliedDatasets, setAppliedDatasets] = useState<Array<{ id: string; type: string }>>([]);
 
-  const handleApplyDatasets = (datasets: string[]) => {
+  const handleApplyDatasets = (datasets: Array<{ id: string; type: string }>) => {
     setAppliedDatasets(datasets);
   };
 

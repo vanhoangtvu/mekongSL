@@ -284,7 +284,7 @@ public class S3Service {
 
         do {
             listResponse = s3Client.listObjectsV2(listRequest);
-            for (S3Object obj : listResponse.contents()) {
+            for (software.amazon.awssdk.services.s3.model.S3Object obj : listResponse.contents()) {
                 String newKey = obj.key().replaceFirst("^" + oldPrefix.replace("/", "\\/"), newPrefix);
                 s3Client.copyObject(CopyObjectRequest.builder()
                         .sourceBucket(bucketName)
