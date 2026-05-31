@@ -4,7 +4,9 @@
   "type": "module",
   "scripts": {
     "fetch:mekong": "node mekong/fetch-mekong-data.mjs",
-    "fetch:mekong:schedule": "node mekong/run-scheduled-fetch.mjs"
+    "fetch:mekong:schedule": "node mekong/run-scheduled-fetch.mjs",
+    "fetch:ecowitt": "node ecowitt/fetch-ecowitt-data.mjs",
+    "fetch:ecowitt:schedule": "node ecowitt/run-scheduled-fetch.mjs"
   },
   "dependencies": {
     "crypto-js": "^4.2.0",

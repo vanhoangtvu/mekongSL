@@ -15,6 +15,7 @@ export default function PublicHomePage() {
   const [activeTab, setActiveTab] = useState<TabType>("criteria");
   const [startDateTime, setStartDateTime] = useState("2026-05-01T00:00");
   const [endDateTime, setEndDateTime] = useState("2026-05-24T23:59");
+  const [ecowittEnabled, setEcowittEnabled] = useState(false);
 
   return (
     <div className="app-container public-home">
@@ -32,10 +33,12 @@ export default function PublicHomePage() {
               endDateTime={endDateTime}
               onStartDateTimeChange={setStartDateTime}
               onEndDateTimeChange={setEndDateTime}
+              ecowittEnabled={ecowittEnabled}
+              onEcowittToggle={setEcowittEnabled}
             />
           </ResizablePanel>
           <div className="geo-panel">
-            <MapStage startDateTime={startDateTime} endDateTime={endDateTime} />
+            <MapStage startDateTime={startDateTime} endDateTime={endDateTime} ecowittEnabled={ecowittEnabled} />
           </div>
         </div>
       </main>

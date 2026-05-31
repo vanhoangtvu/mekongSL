@@ -18,6 +18,7 @@ import java.io.InputStream;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.stream.Collectors;
 
@@ -143,6 +144,96 @@ public class S3Service {
         }
     }
     
+    /**
+     * List files with delimiter support (folder-like view)
+     */
+    public ListObjectsV2Response listFolder(String prefix) {
+        try {
+            ListObjectsV2Request listRequest = ListObjectsV2Request.builder()
+                    .bucket(bucketName)
+                    .prefix(prefix)
+                    .delimiter("/")
+                    .build();
+
+            return s3Client.listObjectsV2(listRequest);
+        } catch (S3Exception e) {
+            log.error("Failed to list folder from S3: {}", e.getMessage());
+            throw new RuntimeException("Failed to list folder: " + e.getMessage());
+        }
+    }
+
+    /**
+     * Copy file within S3 bucket
+     */
+    public void copyFile(String sourceKey, String destinationKey) {
+        try {
+            CopyObjectRequest copyRequest = CopyObjectRequest.builder()
+                    .sourceBucket(bucketName)
+                    .sourceKey(sourceKey)
+                    .destinationBucket(bucketName)
+                    .destinationKey(destinationKey)
+                    .build();
+
+            s3Client.copyObject(copyRequest);
+            log.info("Copied S3 object from {} to {}", sourceKey, destinationKey);
+        } catch (S3Exception e) {
+            log.error("Failed to copy file in S3: {}", e.getMessage());
+            throw new RuntimeException("Failed to copy file: " + e.getMessage());
+        }
+    }
+
+    /**
+     * Rename file = copy + delete
+     */
+    public void renameFile(String oldKey, String newKey) {
+        copyFile(oldKey, newKey);
+        deleteFile(oldKey);
+        log.info("Renamed S3 object from {} to {}", oldKey, newKey);
+    }
+
+    /**
+     * Rename folder = iterate + copy + delete for each object
+     */
+    public void renameFolder(String oldPrefix, String newPrefix) {
+        if (!oldPrefix.endsWith("/")) oldPrefix = oldPrefix + "/";
+        if (!newPrefix.endsWith("/")) newPrefix = newPrefix + "/";
+
+        ListObjectsV2Request listRequest = ListObjectsV2Request.builder()
+                .bucket(bucketName)
+                .prefix(oldPrefix)
+                .build();
+
+        ListObjectsV2Response listResponse;
+        List<String> keysToDelete = new ArrayList<>();
+
+        do {
+            listResponse = s3Client.listObjectsV2(listRequest);
+            for (S3Object obj : listResponse.contents()) {
+                String newKey = obj.key().replaceFirst("^" + oldPrefix.replace("/", "\\/"), newPrefix);
+                s3Client.copyObject(CopyObjectRequest.builder()
+                        .sourceBucket(bucketName)
+                        .sourceKey(obj.key())
+                        .destinationBucket(bucketName)
+                        .destinationKey(newKey)
+                        .build());
+                keysToDelete.add(obj.key());
+            }
+            listRequest = listRequest.toBuilder()
+                    .continuationToken(listResponse.nextContinuationToken())
+                    .build();
+        } while (listResponse.isTruncated());
+
+        // Delete old objects after all copies succeed
+        for (String key : keysToDelete) {
+            s3Client.deleteObject(DeleteObjectRequest.builder()
+                    .bucket(bucketName)
+                    .key(key)
+                    .build());
+        }
+
+        log.info("Renamed S3 folder from {} to {} ({} objects)", oldPrefix, newPrefix, keysToDelete.size());
+    }
+
     /**
      * Generate file URL
      */

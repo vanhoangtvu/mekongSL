@@ -6,6 +6,7 @@ import com.mekongsaltlab.org.dto.gis.LayerUpdateRequest;
 import com.mekongsaltlab.org.entity.gis.Dataset;
 import com.mekongsaltlab.org.entity.gis.Layer;
 import com.mekongsaltlab.org.entity.gis.enums.DataClassType;
+import com.mekongsaltlab.org.entity.gis.enums.GisDataType;
 import com.mekongsaltlab.org.entity.gis.enums.LayerStatus;
 import com.mekongsaltlab.org.entity.gis.enums.LayerType;
 import com.mekongsaltlab.org.repository.gis.DatasetRepository;
@@ -97,6 +98,9 @@ public class LayerService {
 
         Layer layer = new Layer();
         layer.setDataset(dataset);
+        layer.setCategory(request.getCategory());
+        layer.setYear(request.getYear());
+        layer.setGisDataType(parseGisDataType(request.getGisDataType()));
         layer.setName(request.getName());
         layer.setDescription(request.getDescription());
         layer.setLayerType(parseLayerType(request.getLayerType()));
@@ -119,6 +123,15 @@ public class LayerService {
             return null;
         }
 
+        if (request.getCategory() != null) {
+            layer.setCategory(request.getCategory());
+        }
+        if (request.getYear() != null) {
+            layer.setYear(request.getYear());
+        }
+        if (request.getGisDataType() != null) {
+            layer.setGisDataType(parseGisDataType(request.getGisDataType()));
+        }
         if (request.getName() != null) {
             layer.setName(request.getName());
         }
@@ -222,6 +235,10 @@ public class LayerService {
         response.setCreatedAt(layer.getCreatedAt());
         response.setUpdatedAt(layer.getUpdatedAt());
 
+        response.setCategory(layer.getCategory());
+        response.setYear(layer.getYear());
+        response.setGisDataType(layer.getGisDataType() == null ? null : layer.getGisDataType().name());
+
         response.setBboxMinLon(layer.getMinLon());
         response.setBboxMinLat(layer.getMinLat());
         response.setBboxMaxLon(layer.getMaxLon());
@@ -260,6 +277,13 @@ public class LayerService {
             return LayerStatus.ACTIVE;
         }
         return LayerStatus.valueOf(normalizeEnum(value));
+    }
+
+    private GisDataType parseGisDataType(String value) {
+        if (value == null) {
+            return null;
+        }
+        return GisDataType.valueOf(normalizeEnum(value));
     }
 
     private String normalizeEnum(String value) {

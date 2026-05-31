@@ -1502,7 +1502,7 @@ html[data-theme="dark"] .geo-map-inspector-row.highlighted {
   position: absolute;
   top: 1rem;
   right: 1rem;
-  z-index: 10;
+  z-index: 600;
 }
 
 .map-layer-toggle {
@@ -1574,7 +1574,7 @@ html[data-theme="dark"] .geo-map-inspector-row.highlighted {
   position: absolute;
   bottom: 1.5rem; /* Positioned at bottom right */
   right: 1.5rem;  /* Positioned at bottom right */
-  z-index: 10;
+  z-index: 600;
   display: flex;
   flex-direction: column;
   background: rgba(255, 255, 255, 0.95);
@@ -2133,7 +2133,7 @@ html[data-theme="dark"] .map-timeline-tick::after {
   position: absolute;
   top: 1rem;
   left: 1rem;
-  z-index: 50;
+  z-index: 600;
 }
 
 /* Add Layer Button */
@@ -2316,7 +2316,7 @@ html[data-theme="dark"] .map-player-item:hover {
 .map-player-item-type--flooding      { color: #b91c1c; background: #fee2e2; }
 .map-player-item-type--hydrology     { color: #0369a1; background: #e0f2fe; }
 .map-player-item-type--water-quality { color: #0e7490; background: #cffafe; }
-.map-player-item-type--climate       { color: #c2410c; background: #fff7ed; }
+.map-player-item-type--weather       { color: #c2410c; background: #fff7ed; }
 .map-player-item-type--baseline      { color: #3f6212; background: #ecfccb; }
 .map-player-item-type--ecology       { color: #15803d; background: #dcfce7; }
 
@@ -2325,7 +2325,7 @@ html[data-theme="dark"] .map-player-item-type--admin         { color: #9ca3af; b
 html[data-theme="dark"] .map-player-item-type--flooding      { color: #fca5a5; background: rgba(185, 28, 28, 0.2); }
 html[data-theme="dark"] .map-player-item-type--hydrology     { color: #7dd3fc; background: rgba(3, 105, 161, 0.2); }
 html[data-theme="dark"] .map-player-item-type--water-quality { color: #67e8f9; background: rgba(14, 116, 144, 0.2); }
-html[data-theme="dark"] .map-player-item-type--climate       { color: #fed7aa; background: rgba(194, 65, 12, 0.2); }
+html[data-theme="dark"] .map-player-item-type--weather       { color: #fed7aa; background: rgba(194, 65, 12, 0.2); }
 html[data-theme="dark"] .map-player-item-type--baseline      { color: #bef264; background: rgba(63, 98, 18, 0.2); }
 html[data-theme="dark"] .map-player-item-type--ecology       { color: #86efac; background: rgba(21, 128, 61, 0.2); }
 
@@ -2570,7 +2570,7 @@ html[data-theme="dark"] .map-player-item-type--ecology       { color: #86efac; b
   top: 1rem;
   left: 50%;
   transform: translateX(-50%);
-  z-index: 15;
+  z-index: 600;
   width: min(940px, calc(100vw - 2rem));
   display: flex;
   align-items: center;

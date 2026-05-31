@@ -8,6 +8,9 @@ import java.time.Instant;
 public class LayerResponse {
     private Long id;
     private Long datasetId;
+    private String category;
+    private Integer year;
+    private String gisDataType;
     private String name;
     private String description;
     private String layerType;

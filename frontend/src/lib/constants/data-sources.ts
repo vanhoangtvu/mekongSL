@@ -47,8 +47,8 @@ export function inferDataSourceFromFilename(filename: string): DataSourceKey {
 }
 
 export const ECOWITT_DEVICES = [
-  { id: '281727', name: 'Trạm 281727' },
-  { id: '323414', name: 'EasyWeatherPro-E01304' },
+  { id: '281727', name: 'EasyWeatherPro-E013B9', lat: 9.789218, lng: 106.273298 },
+  { id: '323414', name: 'EasyWeatherPro-E01304 Hưng Mỹ', lat: 9.902343, lng: 106.361732 },
 ] as const;
 
-export type EcowittDevice = { id: string; name: string };
+export type EcowittDevice = { id: string; name: string; lat?: number; lng?: number };

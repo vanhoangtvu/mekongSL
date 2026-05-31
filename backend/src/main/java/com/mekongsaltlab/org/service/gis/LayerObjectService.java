@@ -26,6 +26,7 @@ import com.mekongsaltlab.org.entity.gis.LayerFolder;
 import org.springframework.web.multipart.MultipartFile;
 import java.io.IOException;
 
+
 @Service
 @RequiredArgsConstructor
 public class LayerObjectService {
@@ -35,6 +36,7 @@ public class LayerObjectService {
     private final LayerRepository layerRepository;
     private final LayerFolderRepository folderRepository;
     private final S3Service s3Service;
+    private final StoragePathService storagePathService;
 
     @Value("${s3.bucket}")
     private String bucketName;
@@ -56,11 +58,10 @@ public class LayerObjectService {
             }
         }
 
-        String safeCategory = sanitizePathSegment(category != null && !category.isEmpty() ? category : "default");
         String originalFilename = file.getOriginalFilename() != null ? file.getOriginalFilename() : "unknown";
         String safeFilename = sanitizeFilename(originalFilename);
 
-        String s3Key = String.format("layers/%d/%s/%s/%s", layerId, logicalPath, safeCategory, safeFilename);
+        String s3Key = storagePathService.buildGisPath(layer, safeFilename);
 
         s3Service.uploadFile(s3Key, file);
 
@@ -94,10 +95,6 @@ public class LayerObjectService {
         }
 
         return toLayerObjectResponse(layerObjectRepository.save(mapping));
-    }
-
-    private String sanitizePathSegment(String segment) {
-        return segment.replaceAll("[^a-zA-Z0-9_\\-]", "").toLowerCase();
     }
 
     private String sanitizeFilename(String filename) {

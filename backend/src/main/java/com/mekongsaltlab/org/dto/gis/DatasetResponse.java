@@ -8,6 +8,7 @@ import java.time.Instant;
 public class DatasetResponse {
     private Long id;
     private String name;
+    private String slug;
     private String description;
     private Long ownerId;
     private Instant createdAt;

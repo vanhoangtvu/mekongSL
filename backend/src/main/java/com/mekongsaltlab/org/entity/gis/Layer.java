@@ -1,6 +1,7 @@
 package com.mekongsaltlab.org.entity.gis;
 
 import com.mekongsaltlab.org.entity.gis.enums.DataClassType;
+import com.mekongsaltlab.org.entity.gis.enums.GisDataType;
 import com.mekongsaltlab.org.entity.gis.enums.LayerStatus;
 import com.mekongsaltlab.org.entity.gis.enums.LayerType;
 import jakarta.persistence.Column;
@@ -33,6 +34,16 @@ public class Layer {
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "dataset_id", nullable = false)
     private Dataset dataset;
+
+    @Column
+    private String category;
+
+    @Column
+    private Integer year;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "gis_data_type")
+    private GisDataType gisDataType;
 
     @Column(nullable = false)
     private String name;

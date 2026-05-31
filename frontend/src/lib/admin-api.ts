@@ -203,6 +203,53 @@ export async function checkS3FileExists(key: string) {
   return payload.exists;
 }
 
+export interface S3FolderContent {
+  folders: string[];
+  files: S3FileItem[];
+  prefix: string;
+}
+
+export async function listS3Folder(prefix = '') {
+  const url = new URL(getBackendAdminUrl('/s3/folders'));
+  if (prefix) {
+    url.searchParams.set('prefix', prefix);
+  }
+
+  return requestJson<S3FolderContent>(url);
+}
+
+export async function createS3Folder(path: string) {
+  return requestJson<{ message: string; path: string }>(getBackendAdminUrl('/s3/create-folder'), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ path }),
+  });
+}
+
+export async function copyS3File(sourceKey: string, destinationKey: string) {
+  return requestJson<{ message: string; sourceKey: string; destinationKey: string }>(getBackendAdminUrl('/s3/copy'), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ sourceKey, destinationKey }),
+  });
+}
+
+export async function renameS3File(oldKey: string, newKey: string) {
+  return requestJson<{ message: string; oldKey: string; newKey: string }>(getBackendAdminUrl('/s3/rename'), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ oldKey, newKey }),
+  });
+}
+
+export async function renameS3Folder(oldPrefix: string, newPrefix: string) {
+  return requestJson<{ message: string; oldPrefix: string; newPrefix: string }>(getBackendAdminUrl('/s3/rename-folder'), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ oldPrefix, newPrefix }),
+  });
+}
+
 export async function downloadS3File(key: string) {
   const token = authService.getToken();
   const response = await fetch(getBackendAdminUrl(`/s3/download/${key}`), {

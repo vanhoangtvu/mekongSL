@@ -28,6 +28,9 @@ public class Dataset {
 
     private String description;
 
+    @Column(nullable = false, unique = true)
+    private String slug;
+
     @Column(name = "owner_id", nullable = false)
     private Long ownerId;
 

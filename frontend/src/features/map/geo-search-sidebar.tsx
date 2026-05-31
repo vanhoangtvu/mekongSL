@@ -12,6 +12,8 @@ type GeoSearchSidebarProps = {
   endDateTime: string;
   onStartDateTimeChange: (value: string) => void;
   onEndDateTimeChange: (value: string) => void;
+  ecowittEnabled?: boolean;
+  onEcowittToggle?: (enabled: boolean) => void;
 };
 
 type SearchTabsProps = {
@@ -61,6 +63,8 @@ export function GeoSearchSidebar({
   endDateTime,
   onStartDateTimeChange,
   onEndDateTimeChange,
+  ecowittEnabled,
+  onEcowittToggle,
 }: GeoSearchSidebarProps) {
   const [expandedCategories, setExpandedCategories] = useState<Set<string>>(new Set(["landsat"]));
   const [selectedDatasets, setSelectedDatasets] = useState<Set<string>>(new Set());
@@ -246,6 +250,20 @@ export function GeoSearchSidebar({
                 </div>
               ))}
             </div>
+          </section>
+
+          <section className="geo-block" style={{ marginTop: '12px', borderTop: '1px solid #e2e8f0', paddingTop: '16px' }}>
+            <label className="geo-dataset-label" style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }}>
+              <input
+                type="checkbox"
+                checked={!!ecowittEnabled}
+                onChange={(e) => onEcowittToggle?.(e.target.checked)}
+              />
+              <span className="geo-dataset-name" style={{ fontWeight: 600 }}>Ecowitt Stations</span>
+            </label>
+            <p style={{ margin: '6px 0 0 24px', fontSize: '0.8rem', color: '#94a3b8' }}>
+              Hiển thị trạm quan trắc thời tiết Ecowitt trên bản đồ
+            </p>
           </section>
         </div>
       )}

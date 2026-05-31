@@ -38,7 +38,7 @@ export const RASTER_LAYER_MANIFESTS: RasterLayerManifest[] = [
       palette: 'blue-cyan-green-yellow-orange-red',
       legendLabel: 'Độ mặn (ppt)',
     },
-    cloudPath: 'raster/salinity/salinity_313_900.tif',
+    cloudPath: 'gis-data/hydrology/salinity-monitoring/2026/raster/salinity_313_900.tif',
     previewUrl: '/salinity_313_900.tif',
     updatedAt: '2026-05-22T15:07:00.000Z',
   },

@@ -33,11 +33,21 @@ public class DatasetService {
         Dataset dataset = new Dataset();
         dataset.setName(request.getName());
         dataset.setDescription(request.getDescription());
+        dataset.setSlug(request.getSlug() != null ? request.getSlug() : generateSlug(request.getName()));
         dataset.setOwnerId(request.getOwnerId());
         dataset.setCreatedAt(Instant.now());
         dataset.setUpdatedAt(null);
         dataset.setIsDeleted(false);
         return toResponse(datasetRepository.save(dataset));
+    }
+
+    private String generateSlug(String name) {
+        if (name == null) return "dataset";
+        return name.trim().toLowerCase()
+            .replaceAll("[^a-z0-9\\s-]", "")
+            .replaceAll("\\s+", "-")
+            .replaceAll("-+", "-")
+            .replaceAll("^-|-$", "");
     }
 
     public DatasetResponse update(Long id, DatasetUpdateRequest request) {
@@ -47,6 +57,9 @@ public class DatasetService {
         }
         if (request.getName() != null) {
             dataset.setName(request.getName());
+        }
+        if (request.getSlug() != null) {
+            dataset.setSlug(request.getSlug());
         }
         if (request.getDescription() != null) {
             dataset.setDescription(request.getDescription());
@@ -70,6 +83,7 @@ public class DatasetService {
         DatasetResponse response = new DatasetResponse();
         response.setId(dataset.getId());
         response.setName(dataset.getName());
+        response.setSlug(dataset.getSlug());
         response.setDescription(dataset.getDescription());
         response.setOwnerId(dataset.getOwnerId());
         response.setCreatedAt(dataset.getCreatedAt());

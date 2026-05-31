@@ -6,6 +6,9 @@ import java.time.Instant;
 
 @Data
 public class LayerUpdateRequest {
+    private String category;
+    private Integer year;
+    private String gisDataType;
     private String name;
     private String description;
     private String layerType;

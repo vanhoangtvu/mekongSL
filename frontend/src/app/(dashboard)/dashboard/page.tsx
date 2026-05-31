@@ -9,12 +9,9 @@ import { authService } from "../../../lib/auth";
 import {
   createAdminUser,
   deleteAdminUser,
-  deleteS3File,
-  downloadS3File,
   exportMonthlyXlsx,
   listAdminUsers,
   listMonthlyExportFiles,
-  listS3Files,
   listSourceFiles,
   loadCurrentAccount,
   loadDataDevices,
@@ -23,7 +20,6 @@ import {
   refreshMonthlyExport,
   triggerDataFetch,
   listGisLayers,
-  registerLayerObject,
   listLayerFolderTree,
   createLayerFolder,
   deleteLayerFolder,
@@ -31,11 +27,11 @@ import {
   type AdminRole,
   type AdminUser,
   type AdminUserForm,
-  type S3FileItem,
   type GisLayer,
   type LayerFolderDto,
   updateAdminUser,
 } from "../../../lib/admin-api";
+import S3Manager from "../../../components/admin/S3Manager";
 import { DATA_SOURCE_OPTIONS, ECOWITT_DEVICES, type DataSourceKey, type EcowittDevice } from "../../../lib/constants/data-sources";
 import { collectRecordKeys, formatRecordValue, type DataRecord } from "../../../lib/utils/record-utils";
 import {
@@ -47,10 +43,10 @@ import {
   FolderPlus,
   File,
   RefreshCw,
+  Upload,
   Search,
   Server,
   Shield,
-  Upload,
   Users,
 } from "lucide-react";
 
@@ -100,11 +96,7 @@ export default function DashboardPage() {
   const [userSaving, setUserSaving] = useState(false);
   const [editingUserId, setEditingUserId] = useState<number | null>(null);
   const [userForm, setUserForm] = useState<AdminUserForm>(EMPTY_USER_FORM);
-  const [s3Prefix, setS3Prefix] = useState("backups/");
-  const [s3Files, setS3Files] = useState<S3FileItem[]>([]);
-  const [s3Loading, setS3Loading] = useState(true);
   const [uploadFile, setUploadFile] = useState<File | null>(null);
-  const [uploadKey, setUploadKey] = useState("");
   const [dataSource, setDataSource] = useState<DataSourceKey>("mekong");
   const [deviceId, setDeviceId] = useState("");
   const [ecowittDevices, setEcowittDevices] = useState<EcowittDevice[]>([]);
@@ -153,16 +145,7 @@ export default function DashboardPage() {
     }
   };
 
-  const loadS3Files = async (prefix?: string) => {
-    setS3Loading(true);
-    try {
-      setS3Files(await listS3Files(prefix !== undefined ? prefix : s3Prefix));
-    } catch (error) {
-      pushMessage(error instanceof Error ? error.message : "Không tải được danh sách S3", "error");
-    } finally {
-      setS3Loading(false);
-    }
-  };
+  const loadS3Files = async () => {};
 
   const loadData = useCallback(
     async (runId?: string) => {
@@ -401,101 +384,6 @@ export default function DashboardPage() {
     }
   };
 
-  const handleUpload = async () => {
-    if (!uploadFile) {
-      pushMessage("Chọn file để upload", "error");
-      return;
-    }
-
-    setBusyAction("upload-s3");
-    try {
-      const formData = new FormData();
-      formData.append("file", uploadFile);
-      if (uploadKey.trim()) {
-        formData.append("key", uploadKey.trim());
-      }
-
-      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL || "http://localhost:8084/api"}/s3/upload`, {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${authService.getToken() || ""}`,
-        },
-        body: formData,
-      });
-
-      if (!response.ok) {
-        const payload = await response.json().catch(() => null);
-        throw new Error(payload?.error || payload?.message || "Không upload được file");
-      }
-
-      pushMessage("Đã upload file lên S3", "success");
-      setUploadFile(null);
-      setUploadKey("");
-      await loadS3Files();
-    } catch (error) {
-      pushMessage(error instanceof Error ? error.message : "Upload S3 thất bại", "error");
-    } finally {
-      setBusyAction(null);
-    }
-  };
-
-  const handleMapToLayer = async (file: S3FileItem) => {
-    if (layers.length === 0) {
-      pushMessage("Chưa có Layer nào trong hệ thống để ánh xạ.", "error");
-      return;
-    }
-
-    const layerIdStr = window.prompt(
-      `Chọn ID của Layer để ánh xạ file ${file.key}:\n\n` +
-      layers.map(l => `${l.id} - ${l.layerName} (${l.layerType})`).join('\n')
-    );
-
-    if (!layerIdStr) return;
-
-    const layerId = parseInt(layerIdStr, 10);
-    if (isNaN(layerId)) {
-      pushMessage("Layer ID không hợp lệ.", "error");
-      return;
-    }
-
-    setBusyAction(`map-layer-${file.key}`);
-    try {
-      await registerLayerObject(layerId, file.key, file.size || 0);
-      pushMessage("Ánh xạ file vào Layer thành công!", "success");
-    } catch (error) {
-      pushMessage(error instanceof Error ? error.message : "Ánh xạ thất bại", "error");
-    } finally {
-      setBusyAction(null);
-    }
-  };
-
-  const handleDeleteS3 = async (key: string) => {
-    if (!confirm(`Xóa file ${key}?`)) {
-      return;
-    }
-
-    setBusyAction(`delete-s3-${key}`);
-    try {
-      await deleteS3File(key);
-      pushMessage("Đã xóa file S3", "success");
-      await loadS3Files();
-    } catch (error) {
-      pushMessage(error instanceof Error ? error.message : "Xóa file thất bại", "error");
-    } finally {
-      setBusyAction(null);
-    }
-  };
-
-  const handleCreateS3Folder = async () => {
-    const name = window.prompt("Nhập tên thư mục mới trên S3 (ví dụ: backups/2026/):");
-    if (name) {
-      const newPrefix = name.endsWith("/") ? name : `${name}/`;
-      setS3Prefix(newPrefix);
-      await loadS3Files(newPrefix);
-      pushMessage(`Đã chuyển sang thư mục: ${newPrefix}`, "info");
-    }
-  };
-
   const handleFetchData = async () => {
     setBusyAction("fetch-data");
     try {
@@ -536,7 +424,6 @@ export default function DashboardPage() {
   };
 
   const userCount = users.length;
-  const s3Count = s3Files.length;
   const dataCount = dataRows.length;
   const sourceFileCount = sourceFiles.length;
   const adminTabs = [
@@ -607,11 +494,6 @@ export default function DashboardPage() {
                   <Users size={20} />
                   <span>Users</span>
                   <strong>{userCount}</strong>
-                </article>
-                <article className="admin-summary-card">
-                  <Server size={20} />
-                  <span>S3 files</span>
-                  <strong>{s3Count}</strong>
                 </article>
                 <article className="admin-summary-card">
                   <Database size={20} />
@@ -797,100 +679,9 @@ export default function DashboardPage() {
           )}
 
           {activeAdminTab === "storage" && (
-            <section className="admin-tab-panel">
-              <article className="admin-card">
-                <div className="admin-card-header">
-                  <div>
-                    <p className="card-kicker">S3 storage</p>
-                    <h2>Quản lý file</h2>
-                  </div>
-                  <button className="ghost-btn" onClick={() => void loadS3Files()} type="button" disabled={s3Loading}>
-                    <RefreshCw size={16} />
-                    Làm mới
-                  </button>
-                </div>
-
-                <div className="admin-form">
-                  <div className="form-grid">
-                    <label>
-                      Prefix (Thư mục)
-                      <div style={{ display: "flex", gap: "8px" }}>
-                        <input
-                          value={s3Prefix}
-                          onChange={(event) => setS3Prefix(event.target.value)}
-                          style={{ flex: 1 }}
-                          placeholder="backups/"
-                        />
-                        <button type="button" className="ghost-btn" onClick={handleCreateS3Folder}>
-                          <FolderPlus size={16} />
-                          Tạo thư mục
-                        </button>
-                      </div>
-                    </label>
-                    <label>
-                      Key tùy chỉnh
-                      <input value={uploadKey} onChange={(event) => setUploadKey(event.target.value)} placeholder="uploads/file.pdf" />
-                    </label>
-                    <label>
-                      File upload
-                      <input type="file" onChange={(event) => setUploadFile(event.target.files?.[0] ?? null)} />
-                    </label>
-                  </div>
-
-                  <div className="form-actions">
-                    <button className="primary-btn" type="button" onClick={handleUpload} disabled={busyAction === "upload-s3"}>
-                      <Upload size={16} />
-                      Upload
-                    </button>
-                  </div>
-                </div>
-
-                <div className="admin-table-wrap">
-                  {s3Loading ? (
-                    <p className="muted">Đang tải...</p>
-                  ) : (
-                    <table className="admin-table">
-                      <thead>
-                        <tr>
-                          <th>Key</th>
-                          <th>Kích thước</th>
-                          <th>Cập nhật</th>
-                          <th></th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {s3Files.map((file) => (
-                          <tr key={file.key}>
-                            <td className="key-cell">{file.key}</td>
-                            <td>{formatSize(file.size || 0)}</td>
-                            <td>{formatDate(file.lastModified || file.modifiedAt)}</td>
-                            <td className="row-actions">
-                              <button
-                                type="button"
-                                className="mini-btn"
-                                onClick={() => handleMapToLayer(file)}
-                                disabled={busyAction === `map-layer-${file.key}`}
-                              >
-                                Map to Layer
-                              </button>
-                              <button type="button" className="mini-btn" onClick={() => void downloadS3File(file.key)}>
-                                Tải
-                              </button>
-                              <button
-                                type="button"
-                                className="mini-btn danger"
-                                onClick={() => handleDeleteS3(file.key)}
-                                disabled={busyAction === `delete-s3-${file.key}`}
-                              >
-                                Xóa
-                              </button>
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  )}
-                </div>
+            <section className="admin-tab-panel" style={{ padding: 0, overflow: 'hidden' }}>
+              <article className="admin-card" style={{ padding: 0, overflow: 'hidden' }}>
+                <S3Manager />
               </article>
             </section>
           )}

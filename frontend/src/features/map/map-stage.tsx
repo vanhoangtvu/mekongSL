@@ -1,23 +1,73 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import TileLayer from "ol/layer/Tile";
+import VectorLayer from "ol/layer/Vector";
 import WebGLTileLayer from "ol/layer/WebGLTile";
 import Map from "ol/Map";
 import View from "ol/View";
 import { fromLonLat, transformExtent, toLonLat } from "ol/proj";
 import OSM from "ol/source/OSM";
 import XYZ from "ol/source/XYZ";
+import VectorSource from "ol/source/Vector";
 import GeoTIFF from "ol/source/GeoTIFF";
+import Feature from "ol/Feature";
+import Point from "ol/geom/Point";
+import { Style, Circle, Fill, Stroke, Text } from "ol/style";
 import proj4 from "proj4";
 import { register } from "ol/proj/proj4";
-
-import type { RasterLayerManifest } from "../../lib/constants/raster-layers";
+import type { GisLayer, GisLayerRender } from "../../lib/gis-types";
 import { DATASETS } from "../../lib/constants/datasets";
+import { ECOWITT_DEVICES } from "../../lib/constants/data-sources";
 
 // Register UTM 48N projection
 proj4.defs("EPSG:32648", "+proj=utm +zone=48 +datum=WGS84 +units=m +no_defs");
 register(proj4);
+
+// ---- Ecowitt Popup: shared types & helpers ----
+interface EcowittPopupSensorData {
+  time: string;
+  tempf?: number;
+  humidity?: number;
+  wind_speed?: number;
+  wind_gust?: number;
+  rain_daily?: number;
+  pressure_rel?: number;
+  solar_radiation?: number;
+  uv?: number;
+}
+
+type EcowittPopupSensorKey = keyof Omit<EcowittPopupSensorData, "time">;
+
+const ECOWITT_POPUP_SENSORS: { key: EcowittPopupSensorKey; label: string; unit: string; color: string }[] = [
+  { key: "tempf", label: "Nhiệt độ", unit: "°F", color: "#ff6b6b" },
+  { key: "humidity", label: "Độ ẩm", unit: "%", color: "#4ecdc4" },
+  { key: "wind_speed", label: "Tốc độ gió", unit: "mph", color: "#45b7d1" },
+  { key: "rain_daily", label: "Mưa ngày", unit: "in", color: "#6c5ce7" },
+  { key: "pressure_rel", label: "Áp suất", unit: "inHg", color: "#ffd93d" },
+  { key: "solar_radiation", label: "Bức xạ MT", unit: "W/m²", color: "#ff8a5c" },
+  { key: "uv", label: "UV Index", unit: "", color: "#ea8685" },
+];
+
+function parseEcowittPopupData(ecowittData: Record<string, unknown>): EcowittPopupSensorData[] {
+  const times = Array.isArray(ecowittData?.times) ? (ecowittData.times as string[]) : [];
+  const lists = ecowittData?.list as Record<string, { list?: Record<string, unknown[]> }> | undefined;
+  const getVal = (group: string, key: string, idx: number): number | undefined => {
+    const arr = lists?.[group]?.list?.[key];
+    return Array.isArray(arr) ? Number(arr[idx]) : undefined;
+  };
+  return times.map((time, idx) => ({
+    time,
+    tempf: getVal("tempf", "tempf", idx),
+    humidity: getVal("humidity", "humidity", idx),
+    wind_speed: getVal("wind_speed", "windspeedmph", idx),
+    wind_gust: getVal("wind_speed", "windgustmph", idx),
+    rain_daily: getVal("rain", "dailyrainin", idx),
+    pressure_rel: getVal("pressure", "baromrelin", idx),
+    solar_radiation: getVal("so_uv", "solarradiation", idx),
+    uv: getVal("so_uv", "uv", idx),
+  }));
+}
 
 // ---------------------------------------------------------------------------
 // Flatten DATASETS (from datasets.ts) into a list of addable map layers.
@@ -199,6 +249,7 @@ type TimelineUnit = {
 type MapStageProps = {
   startDateTime: string;
   endDateTime: string;
+  ecowittEnabled?: boolean;
 };
 
 function parseDateTimeLocal(value: string) {
@@ -346,13 +397,21 @@ function translateLegendLabel(label: string): string {
     .replace(/Độ sâu/g, "Depth");
 }
 
-export function MapStage({ startDateTime, endDateTime }: MapStageProps) {
+export function MapStage({ startDateTime, endDateTime, ecowittEnabled }: MapStageProps) {
   const mapContainerRef = useRef<HTMLDivElement | null>(null);
   const scrollerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<Map | null>(null);
+  const ecowittLayerRef = useRef<VectorLayer<VectorSource> | null>(null);
   const baseLayerRef = useRef<TileLayer | null>(null);
   const rasterLayerRef = useRef<WebGLTileLayer | null>(null);
-  const [selectedLayer, setSelectedLayer] = useState<RasterLayerManifest | null>(null);
+  const [selectedLayer, setSelectedLayer] = useState<{
+    id: number;
+    name: string;
+    bbox: [number, number, number, number];
+    nodata: number;
+    legendLabel: string;
+    signedUrl: string | null;
+  } | null>(null);
   const [rasterUrl, setRasterUrl] = useState<string | null>(null);
   const [loadStatus, setLoadStatus] = useState("Loading raster layer...");
   const [pixelValue, setPixelValue] = useState<number | null>(null);
@@ -472,6 +531,13 @@ export function MapStage({ startDateTime, endDateTime }: MapStageProps) {
   // Drag-and-drop reordering
   const [dragLayerId, setDragLayerId] = useState<string | null>(null);
 
+  // Ecowitt station popup state
+  const [popupDeviceId, setPopupDeviceId] = useState<string | null>(null);
+  const [popupData, setPopupData] = useState<EcowittPopupSensorData[]>([]);
+  const [popupLoading, setPopupLoading] = useState(false);
+  const [popupError, setPopupError] = useState("");
+  const [popupExpanded, setPopupExpanded] = useState(false);
+
   const reorderLayers = (fromId: string, toId: string) => {
     if (fromId === toId) return;
     setPlayerLayers(prev => {
@@ -548,78 +614,82 @@ export function MapStage({ startDateTime, endDateTime }: MapStageProps) {
   useEffect(() => {
     let isActive = true;
 
-    async function loadLayerManifest() {
+    async function loadLayers() {
       try {
-        const response = await fetch("/api/layers", { cache: "no-store" });
+        const response = await fetch("/api/layers?page=0&size=100", { cache: "no-store" });
         if (!response.ok) {
-          throw new Error(`Unable to load raster layers list (${response.status})`);
+          throw new Error(`Unable to load layers (${response.status})`);
         }
 
-        const payload: { layers?: RasterLayerManifest[] } = await response.json();
-        const nextLayer = payload.layers?.[0] ?? null;
+        const page: { content?: GisLayer[] } = await response.json();
+        const first = page.content?.[0] ?? null;
 
-        if (isActive) {
-          setSelectedLayer(nextLayer);
-          setLoadStatus(nextLayer ? `Selected ${translateLayerName(nextLayer.name)}` : "No raster layers available");
+        if (!isActive) return;
+
+        if (!first) {
+          setSelectedLayer(null);
+          setLoadStatus("No raster layers available");
+          return;
+        }
+
+        setLoadStatus(`Selected ${translateLayerName(first.name)}`);
+
+        // Fetch render URL for the first layer
+        try {
+          const renderRes = await fetch(`/api/layers/${first.id}/url`, { cache: "no-store" });
+          if (!renderRes.ok) {
+            throw new Error(`Render fetch failed (${renderRes.status})`);
+          }
+
+          const renderData: GisLayerRender = await renderRes.json();
+
+          if (!isActive) return;
+
+          const bbox: [number, number, number, number] = [
+            renderData.bboxMinLon ?? 594885,
+            renderData.bboxMinLat ?? 1052655,
+            renderData.bboxMaxLon ?? 688485,
+            renderData.bboxMaxLat ?? 1117455,
+          ];
+
+          setSelectedLayer({
+            id: renderData.id,
+            name: renderData.name,
+            bbox,
+            nodata: -9999,
+            legendLabel: renderData.name,
+            signedUrl: renderData.signedUrl,
+          });
+
+          if (renderData.signedUrl) {
+            setRasterUrl(renderData.signedUrl);
+            setLoadStatus(`Displaying ${translateLayerName(renderData.name)}`);
+          } else {
+            setRasterUrl(null);
+            setLoadStatus("No signed URL for raster layer");
+          }
+        } catch {
+          if (isActive) {
+            setSelectedLayer(null);
+            setRasterUrl(null);
+            setLoadStatus("Failed to get render URL for layer");
+          }
         }
       } catch (error) {
         if (isActive) {
           setSelectedLayer(null);
+          setRasterUrl(null);
           setLoadStatus(error instanceof Error ? error.message : "Failed to load raster layer");
         }
       }
     }
 
-    void loadLayerManifest();
+    void loadLayers();
 
     return () => {
       isActive = false;
     };
   }, []);
-
-  useEffect(() => {
-    let isActive = true;
-
-    async function loadRasterUrl() {
-      if (!selectedLayer) {
-        setRasterUrl(null);
-        return;
-      }
-
-      if (selectedLayer.previewUrl.endsWith(".tif") || selectedLayer.previewUrl.endsWith(".tiff")) {
-        if (isActive) {
-          setRasterUrl(selectedLayer.previewUrl);
-          setLoadStatus(`Displaying ${translateLayerName(selectedLayer.name)}`);
-        }
-
-        return;
-      }
-
-      try {
-        const response = await fetch(selectedLayer.previewUrl, { cache: "no-store" });
-        if (!response.ok) {
-          throw new Error(`Unable to fetch raster render URL (${response.status})`);
-        }
-
-        const payload: { url?: string } = await response.json();
-        if (isActive) {
-          setRasterUrl(payload.url ?? null);
-          setLoadStatus(payload.url ? `Displaying ${translateLayerName(selectedLayer.name)}` : "Missing raster render URL");
-        }
-      } catch (error) {
-        if (isActive) {
-          setRasterUrl(null);
-          setLoadStatus(error instanceof Error ? error.message : "Failed to get raster render URL");
-        }
-      }
-    }
-
-    void loadRasterUrl();
-
-    return () => {
-      isActive = false;
-    };
-  }, [selectedLayer]);
 
   useEffect(() => {
     if (!mapContainerRef.current || mapRef.current) {
@@ -642,6 +712,60 @@ export function MapStage({ startDateTime, endDateTime }: MapStageProps) {
     });
 
     mapRef.current = map;
+
+    // Ecowitt station markers layer
+    const ecowittSource = new VectorSource();
+    const ecowittLayer = new VectorLayer({
+      source: ecowittSource,
+      style: (feature) => {
+        const isHighlighted = feature.get('highlighted');
+        return new Style({
+          image: new Circle({
+            radius: isHighlighted ? 10 : 8,
+            fill: new Fill({ color: isHighlighted ? '#0d6efd' : '#0dcaf0' }),
+            stroke: new Stroke({ color: '#fff', width: 2 }),
+          }),
+          text: new Text({
+            text: feature.get('name') || '',
+            offsetY: -16,
+            font: '500 12px sans-serif',
+            fill: new Fill({ color: '#1e293b' }),
+            stroke: new Stroke({ color: '#fff', width: 3 }),
+          }),
+        });
+      },
+      zIndex: 200,
+    });
+    ecowittLayer.setVisible(!!ecowittEnabled);
+    map.addLayer(ecowittLayer);
+    ecowittLayerRef.current = ecowittLayer;
+
+    // Add station features
+    ECOWITT_DEVICES.forEach((device) => {
+      if (device.lat != null && device.lng != null) {
+        const feature = new Feature({
+          geometry: new Point(fromLonLat([device.lng, device.lat])),
+          deviceId: device.id,
+          name: device.name,
+        });
+        feature.setId(device.id);
+        ecowittSource.addFeature(feature);
+      }
+    });
+
+    // Click handler for station markers — mở popup inline thay vì điều hướng trang
+    map.on("click", (evt) => {
+      const feature = map.forEachFeatureAtPixel(evt.pixel, (f) => f as Feature | undefined);
+      if (feature) {
+        const devId = feature.get("deviceId") as string | undefined;
+        if (devId) {
+          setPopupDeviceId((prev) => (prev === devId ? null : devId));
+          return;
+        }
+      }
+      // Click vào vùng trống → đóng popup
+      setPopupDeviceId(null);
+    });
 
     // Force multiple size updates to ensure proper rendering
     const updateSizes = [0, 100, 300, 500];
@@ -679,11 +803,56 @@ export function MapStage({ startDateTime, endDateTime }: MapStageProps) {
 
     return () => {
       rasterLayerRef.current = null;
+      ecowittLayerRef.current = null;
       baseLayerRef.current = null;
       map.setTarget(undefined);
       mapRef.current = null;
     };
   }, []);
+
+  // Toggle ecowitt station markers visibility
+  useEffect(() => {
+    if (ecowittLayerRef.current) {
+      ecowittLayerRef.current.setVisible(!!ecowittEnabled);
+    }
+  }, [ecowittEnabled]);
+
+  // Fetch dữ liệu Ecowitt khi mở popup trạm
+  useEffect(() => {
+    if (!popupDeviceId) {
+      setPopupData([]);
+      setPopupError("");
+      setPopupExpanded(false);
+      return;
+    }
+
+    let isActive = true;
+    setPopupLoading(true);
+    setPopupError("");
+    setPopupData([]);
+
+    fetch(`/api/ecowitt/proxy?action=get_data&deviceId=${encodeURIComponent(popupDeviceId)}`)
+      .then((res) => res.json() as Promise<{ data?: Record<string, unknown>; error?: string }>)
+      .then((result) => {
+        if (!isActive) return;
+        if (!result.data?.times) throw new Error("Không có dữ liệu từ Ecowitt");
+        const parsed = parseEcowittPopupData(result.data);
+        const valid = parsed.filter((d) =>
+          Object.entries(d).some(([k, v]) => k !== "time" && v !== undefined && !Number.isNaN(Number(v)) && Number(v) !== 0)
+        );
+        setPopupData(valid);
+      })
+      .catch((err: unknown) => {
+        if (isActive) setPopupError(err instanceof Error ? err.message : String(err));
+      })
+      .finally(() => {
+        if (isActive) setPopupLoading(false);
+      });
+
+    return () => {
+      isActive = false;
+    };
+  }, [popupDeviceId]);
 
   // Update map size on window resize
   useEffect(() => {
@@ -752,7 +921,7 @@ export function MapStage({ startDateTime, endDateTime }: MapStageProps) {
       sources: [
         {
           url: absoluteUrl,
-          nodata: selectedLayer.nodata ?? undefined,
+          nodata: selectedLayer.nodata,
         },
       ],
       convertToRGB: false,
@@ -765,7 +934,7 @@ export function MapStage({ startDateTime, endDateTime }: MapStageProps) {
       console.log("GeoTIFF source state:", source.getState());
     });
 
-    const nodataValue = selectedLayer.nodata ?? -9999;
+    const nodataValue = selectedLayer.nodata;
     const rasterLayer = new WebGLTileLayer({
       opacity: 0.7,
       source,
@@ -841,8 +1010,7 @@ export function MapStage({ startDateTime, endDateTime }: MapStageProps) {
             ? (viewOptions.extent as [number, number, number, number])
             : null;
         const worldExtent = worldFile && pixelExtent ? buildWorldFileExtent(worldFile, pixelExtent) : null;
-        const fallbackExtent = selectedLayer?.bbox ?? [594885, 1052655, 688485, 1117455];
-        const resolvedExtent = worldExtent ?? fallbackExtent;
+        const resolvedExtent = worldExtent ?? selectedLayer.bbox;
 
         if (worldExtent) {
           console.log("✅ Map fitted to world file extent");
@@ -864,8 +1032,7 @@ export function MapStage({ startDateTime, endDateTime }: MapStageProps) {
         console.error("Error stack:", error.stack);
 
         const view = map.getView();
-        const fallbackExtent = selectedLayer?.bbox ?? [594885, 1052655, 688485, 1117455];
-        const transformedExtent = transformExtent(fallbackExtent, "EPSG:32648", "EPSG:3857");
+        const transformedExtent = transformExtent(selectedLayer.bbox, "EPSG:32648", "EPSG:3857");
 
         view.fit(transformedExtent, {
           padding: [48, 48, 48, 48],
@@ -969,7 +1136,7 @@ export function MapStage({ startDateTime, endDateTime }: MapStageProps) {
                       {layer.categoryId === "hydrology" && (
                         <svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2c-5.33 4.55-8 8.48-8 11.8C4 17.78 7.58 22 12 22s8-4.22 8-8.2C20 10.48 17.33 6.55 12 2z"/></svg>
                       )}
-                      {layer.categoryId === "climate" && (
+                      {layer.categoryId === "weather" && (
                         <svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor"><path d="M6.76 4.84l-1.8-1.79-1.41 1.41 1.79 1.79 1.42-1.41zM4 10.5H1v2h3v-2zm9-9.95h-2V3.5h2V.55zm7.45 3.91l-1.41-1.41-1.79 1.79 1.41 1.41 1.79-1.79zM20 10.5v2h3v-2h-3zm-8-5c-3.31 0-6 2.69-6 6s2.69 6 6 6 6-2.69 6-6-2.69-6-6-6z"/></svg>
                       )}
                       {layer.categoryId === "flooding" && (
@@ -1379,6 +1546,268 @@ export function MapStage({ startDateTime, endDateTime }: MapStageProps) {
           </div>
         )}
 
+        {/* ---- Ecowitt Station Popup ---- */}
+        {(() => {
+          if (!popupDeviceId) return null;
+          const device = ECOWITT_DEVICES.find((d) => d.id === popupDeviceId);
+          if (!device) return null;
+          const latestData = popupData.length > 0 ? popupData[popupData.length - 1] : null;
+
+          // Build SVG line+area path from sensor values
+          const buildChart = (key: EcowittPopupSensorKey) => {
+            const vals = popupData
+              .map((d) => d[key])
+              .filter((v): v is number => v !== undefined && !Number.isNaN(Number(v)));
+            if (vals.length < 2) return null;
+            const max = Math.max(...vals);
+            const min = Math.min(...vals);
+            const range = max - min || 1;
+            const W = 100; const H = 38;
+            const pts = vals.map((v, i) => ({
+              x: (i / (vals.length - 1)) * W,
+              y: H - 2 - ((v - min) / range) * (H - 4),
+            }));
+            const line = `M ${pts.map((p) => `${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(" L ")}`;
+            const area = `M 0,${H} L ${pts.map((p) => `${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(" L ")} L ${W},${H} Z`;
+            return { line, area, latest: vals[vals.length - 1] };
+          };
+
+          const popupW = popupExpanded ? "340px" : "290px";
+
+          return (
+            <div
+              style={{
+                position: "absolute",
+                top: "72px",
+                ...(popupExpanded ? { bottom: "110px" } : {}),
+                right: "12px",
+                width: popupW,
+                background: "#fff",
+                borderRadius: "14px",
+                boxShadow: "0 6px 32px rgba(0,0,0,0.18)",
+                zIndex: 500,
+                fontFamily: "system-ui, -apple-system, sans-serif",
+                display: "flex",
+                flexDirection: "column",
+                overflow: "hidden",
+              }}
+            >
+              {/* ── Header ── */}
+              <div style={{
+                background: "linear-gradient(135deg, #0d6efd 0%, #0dcaf0 100%)",
+                color: "#fff",
+                padding: "10px 12px 9px",
+                position: "relative",
+                flexShrink: 0,
+              }}>
+                <div style={{ fontSize: "0.6rem", opacity: 0.78, fontWeight: "600", letterSpacing: "0.05em", textTransform: "uppercase" }}>
+                  Trạm Ecowitt · {device.id}
+                </div>
+                <div style={{ fontSize: "0.9rem", fontWeight: "700", lineHeight: 1.25, paddingRight: "24px", marginTop: "2px" }}>
+                  {device.name}
+                </div>
+                {device.lat != null && (
+                  <div style={{ fontSize: "0.63rem", opacity: 0.72, marginTop: "2px" }}>
+                    {device.lat.toFixed(4)}°N, {device.lng?.toFixed(4)}°E
+                  </div>
+                )}
+                <button
+                  type="button"
+                  onClick={() => setPopupDeviceId(null)}
+                  style={{
+                    position: "absolute", top: "8px", right: "8px",
+                    background: "rgba(255,255,255,0.2)", border: "none", color: "#fff",
+                    width: "20px", height: "20px", borderRadius: "50%",
+                    cursor: "pointer", fontSize: "0.95rem", lineHeight: "20px", textAlign: "center",
+                    display: "flex", alignItems: "center", justifyContent: "center", padding: 0,
+                  }}
+                  title="Đóng"
+                >×</button>
+              </div>
+
+              {/* ── Body ── */}
+              <div style={{ flex: 1, overflowY: popupExpanded ? "auto" : "hidden", minHeight: 0 }}>
+
+                {/* Loading */}
+                {popupLoading && (
+                  <div style={{ textAlign: "center", padding: "20px 0", color: "#64748b", fontSize: "0.82rem" }}>
+                    Đang tải dữ liệu...
+                  </div>
+                )}
+
+                {/* Error */}
+                {!popupLoading && popupError && (
+                  <div style={{ margin: "10px", background: "#fef2f2", border: "1px solid #fca5a5", borderRadius: "8px", padding: "9px 11px", color: "#b91c1c", fontSize: "0.78rem" }}>
+                    ⚠ {popupError}
+                  </div>
+                )}
+
+                {/* ═══ COMPACT VIEW ═══ */}
+                {!popupLoading && !popupError && !popupExpanded && (
+                  <div style={{ padding: "10px" }}>
+                    {latestData ? (
+                      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "6px" }}>
+                        {ECOWITT_POPUP_SENSORS.slice(0, 4).map((sensor) => {
+                          const chart = buildChart(sensor.key);
+                          const val = latestData[sensor.key];
+                          const display = val !== undefined && !Number.isNaN(Number(val)) ? Number(val).toFixed(1) : "--";
+                          return (
+                            <div key={sensor.key} style={{
+                              borderRadius: "10px",
+                              background: `${sensor.color}0e`,
+                              border: `1px solid ${sensor.color}28`,
+                              overflow: "hidden",
+                              padding: "8px 9px 0",
+                            }}>
+                              <div style={{ fontSize: "0.6rem", color: "#64748b", fontWeight: "600", textTransform: "uppercase", letterSpacing: "0.04em" }}>
+                                {sensor.label}
+                              </div>
+                              <div style={{ fontSize: "1.1rem", fontWeight: "800", color: sensor.color, marginTop: "1px" }}>
+                                {display}
+                                <span style={{ fontSize: "0.62rem", fontWeight: "500", color: "#94a3b8", marginLeft: "2px" }}>{sensor.unit}</span>
+                              </div>
+                              {chart ? (
+                                <svg viewBox="0 0 100 38" style={{ width: "100%", height: "26px", display: "block", marginTop: "3px" }} preserveAspectRatio="none">
+                                  <path d={chart.area} fill={sensor.color} fillOpacity="0.14" />
+                                  <path d={chart.line} fill="none" stroke={sensor.color} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+                                </svg>
+                              ) : (
+                                <div style={{ height: "26px", marginTop: "3px" }} />
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    ) : (
+                      !popupLoading && (
+                        <div style={{ textAlign: "center", padding: "16px 0", color: "#94a3b8", fontSize: "0.8rem" }}>
+                          Không có dữ liệu hôm nay
+                        </div>
+                      )
+                    )}
+
+                    {/* Expand button */}
+                    <button
+                      type="button"
+                      onClick={() => setPopupExpanded(true)}
+                      style={{
+                        width: "100%", marginTop: "8px",
+                        padding: "6px 0",
+                        background: "linear-gradient(135deg,rgba(13,110,253,0.07),rgba(13,202,240,0.07))",
+                        border: "1px solid rgba(13,110,253,0.18)",
+                        borderRadius: "8px",
+                        color: "#0d6efd",
+                        fontSize: "0.72rem", fontWeight: "700",
+                        cursor: "pointer",
+                        display: "flex", alignItems: "center", justifyContent: "center", gap: "4px",
+                      }}
+                    >
+                      Xem chi tiết
+                      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                        <polyline points="6 9 12 15 18 9"/>
+                      </svg>
+                    </button>
+                  </div>
+                )}
+
+                {/* ═══ EXPANDED VIEW ═══ */}
+                {!popupLoading && !popupError && popupExpanded && (
+                  <div style={{ padding: "10px" }}>
+
+                    {/* Collapse button */}
+                    <button
+                      type="button"
+                      onClick={() => setPopupExpanded(false)}
+                      style={{
+                        width: "100%", marginBottom: "9px",
+                        padding: "5px 0",
+                        background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: "7px",
+                        color: "#64748b", fontSize: "0.68rem", fontWeight: "700",
+                        cursor: "pointer",
+                        display: "flex", alignItems: "center", justifyContent: "center", gap: "4px",
+                      }}
+                    >
+                      <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                        <polyline points="18 15 12 9 6 15"/>
+                      </svg>
+                      Thu gọn
+                    </button>
+
+                    {/* All 7 metrics 2x2 */}
+                    {latestData && (
+                      <>
+                        <div style={{ fontSize: "0.6rem", fontWeight: "700", color: "#94a3b8", textTransform: "uppercase", letterSpacing: "0.07em", marginBottom: "6px" }}>
+                          Thông số mới nhất
+                        </div>
+                        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "5px", marginBottom: "12px" }}>
+                          {ECOWITT_POPUP_SENSORS.map((sensor) => {
+                            const val = latestData[sensor.key];
+                            const display = val !== undefined && !Number.isNaN(Number(val)) ? Number(val).toFixed(1) : "--";
+                            return (
+                              <div key={sensor.key} style={{
+                                padding: "6px 8px",
+                                borderRadius: "8px",
+                                background: `${sensor.color}0e`,
+                                borderLeft: `2.5px solid ${sensor.color}`,
+                              }}>
+                                <div style={{ fontSize: "0.59rem", color: "#64748b", fontWeight: "600", textTransform: "uppercase", letterSpacing: "0.03em" }}>{sensor.label}</div>
+                                <div style={{ fontSize: "0.95rem", fontWeight: "800", color: sensor.color, marginTop: "1px" }}>
+                                  {display}
+                                  <span style={{ fontSize: "0.6rem", fontWeight: "400", color: "#94a3b8", marginLeft: "2px" }}>{sensor.unit}</span>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </>
+                    )}
+
+                    {/* Charts for all 7 sensors */}
+                    {popupData.length > 0 && (
+                      <>
+                        <div style={{ fontSize: "0.6rem", fontWeight: "700", color: "#94a3b8", textTransform: "uppercase", letterSpacing: "0.07em", marginBottom: "8px" }}>
+                          Biểu đồ trong ngày
+                        </div>
+                        {ECOWITT_POPUP_SENSORS.map((sensor) => {
+                          const chart = buildChart(sensor.key);
+                          if (!chart) return null;
+                          return (
+                            <div key={sensor.key} style={{ marginBottom: "10px" }}>
+                              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: "2px" }}>
+                                <span style={{ fontSize: "0.67rem", color: "#475569", fontWeight: "600" }}>
+                                  {sensor.label}
+                                  {sensor.unit && <span style={{ color: "#94a3b8", fontWeight: "400", marginLeft: "2px" }}>({sensor.unit})</span>}
+                                </span>
+                                <span style={{ fontSize: "0.7rem", color: sensor.color, fontWeight: "700" }}>
+                                  {chart.latest.toFixed(1)}
+                                </span>
+                              </div>
+                              <div style={{ background: "#f8fafc", borderRadius: "5px", overflow: "hidden", padding: "2px 2px 0" }}>
+                                <svg viewBox="0 0 100 38" style={{ width: "100%", height: "36px", display: "block" }} preserveAspectRatio="none">
+                                  <path d={chart.area} fill={sensor.color} fillOpacity="0.18" />
+                                  <path d={chart.line} fill="none" stroke={sensor.color} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+                                </svg>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </>
+                    )}
+
+                    {/* No data */}
+                    {popupData.length === 0 && (
+                      <div style={{ textAlign: "center", padding: "16px 0", color: "#94a3b8", fontSize: "0.8rem" }}>
+                        Không có dữ liệu hôm nay
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            </div>
+          );
+        })()}
+
+
         {pixelValue !== null && mouseCoords !== null && (
           <div className="geo-map-inspector">
             <div className="geo-map-inspector-header">
@@ -1405,7 +1834,7 @@ export function MapStage({ startDateTime, endDateTime }: MapStageProps) {
                 <div className="geo-map-inspector-row highlighted">
                   <span className="geo-map-inspector-label">
                     {(() => {
-                      const label = translateLegendLabel(selectedLayer.style.legendLabel);
+                      const label = translateLegendLabel(selectedLayer.legendLabel);
                       const match = label.match(/^([^(]+)/);
                       return match ? match[1].trim() : label;
                     })()}:
@@ -1413,7 +1842,7 @@ export function MapStage({ startDateTime, endDateTime }: MapStageProps) {
                   <span className="geo-map-inspector-val value-highlight">
                     {pixelValue !== null
                       ? `${pixelValue.toFixed(2)} ${(() => {
-                          const label = translateLegendLabel(selectedLayer.style.legendLabel);
+                          const label = translateLegendLabel(selectedLayer.legendLabel);
                           const match = label.match(/\(([^)]+)\)/);
                           return match ? match[1] : "";
                         })()}`
