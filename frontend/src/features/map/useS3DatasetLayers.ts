@@ -55,7 +55,7 @@ export function useS3DatasetLayers(
   // ── Applied datasets: smart diff — keep existing, remove stale, fetch new ──
   useEffect(() => {
     console.warn("[AppliedDatasets] effect triggered with:", appliedDatasets, "timelineDate:", timelineDate);
-    const filtered = (appliedDatasets ?? []).map((d) => d.id);
+    const filtered = (appliedDatasets ?? []).map((d) => `${d.id}-${d.type}`);
     const next = new Set(filtered);
     const prevKeys = Object.keys(renderedLayers);
     const prev = new Set(prevKeys);
@@ -68,16 +68,16 @@ export function useS3DatasetLayers(
       setRenderedLayers({});
     }
 
-    const toRemove = prevKeys.filter((id) => !next.has(id));
-    const toKeep = prevKeys.filter((id) => next.has(id));
+    const toRemove = prevKeys.filter((key) => !next.has(key));
+    const toKeep = prevKeys.filter((key) => next.has(key));
     const toAdd = dateChanged
       ? [...next]
-      : [...next].filter((id) => !prev.has(id));
+      : [...next].filter((key) => !prev.has(key));
 
     if (!dateChanged && toRemove.length > 0) {
       setRenderedLayers((prev) => {
         const nextMap = { ...prev };
-        for (const id of toRemove) delete nextMap[id];
+        for (const key of toRemove) delete nextMap[key];
         return nextMap;
       });
       if (toAdd.length === 0) {
@@ -103,9 +103,17 @@ export function useS3DatasetLayers(
     async function fetchNew() {
       const additions: Record<string, RenderedLayer> = {};
 
-      for (const dsId of toAdd) {
+      for (const dsKey of toAdd) {
         if (!isActive) break;
-        showNotification(`Looking up "${dsId}"...`, "info");
+        
+        // Find the actual dataset entry from the applied list
+        const dsEntry = (appliedDatasets ?? []).find((d) => `${d.id}-${d.type}` === dsKey);
+        if (!dsEntry) continue;
+        
+        const dsId = dsEntry.id;
+        const isVector = dsEntry.type === "vector";
+        
+        showNotification(`Looking up "${dsId}" (${dsEntry.type})...`, "info");
 
         const parent = getParentDataset(dsId);
         const dsInfo = getDatasetById(dsId);
@@ -128,9 +136,6 @@ export function useS3DatasetLayers(
           `gis-data/${dsSlug}/${categorySlug}/${y}/${md}/`,
           `gis-data/${dsSlug}/${categorySlug}/${y}/`,
         ];
-
-        const dsEntry = (appliedDatasets ?? []).find((d) => d.id === dsId);
-        const isVector = dsEntry?.type === "vector";
 
         let foundKey: string | null = null;
         let vdcKey: string | null = null;
@@ -176,7 +181,7 @@ export function useS3DatasetLayers(
 
         const catName = dsInfo?.name || dsId;
         if (!foundKey) {
-          showNotification(`No data found for "${catName}" on ${dateStr}`, "error");
+          showNotification(`No ${isVector ? 'vector' : 'raster'} data found for "${catName}" on ${dateStr}`, "error");
           continue;
         }
 
@@ -184,7 +189,7 @@ export function useS3DatasetLayers(
           const proxyUrl = `/api/tif?key=${encodeURIComponent(foundKey)}`;
           if (isVector) {
             const ext = "." + (foundKey.split(".").pop() || "").toLowerCase();
-            additions[dsId] = {
+            additions[dsKey] = {
               name: parent ? `${parent.name} - ${catName}` : catName,
               proxyUrl,
               type: "vector",
@@ -192,7 +197,7 @@ export function useS3DatasetLayers(
               vdcUrl: vdcKey ? `/api/tif?key=${encodeURIComponent(vdcKey)}` : undefined,
             };
           } else {
-            additions[dsId] = {
+            additions[dsKey] = {
               name: parent ? `${parent.name} - ${catName}` : catName,
               proxyUrl,
               type: "raster",
@@ -209,7 +214,7 @@ export function useS3DatasetLayers(
 
       setRenderedLayers((prev) => {
         const nextMap = { ...prev };
-        for (const [id, info] of Object.entries(additions)) nextMap[id] = info;
+        for (const [key, info] of Object.entries(additions)) nextMap[key] = info;
         return nextMap;
       });
 

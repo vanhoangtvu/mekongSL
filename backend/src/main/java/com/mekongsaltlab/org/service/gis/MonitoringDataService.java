@@ -101,6 +101,7 @@ public class MonitoringDataService {
             .map(station -> monitoringDataFileRepository
                 .findByMonitoringStationIdAndParameterOrderByDataYearDescDataMonthDescDataDayDesc(station.getId(), parameter)
                 .stream()
+                .filter(dataFile -> dataFile.getS3Object() != null && Boolean.FALSE.equals(dataFile.getS3Object().getIsDeleted()))
                 .map(this::toResponse)
                 .collect(Collectors.toList()))
             .orElse(List.of());
@@ -111,6 +112,7 @@ public class MonitoringDataService {
             .map(station -> monitoringDataFileRepository
                 .findByMonitoringStationId(station.getId())
                 .stream()
+                .filter(dataFile -> dataFile.getS3Object() != null && Boolean.FALSE.equals(dataFile.getS3Object().getIsDeleted()))
                 .map(this::toResponse)
                 .collect(Collectors.toList()))
             .orElse(List.of());

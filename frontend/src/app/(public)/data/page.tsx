@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useState, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { authService } from '../../../lib/auth';
-import { DATA_SOURCE_OPTIONS, DEFAULT_DATA_SOURCE, ECOWITT_DEVICES, type DataSourceKey } from '../../../lib/constants/data-sources';
+import { DATA_SOURCE_OPTIONS, DEFAULT_DATA_SOURCE, type DataSourceKey } from '../../../lib/constants/data-sources';
 import { collectRecordKeys, formatRecordValue, type DataRecord } from '../../../lib/utils/record-utils';
 import { loadDataDevices, loadDataRows, loadDataTimeframes, uploadS3File, listS3Files, deleteS3File, downloadS3File } from '../../../lib/admin-api';
 import DataExportModal from '../../../components/DataExportModal';
@@ -161,9 +161,9 @@ const GIS_DATASETS = {
   'hydrology': {
     label: 'Hydrology',
     categories: [
-      { key: 'salinity-monitoring', label: 'Salinity Intrusion Monitoring' },
-      { key: 'water-temperature-monitoring', label: 'Water Temperature Monitoring' },
-      { key: 'ph-monitoring', label: 'pH Monitoring' }
+      { key: 'salinity-monitoring', label: 'Salinity' },
+      { key: 'water-temperature-monitoring', label: 'Temperature' },
+      { key: 'ph-monitoring', label: 'pH' }
     ]
   },
   'baseline-environment': {
@@ -183,25 +183,47 @@ const GIS_DATASETS = {
 };
 
 const STATION_DATA_TYPES = [
-  { key: 'water-quality', label: 'Chất lượng nước (Water Quality)' },
-  { key: 'ecology', label: 'Sinh thái (Ecology)' }
+  { key: 'water-quality', label: 'Chất lượng nước' },
+  { key: 'ecology', label: 'Sinh thái' }
 ];
 
 const STATION_PARAMETERS = [
   { key: 'ph', label: 'pH' },
-  { key: 'salinity', label: 'Độ mặn (Salinity)' },
-  { key: 'temperature', label: 'Nhiệt độ (Temperature)' },
-  { key: 'do', label: 'Oxy hòa tan (DO)' },
-  { key: 'water-level', label: 'Mực nước (Water Level)' },
-  { key: 'flow', label: 'Lưu lượng (Flow)' }
+  { key: 'salinity', label: 'Độ mặn' },
+  { key: 'temperature', label: 'Nhiệt độ' },
+  { key: 'do', label: 'DO' },
+  { key: 'water-level', label: 'Mực nước' },
+  { key: 'flow', label: 'Lưu lượng' }
 ];
 
 const MONITORING_PARAMETERS = [
-  { key: 'salinity', label: 'Độ mặn (Salinity)' },
-  { key: 'temperature', label: 'Nhiệt độ (Temperature)' },
+  { key: 'salinity', label: 'Độ mặn' },
+  { key: 'temperature', label: 'Nhiệt độ' },
   { key: 'ph', label: 'pH' },
-  { key: 'water-level', label: 'Mực nước (Water Level)' }
+  { key: 'water-level', label: 'Mực nước' }
 ];
+
+const TIME_SLOTS = ['05:00', '10:00', '15:00', '20:00', '00:00'];
+
+function getNearestTimeSlot(): string {
+  const now = new Date();
+  const totalMinutes = now.getHours() * 60 + now.getMinutes();
+  const slotMinutes = TIME_SLOTS.map(t => {
+    const [h, m] = t.split(':').map(Number);
+    return h * 60 + m;
+  });
+  let nearestIdx = 0;
+  let minDiff = Infinity;
+  slotMinutes.forEach((sm, idx) => {
+    let diff = Math.abs(totalMinutes - sm);
+    if (diff > 720) diff = 1440 - diff;
+    if (diff < minDiff) {
+      minDiff = diff;
+      nearestIdx = idx;
+    }
+  });
+  return TIME_SLOTS[nearestIdx];
+}
 
 // S3 Flat File List Component
 function S3FlatFileList({ prefix, onPreviewFile }: { prefix: string; onPreviewFile?: (file: any) => void }) {
@@ -1100,6 +1122,98 @@ function FilePreviewModal({ fileKey, onClose }: FilePreviewModalProps) {
   );
 }
 
+function DeviceItem({ device, onRefresh }: { device: { id: string; name: string }; onRefresh: () => void }) {
+  const [editing, setEditing] = useState(false);
+  const [newName, setNewName] = useState(device.name);
+
+  const handleRename = async () => {
+    const trimmed = newName.trim();
+    if (!trimmed || trimmed === device.name) {
+      setEditing(false);
+      return;
+    }
+    try {
+      const token = authService.getToken();
+      const res = await fetch('/api/ecowitt/devices', {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({ deviceId: device.id, name: trimmed }),
+      });
+      if (res.ok) {
+        setEditing(false);
+        onRefresh();
+      } else {
+        const err = await res.json();
+        alert('Lỗi: ' + (err.error || 'Không thể đổi tên'));
+      }
+    } catch {
+      alert('Lỗi kết nối đến server');
+    }
+  };
+
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 14px', background: 'var(--surface)', borderRadius: 'var(--radius-md)', border: '1px solid var(--border)' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flex: 1, minWidth: 0 }}>
+        <Server size={16} color="var(--accent)" />
+        <div style={{ flex: 1, minWidth: 0 }}>
+          {editing ? (
+            <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+              <input
+                type="text"
+                value={newName}
+                onChange={(e) => setNewName(e.target.value)}
+                onKeyDown={(e) => { if (e.key === 'Enter') handleRename(); if (e.key === 'Escape') { setEditing(false); setNewName(device.name); } }}
+                style={{ flex: 1, padding: '4px 8px', border: '1px solid var(--accent)', borderRadius: 'var(--radius-md)', background: 'var(--surface)', color: 'var(--text)', fontSize: '0.9rem', outline: 'none' }}
+                autoFocus
+              />
+              <button onClick={handleRename} style={{ border: 'none', background: 'var(--accent)', color: '#fff', padding: '4px 10px', borderRadius: 'var(--radius-md)', fontSize: '0.8rem', cursor: 'pointer', fontWeight: '600' }}>Lưu</button>
+              <button onClick={() => { setEditing(false); setNewName(device.name); }} style={{ border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text-muted)', padding: '4px 10px', borderRadius: 'var(--radius-md)', fontSize: '0.8rem', cursor: 'pointer' }}>Hủy</button>
+            </div>
+          ) : (
+            <span style={{ fontWeight: '600', fontSize: '0.9rem', color: 'var(--text)', cursor: 'pointer' }} onClick={() => { setNewName(device.name); setEditing(true); }}>{device.name}</span>
+          )}
+          <span style={{ marginLeft: '8px', fontSize: '0.8rem', color: 'var(--text-muted)', fontFamily: 'monospace' }}>ID: {device.id}</span>
+        </div>
+      </div>
+      <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+        <button
+          onClick={() => { setNewName(device.name); setEditing(true); }}
+          style={{ border: 'none', background: 'none', cursor: 'pointer', color: 'var(--accent)', padding: '6px', borderRadius: '6px', display: 'flex', alignItems: 'center', gap: '4px', fontSize: '0.85rem' }}
+          title="Đổi tên"
+        >
+          ✏️
+        </button>
+        <button
+          onClick={async () => {
+            if (!window.confirm(`Xóa thiết bị ${device.name} (${device.id})?`)) return;
+            try {
+              const token = authService.getToken();
+              const res = await fetch(`/api/ecowitt/devices?id=${encodeURIComponent(device.id)}`, {
+                method: 'DELETE',
+                headers: token ? { Authorization: `Bearer ${token}` } : {},
+              });
+              if (res.ok) onRefresh();
+              else {
+                const err = await res.json();
+                alert('Lỗi: ' + (err.error || 'Không thể xóa thiết bị'));
+              }
+            } catch {
+              alert('Lỗi kết nối đến server');
+            }
+          }}
+          style={{ border: 'none', background: 'none', cursor: 'pointer', color: '#dc3545', padding: '6px', borderRadius: '6px', display: 'flex', alignItems: 'center', gap: '4px', fontSize: '0.85rem' }}
+          title="Xóa thiết bị"
+        >
+          <Trash2 size={15} />
+        </button>
+      </div>
+    </div>
+  );
+}
+
 export default function DataPage() {
   const router = useRouter();
   const hasValue = (val: unknown) => {
@@ -1109,7 +1223,13 @@ export default function DataPage() {
   const [data, setData] = useState<DataRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [fetching, setFetching] = useState(false);
-  const [activeTab, setActiveTab] = useState<'ingest' | 'browse' | 'upload'>('browse');
+  const [activeTab, setActiveTab] = useState<'ingest' | 'browse' | 'upload'>(() => {
+    if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem('dataPage:activeTab');
+      if (saved === 'ingest' || saved === 'browse' || saved === 'upload') return saved;
+    }
+    return 'browse';
+  });
   const [previewFile, setPreviewFile] = useState<any>(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [provinceFilter, setProvinceFilter] = useState<ProvinceFilter>('all');
@@ -1125,6 +1245,7 @@ export default function DataPage() {
   const [addDeviceError, setAddDeviceError] = useState('');
   const [addDeviceSuccess, setAddDeviceSuccess] = useState('');
   const [authChecked, setAuthChecked] = useState(false);
+  const canManageData = useMemo(() => authService.canAccess('DATA_MANAGER'), []);
   const [showExportModal, setShowExportModal] = useState(false);
   const [deviceId, setDeviceId] = useState('');
   const [ecowittDevices, setEcowittDevices] = useState<Array<{ id: string; name: string }>>([]);
@@ -1135,10 +1256,10 @@ export default function DataPage() {
   // GIS Data Form States
   const [gisDataset, setGisDataset] = useState<string>('');
   const [gisCategory, setGisCategory] = useState<string>('');
-  const [gisYear, setGisYear] = useState<string>('');
-  const [gisMonth, setGisMonth] = useState<string>('');
-  const [gisDay, setGisDay] = useState<string>('');
-  const [gisTime, setGisTime] = useState<string>('');
+  const [gisYear, setGisYear] = useState<string>(String(new Date().getFullYear()));
+  const [gisMonth, setGisMonth] = useState<string>(String(new Date().getMonth() + 1));
+  const [gisDay, setGisDay] = useState<string>(String(new Date().getDate()));
+  const [gisTime, setGisTime] = useState<string>(() => getNearestTimeSlot());
   const [gisDataType, setGisDataType] = useState<string>('');
   const [gisDescription, setGisDescription] = useState<string>('');
   
@@ -1146,7 +1267,7 @@ export default function DataPage() {
   const [selectedStation, setSelectedStation] = useState<string>('');
   const [selectedParam, setSelectedParam] = useState<string>('');
   const [selectedDate, setSelectedDate] = useState<string>('');
-  const [selectedTime, setSelectedTime] = useState<string>('');
+  const [selectedTime, setSelectedTime] = useState<string>(() => getNearestTimeSlot());
   const [uploadDescription, setUploadDescription] = useState<string>('');
   const [stationDataType, setStationDataType] = useState<string>('');
   
@@ -1156,6 +1277,11 @@ export default function DataPage() {
   const [uploadStatus, setUploadStatus] = useState<'idle' | 'uploading' | 'completed' | 'failed' | 'cancelled'>('idle');
   const [uploadErrorMessage, setUploadErrorMessage] = useState<string>('');
   const [isDragActive, setIsDragActive] = useState<boolean>(false);
+
+  // Persist active tab across page reloads
+  useEffect(() => {
+    localStorage.setItem('dataPage:activeTab', activeTab);
+  }, [activeTab]);
 
   // Synchronize GIS Category when GIS Dataset changes
   useEffect(() => {
@@ -1230,11 +1356,7 @@ export default function DataPage() {
         router.replace('/auth');
         return false;
       }
-      if (!authService.canAccess('DATA_MANAGER')) {
-        router.replace('/unauthorized');
-        return false;
-      }
-      return true;
+    return true;
     };
 
     if (checkAuth()) {
@@ -1275,22 +1397,33 @@ export default function DataPage() {
     );
   }, [authChecked, dateFilter, loadData, selectedRunId, selectedSource]);
 
-  // Load device list from DB for ecowitt
+  // Load device list from API for ecowitt
   useEffect(() => {
     if (!authChecked || selectedSource !== 'ecowitt') return;
 
     const fetchDevices = async () => {
       try {
-        const devices = await loadDataDevices('ecowitt');
-        if (devices.length > 0) {
-          setEcowittDevices(
-            devices.map((d) => ({ id: d.device_id, name: `Trạm ${d.device_id}` })),
-          );
+        const res = await fetch('/api/ecowitt/devices');
+        const data = await res.json();
+        if (data.devices && Array.isArray(data.devices) && data.devices.length > 0) {
+          setEcowittDevices(data.devices);
         } else {
-          setEcowittDevices(ECOWITT_DEVICES as unknown as Array<{ id: string; name: string }>);
+          const devices = await loadDataDevices('ecowitt');
+          if (devices.length > 0) {
+            setEcowittDevices(devices.map((d) => ({ id: d.device_id, name: `Trạm ${d.device_id}` })));
+          } else {
+            setEcowittDevices([]);
+          }
         }
       } catch {
-        setEcowittDevices(ECOWITT_DEVICES as unknown as Array<{ id: string; name: string }>);
+        try {
+          const devices = await loadDataDevices('ecowitt');
+          if (devices.length > 0) {
+            setEcowittDevices(devices.map((d) => ({ id: d.device_id, name: `Trạm ${d.device_id}` })));
+          }
+        } catch {
+          setEcowittDevices([]);
+        }
       }
     };
 
@@ -1328,9 +1461,152 @@ export default function DataPage() {
         color: '#64748b'
       }}>
         Đang xác thực quyền truy cập...
+    </div>
+  );
+}
+
+// ── Lịch tự động thu thập dữ liệu ──
+const SCHEDULE_OPTIONS: Record<string, { cron: string; label: string }[]> = {
+  ecowitt: [
+    { cron: '*/5 * * * *', label: 'Mỗi 5 phút' },
+    { cron: '*/15 * * * *', label: 'Mỗi 15 phút' },
+    { cron: '*/30 * * * *', label: 'Mỗi 30 phút' },
+    { cron: '0 * * * *', label: 'Mỗi 1 giờ' },
+    { cron: '0 */3 * * *', label: 'Mỗi 3 giờ' },
+    { cron: '0 */6 * * *', label: 'Mỗi 6 giờ' },
+  ],
+  mekong: [
+    { cron: '0 */2 * * *', label: 'Mỗi 2 giờ (12 lần/ngày)' },
+    { cron: '0 0,6,12,18 * * *', label: '4 lần/ngày (0, 6, 12, 18)' },
+    { cron: '0 0,5,10,15,20 * * *', label: '5 lần/ngày (0, 5, 10, 15, 20)' },
+    { cron: '0 0,8,16 * * *', label: '3 lần/ngày (0, 8, 16)' },
+    { cron: '0 0,12 * * *', label: '2 lần/ngày (0, 12)' },
+    { cron: '0 0 * * *', label: '1 lần/ngày (0h)' },
+  ],
+};
+const CUSTOM_LABEL = '✏️ Tùy chỉnh...';
+
+function ScheduleConfig({ source }: { source: string }) {
+  const isAdmin = useMemo(() => authService.hasRole('ADMIN'), []);
+  const key = source === 'mekong' ? 'mekong' : 'ecowitt';
+  const options = SCHEDULE_OPTIONS[key];
+
+  const [config, setConfig] = useState<{ ecowitt: { cron: string; label: string }; mekong: { cron: string; label: string } } | null>(null);
+  const [sel, setSel] = useState('');
+  const [custom, setCustom] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [msg, setMsg] = useState('');
+
+  useEffect(() => {
+    fetch('/api/settings/fetch-schedule')
+      .then((r) => r.json())
+      .then((data) => {
+        setConfig(data);
+        const current = key === 'ecowitt' ? data.ecowitt?.cron : data.mekong?.cron;
+        const matched = options.find((o) => o.cron === current);
+        if (matched) {
+          setSel(matched.cron);
+        } else {
+          setSel('__custom__');
+          setCustom(current || '');
+        }
+      })
+      .catch(() => setConfig(null));
+  }, [key]);
+
+  const save = async () => {
+    if (!config) return;
+    setSaving(true);
+    setMsg('');
+    const cronVal = sel === '__custom__' ? custom : sel;
+    const labelVal = sel === '__custom__' ? custom : (options.find((o) => o.cron === sel)?.label || sel);
+    try {
+      const body = key === 'ecowitt'
+        ? { ecowitt: { cron: cronVal, label: labelVal }, mekong: config.mekong }
+        : { ecowitt: config.ecowitt, mekong: { cron: cronVal, label: labelVal } };
+      const res = await fetch('/api/settings/fetch-schedule', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setConfig(data.config);
+        setMsg('Đã lưu thành công!');
+      } else {
+        setMsg(data.error || 'Lỗi không xác định');
+      }
+    } catch {
+      setMsg('Không thể kết nối server');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (!isAdmin || !config) return null;
+
+  const label = key === 'ecowitt' ? 'Ecowitt' : 'Mekong';
+
+  return (
+    <div style={{
+      marginTop: '16px',
+      padding: '12px 16px',
+      background: 'rgba(13, 110, 253, 0.03)',
+      borderRadius: 'var(--radius-md)',
+      border: '1px solid rgba(13, 110, 253, 0.1)',
+    }}>
+      <h4 style={{ margin: '0 0 10px 0', fontSize: '0.9rem', fontWeight: '600', color: 'var(--text)' }}>
+        ⏰ Lịch tự động thu thập · {label}
+      </h4>
+      <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', alignItems: 'end' }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', flex: 1, minWidth: '180px' }}>
+          <label style={{ fontSize: '0.75rem', fontWeight: '600', color: 'var(--text-muted)' }}>Chu kỳ</label>
+          <select
+            value={sel}
+            onChange={(e) => setSel(e.target.value)}
+            style={{
+              padding: '6px 10px', border: '1px solid var(--border)', borderRadius: 'var(--radius-md)',
+              background: 'var(--surface)', color: 'var(--text)', fontSize: '0.85rem', outline: 'none',
+            }}
+          >
+            {options.map((opt) => (
+              <option key={opt.cron} value={opt.cron}>{opt.label}</option>
+            ))}
+            <option value="__custom__">{CUSTOM_LABEL}</option>
+          </select>
+        </div>
+        {sel === '__custom__' && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', flex: 1, minWidth: '160px' }}>
+            <label style={{ fontSize: '0.75rem', fontWeight: '600', color: 'var(--text-muted)' }}>Cron expression</label>
+            <input
+              value={custom}
+              onChange={(e) => setCustom(e.target.value)}
+              placeholder="VD: */15 * * * *"
+              style={{
+                padding: '6px 10px', border: '1px solid var(--border)', borderRadius: 'var(--radius-md)',
+                background: 'var(--surface)', color: 'var(--text)', fontSize: '0.85rem',
+                fontFamily: 'monospace', outline: 'none',
+              }}
+            />
+          </div>
+        )}
+        <button
+          onClick={save}
+          disabled={saving}
+          style={{
+            padding: '6px 16px', borderRadius: 'var(--radius-md)', border: 'none',
+            background: saving ? 'var(--text-muted)' : 'var(--accent)', color: '#fff',
+            fontSize: '0.82rem', fontWeight: '600', cursor: saving ? 'not-allowed' : 'pointer',
+            whiteSpace: 'nowrap',
+          }}
+        >
+          {saving ? '⏳' : 'Lưu'}
+        </button>
+        {msg && <span style={{ fontSize: '0.78rem', color: msg.includes('thành công') ? '#28a745' : '#dc3545' }}>{msg}</span>}
       </div>
-    );
-  }
+    </div>
+  );
+}
 
   const handleFetchData = async () => {
     setFetching(true);
@@ -1392,9 +1668,38 @@ export default function DataPage() {
       const result = await res.json();
 
       if (res.ok) {
+        // Register device into ecowitt_device table
+        try {
+          const token = authService.getToken();
+          await fetch('/api/ecowitt/devices', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              ...(token ? { Authorization: `Bearer ${token}` } : {}),
+            },
+            body: JSON.stringify({ deviceId }),
+          });
+        } catch { /* non-critical */ }
+
         setAddDeviceSuccess(`✓ Đã fetch dữ liệu cho device ${deviceId} thành công!`);
         setNewDeviceId('');
         setTimeout(() => setAddDeviceSuccess(''), 5000);
+        // Refresh devices list & current data
+        if (dateFilter) {
+          await loadTimeframes(selectedSource, dateFilter);
+        }
+        await loadData(selectedSource, dateFilter || undefined, selectedRunId || undefined);
+        // Refresh device list from API
+        try {
+          const token = authService.getToken();
+          const devRes = await fetch('/api/ecowitt/devices', {
+            headers: token ? { Authorization: `Bearer ${token}` } : {},
+          });
+          const devData = await devRes.json();
+          if (devData.devices && Array.isArray(devData.devices)) {
+            setEcowittDevices(devData.devices);
+          }
+        } catch { /* keep current list */ }
       } else {
         setAddDeviceError(result.message || 'Lỗi không xác định');
       }
@@ -1540,7 +1845,7 @@ export default function DataPage() {
   const autoDetectType = (fileName: string) => {
     const ext = fileName.substring(fileName.lastIndexOf('.')).toLowerCase();
     const rasterExts = ['.tif', '.tiff', '.cog', '.png', '.jpg', '.jpeg', '.rst'];
-    const vectorExts = ['.geojson', '.shp', '.kml', '.gpkg', '.zip', '.vtc', '.vct'];
+    const vectorExts = ['.geojson', '.shp', '.kml', '.gpkg', '.zip', '.vtc', '.vct', '.vdc'];
     
     if (uploadGroup === 'gis') {
       if (rasterExts.includes(ext)) {
@@ -1561,12 +1866,12 @@ export default function DataPage() {
           return { valid: false, message: `File Raster không hợp lệ. Chỉ cho phép các định dạng: ${allowed.join(', ')}` };
         }
       } else if (gisDataType === 'vector') {
-        const allowed = ['.geojson', '.shp', '.kml', '.gpkg', '.zip', '.vtc', '.vct'];
+        const allowed = ['.geojson', '.shp', '.kml', '.gpkg', '.zip', '.vtc', '.vct', '.vdc'];
         if (!allowed.includes(ext)) {
           return { valid: false, message: `File Vector không hợp lệ. Chỉ cho phép các định dạng: ${allowed.join(', ')}` };
         }
       } else {
-        const allowed = ['.tif', '.tiff', '.cog', '.png', '.jpg', '.jpeg', '.rst', '.geojson', '.shp', '.kml', '.gpkg', '.zip', '.vtc', '.vct'];
+        const allowed = ['.tif', '.tiff', '.cog', '.png', '.jpg', '.jpeg', '.rst', '.geojson', '.shp', '.kml', '.gpkg', '.zip', '.vtc', '.vct', '.vdc'];
         if (!allowed.includes(ext)) {
           return { valid: false, message: `File GIS không hợp lệ. Chỉ cho phép các định dạng: ${allowed.join(', ')}` };
         }
@@ -1776,8 +2081,8 @@ export default function DataPage() {
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: '10px', marginBottom: '20px' }}>
             {[
               { key: 'browse', label: 'Tra cứu dữ liệu' },
-              { key: 'ingest', label: 'Nhận dữ liệu' },
-              { key: 'upload', label: 'Nhập dữ liệu' },
+              ...(canManageData ? [{ key: 'ingest', label: 'Nhận dữ liệu' }] : []),
+              ...(canManageData ? [{ key: 'upload', label: 'Nhập dữ liệu' }] : []),
             ].map((tab) => {
               const isActive = activeTab === tab.key;
               return (
@@ -1835,7 +2140,7 @@ export default function DataPage() {
                     style={{ padding: '10px 12px', border: '1px solid var(--border)', borderRadius: 'var(--radius-md)', background: 'var(--surface)', color: 'var(--text)', fontSize: '0.95rem', outline: 'none' }}
                   >
                     <option value="">Tất cả</option>
-                    {(ecowittDevices.length > 0 ? ecowittDevices : ECOWITT_DEVICES).map((d) => (
+                    {ecowittDevices.map((d) => (
                       <option key={d.id} value={d.id}>{d.name}</option>
                     ))}
                   </select>
@@ -2046,8 +2351,34 @@ export default function DataPage() {
                   <p style={{ margin: '8px 0 0 0', fontSize: '0.85rem', color: '#28a745' }}>{addDeviceSuccess}</p>
                 )}
               </div>
+
+              <div style={{ marginTop: '16px', padding: '16px', background: 'rgba(220, 53, 69, 0.05)', borderRadius: 'var(--radius-md)', border: '1px solid rgba(220, 53, 69, 0.15)' }}>
+                <h4 style={{ margin: '0 0 12px 0', fontSize: '0.95rem', fontWeight: '600', color: 'var(--text)' }}>📋 Danh sách thiết bị đã đăng ký</h4>
+                {ecowittDevices.length === 0 ? (
+                  <p style={{ margin: '8px 0', fontSize: '0.85rem', color: 'var(--text-muted)' }}>Chưa có thiết bị nào được đăng ký.</p>
+                ) : (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                    {ecowittDevices.map((dev) => (
+                      <DeviceItem
+                        key={dev.id}
+                        device={dev}
+                        onRefresh={() => {
+                          const token = authService.getToken();
+                          fetch('/api/ecowitt/devices', {
+                            headers: token ? { Authorization: `Bearer ${token}` } : {},
+                          }).then(r => r.json()).then(data => {
+                            if (data.devices && Array.isArray(data.devices)) setEcowittDevices(data.devices);
+                          }).catch(() => {});
+                        }}
+                      />
+                    ))}
+                  </div>
+                )}
+              </div>
             </>
           )}
+
+          {activeTab === 'ingest' && <ScheduleConfig source={selectedSource} />}
 
           {activeTab === 'browse' && !loading && (
             <div style={{ marginTop: '20px', padding: '12px 16px', background: 'rgba(13, 110, 253, 0.05)', borderRadius: 'var(--radius-md)', border: '1px solid rgba(13, 110, 253, 0.1)', display: 'flex', alignItems: 'center', gap: '12px' }}>
@@ -2158,7 +2489,7 @@ export default function DataPage() {
           </div>
         ) : null}
 
-        {activeTab === 'upload' && (
+        {canManageData && activeTab === 'upload' && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '24px', marginTop: '10px' }}>
             <div className="upload-tab-container fade-in" style={{ display: 'flex', gap: '24px', flexWrap: 'wrap' }}>
             {/* Cột trái: Form nhập liệu */}
@@ -2313,12 +2644,16 @@ export default function DataPage() {
                           <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.85rem', fontWeight: '600', color: 'var(--text)' }}>
                             <Clock size={14} color={hasValue(gisTime) ? "var(--accent)" : "var(--text-muted)"} /> Giờ (Tùy chọn)
                           </label>
-                          <input
-                            type="time"
+                          <select
                             value={gisTime}
                             onChange={(e) => setGisTime(e.target.value)}
                             className={`form-input ${hasValue(gisTime) ? 'has-value' : ''}`}
-                          />
+                          >
+                            <option value="">--</option>
+                            {TIME_SLOTS.map(slot => (
+                              <option key={slot} value={slot}>{slot}</option>
+                            ))}
+                          </select>
                         </div>
                       </div>
                     </div>
@@ -2420,12 +2755,15 @@ export default function DataPage() {
                           <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.85rem', fontWeight: '600', color: 'var(--text)' }}>
                             <Clock size={14} color={hasValue(selectedTime) ? "var(--accent)" : "var(--text-muted)"} /> Giờ ghi nhận <span style={{ color: '#dc3545' }}>*</span>
                           </label>
-                          <input
-                            type="time"
+                          <select
                             value={selectedTime}
                             onChange={(e) => setSelectedTime(e.target.value)}
                             className={`form-input ${hasValue(selectedTime) ? 'has-value' : ''}`}
-                          />
+                          >
+                            {TIME_SLOTS.map(slot => (
+                              <option key={slot} value={slot}>{slot}</option>
+                            ))}
+                          </select>
                         </div>
                       </div>
                     </div>
@@ -2510,12 +2848,15 @@ export default function DataPage() {
                           <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.85rem', fontWeight: '600', color: 'var(--text)' }}>
                             <Clock size={14} color={hasValue(selectedTime) ? "var(--accent)" : "var(--text-muted)"} /> Giờ ghi nhận <span style={{ color: '#dc3545' }}>*</span>
                           </label>
-                          <input
-                            type="time"
+                          <select
                             value={selectedTime}
                             onChange={(e) => setSelectedTime(e.target.value)}
                             className={`form-input ${hasValue(selectedTime) ? 'has-value' : ''}`}
-                          />
+                          >
+                            {TIME_SLOTS.map(slot => (
+                              <option key={slot} value={slot}>{slot}</option>
+                            ))}
+                          </select>
                         </div>
                       </div>
                     </div>
@@ -2577,7 +2918,7 @@ export default function DataPage() {
                         ? gisDataType === 'raster'
                           ? '.tif,.tiff,.cog,.png,.jpg,.jpeg,.rst'
                           : gisDataType === 'vector'
-                            ? '.geojson,.shp,.kml,.gpkg,.zip,.vtc,.vct'
+                            ? '.geojson,.shp,.kml,.gpkg,.zip,.vtc,.vct,.vdc'
                             : '.tif,.tiff,.cog,.png,.jpg,.jpeg,.rst,.geojson,.shp,.kml,.gpkg,.zip,.vtc,.vct'
                         : '.csv'
                     }
@@ -2611,8 +2952,8 @@ export default function DataPage() {
                         ? gisDataType === 'raster'
                           ? 'Raster: .tif, .tiff, .cog, .png, .jpg, .jpeg, .rst (Tối đa 100MB)'
                           : gisDataType === 'vector'
-                            ? 'Vector: .geojson, .shp, .kml, .gpkg, .zip, .vtc, .vct (Tối đa 100MB)'
-                            : 'Hỗ trợ: Raster (.tif, .rst...) và Vector (.geojson, .vtc...) (Tối đa 100MB)'
+                            ? 'Vector: .geojson, .shp, .kml, .gpkg, .zip, .vtc, .vct, .vdc (Tối đa 100MB)'
+                            : 'Hỗ trợ: Raster (.tif, .rst...) và Vector (.geojson, .vtc, .vct, .vdc...) (Tối đa 100MB)'
                         : 'Bảng dữ liệu: .csv (Tối đa 100MB)'}
                     </p>
                   </div>

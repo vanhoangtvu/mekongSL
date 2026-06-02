@@ -3,6 +3,7 @@
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 import crypto from 'node:crypto';
+import mysql from 'mysql2/promise';
 import {
   buildMysqlColumnDefinitions,
   collectRowColumns,
@@ -13,7 +14,30 @@ import {
   writeCsvSnapshot,
 } from '../lib/persistence.mjs';
 
-const DEFAULT_DEVICE_IDS = ['281727', '323414'];
+const DEFAULT_DEVICE_IDS = [];
+
+async function loadDeviceIdsFromDb() {
+  try {
+    const connection = await mysql.createConnection(MYSQL_CONFIG);
+    try {
+      const [rows] = await connection.query(
+        `SELECT device_id FROM ecowitt_device ORDER BY device_id ASC`,
+      );
+      if (Array.isArray(rows) && rows.length > 0) {
+        return rows.map((r) => String(r.device_id)).filter(Boolean);
+      }
+      const [fallbackRows] = await connection.query(
+        `SELECT DISTINCT device_id FROM ecowitt WHERE device_id IS NOT NULL AND device_id != '' ORDER BY device_id ASC`,
+      );
+      if (Array.isArray(fallbackRows) && fallbackRows.length > 0) {
+        return fallbackRows.map((r) => String(r.device_id)).filter(Boolean);
+      }
+    } finally {
+      await connection.end();
+    }
+  } catch {}
+  return ['281727', '323414', '329139'];
+}
 
 function todayDateString() {
   const now = new Date();
@@ -344,9 +368,12 @@ async function main() {
     cookie = loginResult.cookie;
   }
 
-  const deviceIds = args.deviceId
-    ? String(args.deviceId).split(',').map((id) => id.trim()).filter(Boolean)
-    : DEFAULT_DEVICE_IDS;
+  let deviceIds = [];
+  if (args.deviceId) {
+    deviceIds = String(args.deviceId).split(',').map((id) => id.trim()).filter(Boolean);
+  } else {
+    deviceIds = await loadDeviceIdsFromDb();
+  }
 
   const fetchedAt = formatMysqlDateTime();
   let allRows = [];

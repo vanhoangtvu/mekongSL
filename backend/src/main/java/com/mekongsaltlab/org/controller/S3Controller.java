@@ -108,7 +108,7 @@ public class S3Controller {
      * Delete file from S3 (ADMIN + DATA_MANAGER only)
      */
     @DeleteMapping("/delete/{*key}")
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize("hasAnyRole('ADMIN', 'DATA_MANAGER')")
     public ResponseEntity<Map<String, String>> deleteFile(@PathVariable String key) {
         String cleanKey = key.startsWith("/") ? key.substring(1) : key;
         s3Service.deleteFile(cleanKey);

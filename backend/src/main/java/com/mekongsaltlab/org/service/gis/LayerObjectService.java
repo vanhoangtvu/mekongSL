@@ -148,6 +148,7 @@ public class LayerObjectService {
     public List<LayerObjectResponse> listLayerObjects(Long layerId) {
         return layerObjectRepository.findByLayerId(layerId)
             .stream()
+            .filter(mapping -> mapping.getS3Object() != null && Boolean.FALSE.equals(mapping.getS3Object().getIsDeleted()))
             .map(this::toLayerObjectResponse)
             .collect(Collectors.toList());
     }

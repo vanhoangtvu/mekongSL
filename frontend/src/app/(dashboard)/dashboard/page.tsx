@@ -32,7 +32,7 @@ import {
   updateAdminUser,
 } from "../../../lib/admin-api";
 import S3Manager from "../../../components/admin/S3Manager";
-import { DATA_SOURCE_OPTIONS, ECOWITT_DEVICES, type DataSourceKey, type EcowittDevice } from "../../../lib/constants/data-sources";
+import { DATA_SOURCE_OPTIONS, type DataSourceKey, type EcowittDevice } from "../../../lib/constants/data-sources";
 import { collectRecordKeys, formatRecordValue, type DataRecord } from "../../../lib/utils/record-utils";
 import {
   Activity,
@@ -269,17 +269,25 @@ export default function DashboardPage() {
   useEffect(() => {
     void loadData(selectedRunId);
 
-    // Load device list from DB for ecowitt
+    // Load device list from API for ecowitt
     if (dataSource === "ecowitt") {
-      loadDataDevices("ecowitt")
-        .then((devices) => {
+      const loadFromApi = async () => {
+        try {
+          const res = await fetch('/api/ecowitt/devices');
+          const data = await res.json();
+          if (data.devices && Array.isArray(data.devices) && data.devices.length > 0) {
+            setEcowittDevices(data.devices);
+            return;
+          }
+        } catch {}
+        try {
+          const devices = await loadDataDevices("ecowitt");
           if (devices.length > 0) {
             setEcowittDevices(devices.map((d) => ({ id: d.device_id, name: `Trạm ${d.device_id}` })));
-          } else {
-            setEcowittDevices([...ECOWITT_DEVICES]);
           }
-        })
-        .catch(() => setEcowittDevices([...ECOWITT_DEVICES]));
+        } catch {}
+      };
+      loadFromApi();
     }
   }, [loadData, selectedRunId]);
 
@@ -850,7 +858,7 @@ export default function DashboardPage() {
                             Thiết bị
                             <select value={deviceId} onChange={(event) => setDeviceId(event.target.value)}>
                               <option value="">Tất cả</option>
-                              {(ecowittDevices.length > 0 ? ecowittDevices : ECOWITT_DEVICES).map((d) => (
+                              {ecowittDevices.map((d) => (
                                 <option key={d.id} value={d.id}>
                                   {d.name}
                                 </option>

@@ -178,17 +178,63 @@ public class S3Service {
     }
     
     /**
-     * Delete file from S3
+     * Delete file or folder from S3 and soft-delete in DB
      */
+    @Transactional
     public void deleteFile(String key) {
         try {
-            DeleteObjectRequest deleteObjectRequest = DeleteObjectRequest.builder()
-                    .bucket(bucketName)
-                    .key(key)
-                    .build();
-            
-            s3Client.deleteObject(deleteObjectRequest);
-            log.info("Deleted file from S3: {}", key);
+            if (key.endsWith("/")) {
+                // It's a folder: list all objects with this prefix and delete them recursively
+                ListObjectsV2Request listRequest = ListObjectsV2Request.builder()
+                        .bucket(bucketName)
+                        .prefix(key)
+                        .build();
+                ListObjectsV2Response listResponse;
+                do {
+                    listResponse = s3Client.listObjectsV2(listRequest);
+                    List<ObjectIdentifier> toDelete = listResponse.contents().stream()
+                            .map(obj -> ObjectIdentifier.builder().key(obj.key()).build())
+                            .collect(Collectors.toList());
+
+                    if (!toDelete.isEmpty()) {
+                        DeleteObjectsRequest deleteObjectsRequest = DeleteObjectsRequest.builder()
+                                .bucket(bucketName)
+                                .delete(Delete.builder().objects(toDelete).build())
+                                .build();
+                        s3Client.deleteObjects(deleteObjectsRequest);
+
+                        // Soft-delete corresponding records in DB
+                        for (ObjectIdentifier objId : toDelete) {
+                            s3ObjectRepository.findByBucketAndS3Key(bucketName, objId.key()).ifPresent(s3Object -> {
+                                s3Object.setIsDeleted(true);
+                                s3Object.setDeletedAt(Instant.now());
+                                s3ObjectRepository.save(s3Object);
+                            });
+                        }
+                    }
+                    listRequest = listRequest.toBuilder()
+                            .continuationToken(listResponse.nextContinuationToken())
+                            .build();
+                } while (listResponse.isTruncated());
+                log.info("Deleted S3 folder and contents recursively: {}", key);
+            } else {
+                // It's a single file
+                DeleteObjectRequest deleteObjectRequest = DeleteObjectRequest.builder()
+                        .bucket(bucketName)
+                        .key(key)
+                        .build();
+
+                s3Client.deleteObject(deleteObjectRequest);
+                log.info("Deleted file from S3: {}", key);
+
+                // Soft-delete corresponding record in DB
+                s3ObjectRepository.findByBucketAndS3Key(bucketName, key).ifPresent(s3Object -> {
+                    s3Object.setIsDeleted(true);
+                    s3Object.setDeletedAt(Instant.now());
+                    s3ObjectRepository.save(s3Object);
+                    log.info("Soft-deleted DB record for S3 key: {}", key);
+                });
+            }
         } catch (S3Exception e) {
             log.error("Failed to delete file from S3: {}", e.getMessage());
             throw new RuntimeException("Failed to delete file: " + e.getMessage());
