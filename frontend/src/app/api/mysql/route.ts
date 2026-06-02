@@ -242,7 +242,7 @@ export async function GET(request: NextRequest) {
         { status: 403 }
       );
     }
-    console.error('Database fetch error:', error);
-    return NextResponse.json({ error: 'Database fetch failed', data: [] }, { status: 500 });
+    console.error('Database fetch error:', message);
+    return NextResponse.json({ error: 'Database fetch failed: ' + message, data: [] }, { status: 500 });
   }
 }

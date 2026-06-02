@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { AppHeader } from "../../components/layout/app-header";
 import { AppFooter } from "../../components/layout/app-footer";
@@ -13,10 +13,22 @@ type TabType = "criteria" | "datasets" | "additional" | "results";
 export default function PublicHomePage() {
   const router = useRouter();
   const [activeTab, setActiveTab] = useState<TabType>("criteria");
+  
+  useEffect(() => {
+    const saved = localStorage.getItem('homePage:activeTab');
+    if (saved === 'criteria' || saved === 'datasets' || saved === 'additional' || saved === 'results') {
+      setActiveTab(saved);
+    }
+  }, []);
+  
   const [startDateTime, setStartDateTime] = useState("2026-05-01T00:00");
   const [endDateTime, setEndDateTime] = useState("2026-05-24T23:59");
   const [ecowittEnabled, setEcowittEnabled] = useState(false);
   const [appliedDatasets, setAppliedDatasets] = useState<Array<{ id: string; type: string }>>([]);
+
+  useEffect(() => {
+    localStorage.setItem('homePage:activeTab', activeTab);
+  }, [activeTab]);
 
   const handleApplyDatasets = (datasets: Array<{ id: string; type: string }>) => {
     setAppliedDatasets(datasets);

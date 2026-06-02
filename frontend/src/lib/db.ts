@@ -8,9 +8,17 @@ export const MYSQL_CONFIG = {
   database: process.env.MYSQL_DATABASE || 'mekong',
 };
 
-export const pool = mysql.createPool({
+declare global {
+  var _mysqlPool: mysql.Pool | undefined;
+}
+
+export const pool = global._mysqlPool || mysql.createPool({
   ...MYSQL_CONFIG,
   waitForConnections: true,
   connectionLimit: 10,
   queueLimit: 0,
 });
+
+if (process.env.NODE_ENV !== 'production') {
+  global._mysqlPool = pool;
+}
