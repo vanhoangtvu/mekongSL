@@ -15,7 +15,7 @@ import { Style, Circle, Fill, Stroke, Text } from "ol/style";
 import proj4 from "proj4";
 import { register } from "ol/proj/proj4";
 import { DATASETS } from "../../lib/constants/datasets";
-import { ECOWITT_DEVICES } from "../../lib/constants/data-sources";
+import { ECOWITT_DEVICES, type EcowittDevice } from "../../lib/constants/data-sources";
 import { useS3DatasetLayers } from "./useS3DatasetLayers";
 
 // Register UTM 48N projection
@@ -400,17 +400,718 @@ function translateLegendLabel(label: string): string {
     .replace(/Độ sâu/g, "Depth");
 }
 
+// ---------------------------------------------------------------------------
+// SensorChart — interactive sparkline with hover crosshair
+// ---------------------------------------------------------------------------
+function SensorChart({
+  data,
+  sensor,
+  hoveredIdx,
+  onHover,
+  chartH,
+}: {
+  data: EcowittPopupSensorData[];
+  sensor: (typeof ECOWITT_POPUP_SENSORS)[number];
+  hoveredIdx: number | null;
+  onHover: (idx: number | null) => void;
+  chartH?: number;
+}) {
+  const H = chartH ?? 56;
+  const W = 240;
+  const PAD = 2;
+
+  const entries = data
+    .map((d, i) => ({ i, v: d[sensor.key] }))
+    .filter((x): x is { i: number; v: number } => x.v !== undefined && !Number.isNaN(Number(x.v)));
+
+  if (entries.length < 2) return null;
+
+  const max = Math.max(...entries.map((e) => e.v));
+  const min = Math.min(...entries.map((e) => e.v));
+  const range = max - min || 1;
+  const plotW = W - PAD * 2;
+  const plotH = H - PAD * 2;
+
+  const pts = entries.map((e) => ({
+    x: PAD + (e.i / (data.length - 1)) * plotW,
+    y: PAD + plotH - ((e.v - min) / range) * plotH,
+    i: e.i,
+    v: e.v,
+  }));
+
+  const lineD = pts.map((p, i) => `${i === 0 ? "M" : "L"}${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(" ");
+  const areaD = `M${PAD},${H} ${lineD.slice(1)} L${W - PAD},${H} Z`;
+
+  // Closest data-point for the current hover index
+  const activeIdx = hoveredIdx !== null ? Math.min(hoveredIdx, data.length - 1) : null;
+  const activePt = activeIdx !== null ? pts.find((p) => p.i === activeIdx) ?? null : null;
+  const activeData = activeIdx !== null ? data[activeIdx] : null;
+
+  return (
+    <div style={{ position: "relative" }}>
+      {/* Tooltip bar — always rendered to prevent layout shift */}
+      <div
+        style={{
+          fontSize: "0.58rem",
+          fontWeight: "700",
+          textAlign: "center",
+          whiteSpace: "nowrap",
+          overflow: "hidden",
+          textOverflow: "ellipsis",
+          marginBottom: "1px",
+          lineHeight: 1.2,
+          visibility: activeIdx !== null ? "visible" : "hidden",
+          color: activeIdx !== null ? sensor.color : "transparent",
+        }}
+      >
+        {activeData?.time ?? ""}
+        <span style={{ color: "#94a3b8", fontWeight: "400", margin: "0 2px" }}>|</span>
+        {activePt ? activePt.v.toFixed(2) : ""}
+        {sensor.unit}
+      </div>
+
+      <svg
+        viewBox={`0 0 ${W} ${H}`}
+        style={{ width: "100%", height: H, display: "block" }}
+        preserveAspectRatio="none"
+        onMouseMove={(e) => {
+          const rect = e.currentTarget.getBoundingClientRect();
+          const ratio = (e.clientX - rect.left) / rect.width;
+          const idx = Math.round(ratio * (data.length - 1));
+          onHover(Math.max(0, Math.min(idx, data.length - 1)));
+        }}
+        onMouseLeave={() => onHover(null)}
+      >
+        {/* Horizontal grid */}
+        <line x1={PAD} y1={PAD} x2={W - PAD} y2={PAD} stroke="#e2e8f0" strokeWidth="0.6" />
+        <line x1={PAD} y1={PAD + plotH * 0.5} x2={W - PAD} y2={PAD + plotH * 0.5} stroke="#e2e8f0" strokeWidth="0.6" />
+        <line x1={PAD} y1={H - PAD} x2={W - PAD} y2={H - PAD} stroke="#e2e8f0" strokeWidth="0.6" />
+
+        {/* Area fill */}
+        <path d={areaD} fill={sensor.color} fillOpacity="0.10" />
+
+        {/* Line */}
+        <path
+          d={lineD}
+          fill="none"
+          stroke={sensor.color}
+          strokeWidth="1.6"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+
+        {/* Crosshair */}
+        {activePt && (
+          <line
+            x1={activePt.x}
+            y1={PAD}
+            x2={activePt.x}
+            y2={H - PAD}
+            stroke="#94a3b8"
+            strokeWidth="0.7"
+            strokeDasharray="2,2"
+          />
+        )}
+      </svg>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// EcowittStationPopup — interactive popup card with hover-enabled charts
+// ---------------------------------------------------------------------------
+function EcowittStationPopup({
+  device,
+  data,
+  loading,
+  error,
+  expanded,
+  dateStr,
+  onDateChange,
+  onClose,
+  onExpand,
+  onCollapse,
+}: {
+  device: { id: string; name: string; lat?: number; lng?: number };
+  data: EcowittPopupSensorData[];
+  loading: boolean;
+  error: string;
+  expanded: boolean;
+  dateStr: string;
+  onDateChange: (d: string) => void;
+  onClose: () => void;
+  onExpand: () => void;
+  onCollapse: () => void;
+}) {
+  const [hoveredIdx, setHoveredIdx] = useState<number | null>(null);
+  const latestData = data.length > 0 ? data[data.length - 1] : null;
+  const popupW = expanded ? "340px" : "290px";
+
+  const getLatest = (key: EcowittPopupSensorKey): string => {
+    const v = latestData?.[key];
+    return v !== undefined && !Number.isNaN(Number(v)) ? Number(v).toFixed(2) : "--";
+  };
+
+  return (
+    <div
+      style={{
+        position: "absolute",
+        top: "72px",
+        ...(expanded ? { bottom: "110px" } : {}),
+        right: "12px",
+        width: popupW,
+        background: "#fff",
+        borderRadius: "14px",
+        boxShadow: "0 6px 32px rgba(0,0,0,0.18)",
+        zIndex: 500,
+        fontFamily: "system-ui, -apple-system, sans-serif",
+        display: "flex",
+        flexDirection: "column",
+        overflow: "hidden",
+      }}
+    >
+      <style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style>
+
+      {/* ── Header ── */}
+      <div
+        style={{
+          background: "linear-gradient(135deg, #0d6efd 0%, #0dcaf0 100%)",
+          color: "#fff",
+          padding: "10px 12px 9px",
+          position: "relative",
+          flexShrink: 0,
+        }}
+      >
+        <div
+          style={{
+            fontSize: "0.6rem",
+            opacity: 0.78,
+            fontWeight: "600",
+            letterSpacing: "0.05em",
+            textTransform: "uppercase",
+          }}
+        >
+          Trạm Ecowitt · {device.id}
+        </div>
+        <div
+          style={{
+            fontSize: "0.9rem",
+            fontWeight: "700",
+            lineHeight: 1.25,
+            paddingRight: "24px",
+            marginTop: "2px",
+          }}
+        >
+          {device.name}
+        </div>
+        {device.lat != null && (
+          <div style={{ fontSize: "0.63rem", opacity: 0.72, marginTop: "2px" }}>
+            {device.lat.toFixed(4)}°N, {device.lng?.toFixed(4)}°E
+          </div>
+        )}
+        <button
+          type="button"
+          onClick={onClose}
+          style={{
+            position: "absolute",
+            top: "8px",
+            right: "8px",
+            background: "rgba(255,255,255,0.2)",
+            border: "none",
+            color: "#fff",
+            width: "20px",
+            height: "20px",
+            borderRadius: "50%",
+            cursor: "pointer",
+            fontSize: "0.95rem",
+            lineHeight: "20px",
+            textAlign: "center",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            padding: 0,
+          }}
+          title="Đóng"
+        >
+          ×
+        </button>
+      </div>
+
+      {/* ── Date picker row ── */}
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: "6px",
+          padding: "6px 12px",
+          borderBottom: "1px solid #e2e8f0",
+          flexShrink: 0,
+        }}
+      >
+        <svg
+          width="12"
+          height="12"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="#64748b"
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        >
+          <rect x="3" y="4" width="18" height="18" rx="2" ry="2" />
+          <line x1="16" y1="2" x2="16" y2="6" />
+          <line x1="8" y1="2" x2="8" y2="6" />
+          <line x1="3" y1="10" x2="21" y2="10" />
+        </svg>
+        <input
+          type="date"
+          value={dateStr}
+          onChange={(e) => onDateChange(e.target.value)}
+          style={{
+            flex: 1,
+            border: "1px solid #e2e8f0",
+            borderRadius: "6px",
+            padding: "3px 6px",
+            fontSize: "0.75rem",
+            color: "#334155",
+            background: "#f8fafc",
+            outline: "none",
+            fontFamily: "inherit",
+          }}
+        />
+        {loading && (
+          <div
+            style={{
+              width: "14px",
+              height: "14px",
+              border: "2px solid #e2e8f0",
+              borderTopColor: "#0d6efd",
+              borderRadius: "50%",
+              animation: "spin 0.6s linear infinite",
+              flexShrink: 0,
+            }}
+          />
+        )}
+      </div>
+
+      {/* ── Body ── */}
+      <div
+        style={{
+          flex: 1,
+          overflowY: expanded ? "auto" : "hidden",
+          minHeight: 0,
+        }}
+      >
+        {/* Loading */}
+        {loading && (
+          <div
+            style={{
+              textAlign: "center",
+              padding: "20px 0",
+              color: "#64748b",
+              fontSize: "0.82rem",
+            }}
+          >
+            Đang tải dữ liệu...
+          </div>
+        )}
+
+        {/* Error */}
+        {!loading && error && (
+          <div
+            style={{
+              margin: "10px",
+              background: "#fef2f2",
+              border: "1px solid #fca5a5",
+              borderRadius: "8px",
+              padding: "9px 11px",
+              color: "#b91c1c",
+              fontSize: "0.78rem",
+            }}
+          >
+            ⚠ {error}
+          </div>
+        )}
+
+        {/* ═══ COMPACT VIEW ═══ */}
+        {!loading && !error && !expanded && (
+          <div style={{ padding: "10px" }}>
+            {latestData ? (
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "6px" }}>
+                {ECOWITT_POPUP_SENSORS.slice(0, 4).map((sensor) => {
+                  const display = getLatest(sensor.key);
+                  return (
+                    <div
+                      key={sensor.key}
+                      style={{
+                        borderRadius: "10px",
+                        background: `${sensor.color}0e`,
+                        border: `1px solid ${sensor.color}28`,
+                        overflow: "hidden",
+                        padding: "8px 9px 0",
+                      }}
+                    >
+                      <div
+                        style={{
+                          fontSize: "0.6rem",
+                          color: "#64748b",
+                          fontWeight: "600",
+                          textTransform: "uppercase",
+                          letterSpacing: "0.04em",
+                        }}
+                      >
+                        {sensor.label}
+                      </div>
+                      <div
+                        style={{
+                          fontSize: "1.1rem",
+                          fontWeight: "800",
+                          color: sensor.color,
+                          marginTop: "1px",
+                        }}
+                      >
+                        {display}
+                        <span
+                          style={{
+                            fontSize: "0.62rem",
+                            fontWeight: "500",
+                            color: "#94a3b8",
+                            marginLeft: "2px",
+                          }}
+                        >
+                          {sensor.unit}
+                        </span>
+                      </div>
+                      <SensorChart
+                        data={data}
+                        sensor={sensor}
+                        hoveredIdx={hoveredIdx}
+                        onHover={setHoveredIdx}
+                        chartH={40}
+                      />
+                    </div>
+                  );
+                })}
+              </div>
+            ) : (
+              !loading && (
+                <div
+                  style={{
+                    textAlign: "center",
+                    padding: "16px 0",
+                    color: "#94a3b8",
+                    fontSize: "0.8rem",
+                  }}
+                >
+                  Không có dữ liệu hôm nay
+                </div>
+              )
+            )}
+
+            {/* Expand button */}
+            <button
+              type="button"
+              onClick={onExpand}
+              style={{
+                width: "100%",
+                marginTop: "8px",
+                padding: "6px 0",
+                background: "linear-gradient(135deg,rgba(13,110,253,0.07),rgba(13,202,240,0.07))",
+                border: "1px solid rgba(13,110,253,0.18)",
+                borderRadius: "8px",
+                color: "#0d6efd",
+                fontSize: "0.72rem",
+                fontWeight: "700",
+                cursor: "pointer",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                gap: "4px",
+              }}
+            >
+              Xem chi tiết
+              <svg
+                width="11"
+                height="11"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2.5"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <polyline points="6 9 12 15 18 9" />
+              </svg>
+            </button>
+          </div>
+        )}
+
+        {/* ═══ EXPANDED VIEW ═══ */}
+        {!loading && !error && expanded && (
+          <div style={{ padding: "10px" }}>
+            {/* Collapse button */}
+            <button
+              type="button"
+              onClick={onCollapse}
+              style={{
+                width: "100%",
+                marginBottom: "9px",
+                padding: "5px 0",
+                background: "#f8fafc",
+                border: "1px solid #e2e8f0",
+                borderRadius: "7px",
+                color: "#64748b",
+                fontSize: "0.68rem",
+                fontWeight: "700",
+                cursor: "pointer",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                gap: "4px",
+              }}
+            >
+              <svg
+                width="10"
+                height="10"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2.5"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <polyline points="18 15 12 9 6 15" />
+              </svg>
+              Thu gọn
+            </button>
+
+            {/* Latest values table */}
+            {latestData && (
+              <>
+                <div
+                  style={{
+                    fontSize: "0.6rem",
+                    fontWeight: "700",
+                    color: "#94a3b8",
+                    textTransform: "uppercase",
+                    letterSpacing: "0.07em",
+                    marginBottom: "6px",
+                  }}
+                >
+                  Thông số mới nhất
+                </div>
+                <div
+                  style={{
+                    display: "grid",
+                    gridTemplateColumns: "1fr 1fr",
+                    gap: "5px",
+                    marginBottom: "12px",
+                  }}
+                >
+                  {ECOWITT_POPUP_SENSORS.map((sensor) => {
+                    const display = getLatest(sensor.key);
+                    return (
+                      <div
+                        key={sensor.key}
+                        style={{
+                          padding: "6px 8px",
+                          borderRadius: "8px",
+                          background: `${sensor.color}0e`,
+                          borderLeft: `2.5px solid ${sensor.color}`,
+                        }}
+                      >
+                        <div
+                          style={{
+                            fontSize: "0.59rem",
+                            color: "#64748b",
+                            fontWeight: "600",
+                            textTransform: "uppercase",
+                            letterSpacing: "0.03em",
+                          }}
+                        >
+                          {sensor.label}
+                        </div>
+                        <div
+                          style={{
+                            fontSize: "0.95rem",
+                            fontWeight: "800",
+                            color: sensor.color,
+                            marginTop: "1px",
+                          }}
+                        >
+                          {display}
+                          <span
+                            style={{
+                              fontSize: "0.6rem",
+                              fontWeight: "400",
+                              color: "#94a3b8",
+                              marginLeft: "2px",
+                            }}
+                          >
+                            {sensor.unit}
+                          </span>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </>
+            )}
+
+            {/* Charts for all 7 sensors */}
+            {data.length > 0 && (
+              <>
+                <div
+                  style={{
+                    fontSize: "0.6rem",
+                    fontWeight: "700",
+                    color: "#94a3b8",
+                    textTransform: "uppercase",
+                    letterSpacing: "0.07em",
+                    marginBottom: "8px",
+                  }}
+                >
+                  Biểu đồ trong ngày
+                </div>
+                {ECOWITT_POPUP_SENSORS.map((sensor) => (
+                  <div key={sensor.key} style={{ marginBottom: "10px" }}>
+                    <div
+                      style={{
+                        display: "flex",
+                        justifyContent: "space-between",
+                        alignItems: "baseline",
+                        marginBottom: "2px",
+                      }}
+                    >
+                      <span
+                        style={{
+                          fontSize: "0.67rem",
+                          color: "#475569",
+                          fontWeight: "600",
+                        }}
+                      >
+                        {sensor.label}
+                        {sensor.unit && (
+                          <span
+                            style={{
+                              color: "#94a3b8",
+                              fontWeight: "400",
+                              marginLeft: "2px",
+                            }}
+                          >
+                            ({sensor.unit})
+                          </span>
+                        )}
+                      </span>
+                      <span
+                        style={{
+                          fontSize: "0.7rem",
+                          color: sensor.color,
+                          fontWeight: "700",
+                        }}
+                      >
+                        {getLatest(sensor.key)}
+                      </span>
+                    </div>
+                    <div
+                      style={{
+                        background: "#f8fafc",
+                        borderRadius: "5px",
+                        overflow: "hidden",
+                        padding: "2px 2px 0",
+                      }}
+                    >
+                      <SensorChart
+                        data={data}
+                        sensor={sensor}
+                        hoveredIdx={hoveredIdx}
+                        onHover={setHoveredIdx}
+                      />
+                    </div>
+                  </div>
+                ))}
+              </>
+            )}
+
+            {/* No data */}
+            {data.length === 0 && (
+              <div
+                style={{
+                  textAlign: "center",
+                  padding: "16px 0",
+                  color: "#94a3b8",
+                  fontSize: "0.8rem",
+                }}
+              >
+                Không có dữ liệu hôm nay
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export function MapStage({ startDateTime, endDateTime, ecowittEnabled, appliedDatasets }: MapStageProps) {
   const mapContainerRef = useRef<HTMLDivElement | null>(null);
   const scrollerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<Map | null>(null);
   const ecowittLayerRef = useRef<VectorLayer<VectorSource> | null>(null);
+  const ecowittSourceRef = useRef<VectorSource | null>(null);
   const baseLayerRef = useRef<TileLayer | null>(null);
   const [pixelValue, setPixelValue] = useState<number | null>(null);
   const [mouseCoords, setMouseCoords] = useState<[number, number] | null>(null);
 
-  const { renderedLayers, layerRefs } = useS3DatasetLayers(appliedDatasets, mapRef);
-  const [activeBaseLayer, setActiveBaseLayer] = useState<BaseLayerType>("osm");
+  const [timelineUnitMode, setTimelineUnitMode] = useState<TimelineUnitMode>("auto");
+
+  const startDate = useMemo(() => parseDateTimeLocal(startDateTime), [startDateTime]);
+  const endDate = useMemo(() => parseDateTimeLocal(endDateTime), [endDateTime]);
+
+  const timelineData = useMemo(() => {
+    if (!startDate || !endDate) {
+      return { mode: "day" as TimelineResolvedMode, units: [] as TimelineUnit[] };
+    }
+
+    const normalizedStart = startDate <= endDate ? startDate : endDate;
+    const normalizedEnd = startDate <= endDate ? endDate : startDate;
+    const resolvedMode = resolveTimelineMode(normalizedStart, normalizedEnd, timelineUnitMode);
+
+    return buildTimelineUnits(normalizedStart, normalizedEnd, resolvedMode);
+  }, [startDate, endDate, timelineUnitMode]);
+
+  const timelineUnits = timelineData.units;
+
+  const [timelineIndex, setTimelineIndex] = useState(() => {
+    if (timelineUnits.length === 0) return 0;
+    const today = new Date();
+    const todayMs = today.getTime();
+    let bestIdx = 0;
+    let bestDiff = Infinity;
+    for (let i = 0; i < timelineUnits.length; i++) {
+      const diff = Math.abs(new Date(timelineUnits[i].value).getTime() - todayMs);
+      if (diff < bestDiff) {
+        bestDiff = diff;
+        bestIdx = i;
+      }
+    }
+    return bestIdx;
+  });
+
+  const rawTimelineDate = useMemo(() => {
+    const unit = timelineUnits[timelineIndex];
+    return unit?.value ? unit.value.slice(0, 10) : undefined;
+  }, [timelineIndex, timelineUnits]);
+
+  const [timelineDate, setTimelineDate] = useState(rawTimelineDate);
+  useEffect(() => {
+    const timer = setTimeout(() => setTimelineDate(rawTimelineDate), 300);
+    return () => clearTimeout(timer);
+  }, [rawTimelineDate]);
+
+  const { renderedLayers, layerRefs } = useS3DatasetLayers(appliedDatasets, mapRef, timelineDate);
+
+  const [activeBaseLayer, setActiveBaseLayer] = useState<BaseLayerType>("light");
   const [showLayerMenu, setShowLayerMenu] = useState(false);
   const [showTimeline, setShowTimeline] = useState(true);
   const [showPlayerDropdown, setShowPlayerDropdown] = useState(false);
@@ -459,14 +1160,16 @@ export function MapStage({ startDateTime, endDateTime, ecowittEnabled, appliedDa
   useEffect(() => {
     const layers = layerRefs.current;
     playerLayers.forEach((pl) => {
-      const olLayer = layers[pl.id];
+      const layerKey = pl.type ? `${pl.id}-${pl.type}` : pl.id;
+      const olLayer = layers[layerKey];
       if (olLayer) {
         olLayer.setVisible(pl.added);
       }
     });
     // z-order: first in list = on top
     playerLayers.forEach((pl, idx) => {
-      const olLayer = layers[pl.id];
+      const layerKey = pl.type ? `${pl.id}-${pl.type}` : pl.id;
+      const olLayer = layers[layerKey];
       if (olLayer) {
         const z = 100 + (playerLayers.length - idx);
         olLayer.setZIndex(z);
@@ -565,13 +1268,13 @@ export function MapStage({ startDateTime, endDateTime, ecowittEnabled, appliedDa
     return `${yyyy}-${mm}-${dd}`;
   };
 
-  const confirmAddLayer = (id: string, _layerType: "raster" | "vector") => {
-    setPlayerLayers(prev => prev.map(l => l.id === id ? { ...l, added: true } : l));
+  const confirmAddLayer = (key: string, layerType: "raster" | "vector") => {
+    setPlayerLayers(prev => prev.map(l => getLayerKey(l) === key ? { ...l, added: true, type: layerType } : l));
     setPendingLayerId(null);
   };
 
-  const removeLayer = (id: string) => {
-    setPlayerLayers(prev => prev.map(l => l.id === id ? { ...l, added: false } : l));
+  const removeLayer = (key: string) => {
+    setPlayerLayers(prev => prev.map(l => getLayerKey(l) === key ? { ...l, added: false } : l));
   };
 
   // Drag-and-drop reordering
@@ -583,12 +1286,21 @@ export function MapStage({ startDateTime, endDateTime, ecowittEnabled, appliedDa
   const [popupLoading, setPopupLoading] = useState(false);
   const [popupError, setPopupError] = useState("");
   const [popupExpanded, setPopupExpanded] = useState(false);
+  const [popupDate, setPopupDate] = useState(() => {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  });
+  const popupDeviceIdRef = useRef(popupDeviceId);
+  popupDeviceIdRef.current = popupDeviceId;
+  const [ecowittDevices, setEcowittDevices] = useState<EcowittDevice[]>([...ECOWITT_DEVICES] as EcowittDevice[]);
 
-  const reorderLayers = (fromId: string, toId: string) => {
-    if (fromId === toId) return;
+  const getLayerKey = (l: {id: string, type?: string}) => l.type ? `${l.id}-${l.type}` : l.id;
+
+  const reorderLayers = (fromKey: string, toKey: string) => {
+    if (fromKey === toKey) return;
     setPlayerLayers(prev => {
-      const from = prev.findIndex(l => l.id === fromId);
-      const to   = prev.findIndex(l => l.id === toId);
+      const from = prev.findIndex(l => getLayerKey(l) === fromKey);
+      const to   = prev.findIndex(l => getLayerKey(l) === toKey);
       if (from === -1 || to === -1) return prev;
       const next = [...prev];
       const [moved] = next.splice(from, 1);
@@ -596,25 +1308,8 @@ export function MapStage({ startDateTime, endDateTime, ecowittEnabled, appliedDa
       return next;
     });
   };
-  const [timelineIndex, setTimelineIndex] = useState(0);
-  const [timelineUnitMode, setTimelineUnitMode] = useState<TimelineUnitMode>("auto");
 
-  const startDate = useMemo(() => parseDateTimeLocal(startDateTime), [startDateTime]);
-  const endDate = useMemo(() => parseDateTimeLocal(endDateTime), [endDateTime]);
 
-  const timelineData = useMemo(() => {
-    if (!startDate || !endDate) {
-      return { mode: "day" as TimelineResolvedMode, units: [] as TimelineUnit[] };
-    }
-
-    const normalizedStart = startDate <= endDate ? startDate : endDate;
-    const normalizedEnd = startDate <= endDate ? endDate : startDate;
-    const resolvedMode = resolveTimelineMode(normalizedStart, normalizedEnd, timelineUnitMode);
-
-    return buildTimelineUnits(normalizedStart, normalizedEnd, resolvedMode);
-  }, [startDate, endDate, timelineUnitMode]);
-
-  const timelineUnits = timelineData.units;
   const timelineUnitOptions: Array<{ value: TimelineUnitMode; label: string }> = [
     { value: "auto", label: "Auto" },
     { value: "hour4", label: "4h" },
@@ -623,8 +1318,20 @@ export function MapStage({ startDateTime, endDateTime, ecowittEnabled, appliedDa
   ];
 
   useEffect(() => {
-    setTimelineIndex(0);
-  }, [startDateTime, endDateTime]);
+    if (timelineUnits.length === 0) return;
+    const today = new Date();
+    const todayMs = today.getTime();
+    let bestIdx = 0;
+    let bestDiff = Infinity;
+    for (let i = 0; i < timelineUnits.length; i++) {
+      const diff = Math.abs(new Date(timelineUnits[i].value).getTime() - todayMs);
+      if (diff < bestDiff) {
+        bestDiff = diff;
+        bestIdx = i;
+      }
+    }
+    setTimelineIndex(bestIdx);
+  }, [startDateTime, endDateTime, appliedDatasets]);
 
   useEffect(() => {
     if (timelineUnits.length === 0) {
@@ -634,28 +1341,7 @@ export function MapStage({ startDateTime, endDateTime, ecowittEnabled, appliedDa
     setTimelineIndex((currentIndex) => Math.min(currentIndex, timelineUnits.length - 1));
   }, [timelineUnits.length]);
 
-  // Auto-scroll the timeline scroller when the active thumb approaches the edges
-  useEffect(() => {
-    const scroller = scrollerRef.current;
-    if (!scroller || timelineUnits.length <= 1) return;
 
-    const totalWidth = scroller.scrollWidth;
-    const visibleWidth = scroller.clientWidth;
-    if (totalWidth <= visibleWidth) return;
-
-    // Calculate approximate position of the active thumb
-    const ratio = timelineIndex / (timelineUnits.length - 1);
-    const thumbX = ratio * totalWidth;
-
-    const scrollLeft = scroller.scrollLeft;
-    const padding = 60; // Comfortable margin to trigger scrolling
-
-    if (thumbX > scrollLeft + visibleWidth - padding) {
-      scroller.scrollLeft = thumbX - visibleWidth + padding;
-    } else if (thumbX < scrollLeft + padding) {
-      scroller.scrollLeft = thumbX - padding;
-    }
-  }, [timelineIndex, timelineUnits.length]);
 
   useEffect(() => {
     if (!mapContainerRef.current || mapRef.current) {
@@ -681,22 +1367,35 @@ export function MapStage({ startDateTime, endDateTime, ecowittEnabled, appliedDa
 
     // Ecowitt station markers layer
     const ecowittSource = new VectorSource();
+    ecowittSourceRef.current = ecowittSource;
     const ecowittLayer = new VectorLayer({
       source: ecowittSource,
       style: (feature) => {
-        const isHighlighted = feature.get('highlighted');
+        const selectedId = popupDeviceIdRef.current;
+        if (selectedId && feature?.getId() === selectedId) {
+          const now = Date.now();
+          const pulse = Math.sin(now / 150) * 0.2 + 0.8;
+          return [
+            new Style({
+              image: new Circle({
+                radius: 12,
+                fill: new Fill({ color: `rgba(0, 120, 40, ${pulse * 0.18})` }),
+              }),
+            }),
+            new Style({
+              image: new Circle({
+                radius: 8,
+                fill: new Fill({ color: `rgba(0, 130, 45, ${pulse})` }),
+                stroke: new Stroke({ color: '#fff', width: 2 }),
+              }),
+            }),
+          ];
+        }
         return new Style({
           image: new Circle({
-            radius: isHighlighted ? 10 : 8,
-            fill: new Fill({ color: isHighlighted ? '#0d6efd' : '#0dcaf0' }),
+            radius: 6,
+            fill: new Fill({ color: '#dc3545' }),
             stroke: new Stroke({ color: '#fff', width: 2 }),
-          }),
-          text: new Text({
-            text: feature.get('name') || '',
-            offsetY: -16,
-            font: '500 12px sans-serif',
-            fill: new Fill({ color: '#1e293b' }),
-            stroke: new Stroke({ color: '#fff', width: 3 }),
           }),
         });
       },
@@ -705,19 +1404,6 @@ export function MapStage({ startDateTime, endDateTime, ecowittEnabled, appliedDa
     ecowittLayer.setVisible(!!ecowittEnabled);
     map.addLayer(ecowittLayer);
     ecowittLayerRef.current = ecowittLayer;
-
-    // Add station features
-    ECOWITT_DEVICES.forEach((device) => {
-      if (device.lat != null && device.lng != null) {
-        const feature = new Feature({
-          geometry: new Point(fromLonLat([device.lng, device.lat])),
-          deviceId: device.id,
-          name: device.name,
-        });
-        feature.setId(device.id);
-        ecowittSource.addFeature(feature);
-      }
-    });
 
     // Click handler for station markers — mở popup inline thay vì điều hướng trang
     map.on("click", (evt) => {
@@ -752,7 +1438,8 @@ export function MapStage({ startDateTime, endDateTime, ecowittEnabled, appliedDa
       if (layers && typeof layers === 'object') {
         for (const [, layer] of Object.entries(layers)) {
           try {
-            const buf = layer.getData(evt.pixel);
+            if (!('getData' in layer)) continue;
+            const buf = (layer as import("ol/layer/WebGLTile").default).getData(evt.pixel);
             if (buf && !(buf instanceof DataView) && buf.length > 0 && buf[0] > 0) {
               pixelData = buf[0];
               break;
@@ -785,6 +1472,57 @@ export function MapStage({ startDateTime, endDateTime, ecowittEnabled, appliedDa
     }
   }, [ecowittEnabled]);
 
+  // Fetch device info (coordinates, name) từ Ecowitt API
+  // Re-fetch khi mở popup hoặc tab quay lại để đảm bảo luôn có device list mới nhất
+  useEffect(() => {
+    let active = true;
+    fetch('/api/ecowitt/devices')
+      .then((r) => r.json())
+      .then((res) => {
+        if (!active) return;
+        if (res.devices && Array.isArray(res.devices) && res.devices.length > 0) {
+          setEcowittDevices(res.devices);
+        } else {
+          setEcowittDevices([...ECOWITT_DEVICES] as EcowittDevice[]);
+        }
+      })
+      .catch(() => {
+        if (active) setEcowittDevices([...ECOWITT_DEVICES] as EcowittDevice[]);
+      });
+    return () => { active = false; };
+  }, [popupDeviceId]);
+
+  // Pulse animation loop for selected marker
+  useEffect(() => {
+    const source = ecowittSourceRef.current;
+    if (!source || !popupDeviceId) return;
+    let animId: number;
+    const tick = () => {
+      source.changed();
+      animId = requestAnimationFrame(tick);
+    };
+    animId = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(animId);
+  }, [popupDeviceId]);
+
+  // Update marker features when ecowittDevices changes
+  useEffect(() => {
+    const source = ecowittSourceRef.current;
+    if (!source) return;
+    source.clear();
+    ecowittDevices.forEach((device) => {
+      if (device.lat != null && device.lng != null) {
+        const feature = new Feature({
+          geometry: new Point(fromLonLat([device.lng, device.lat])),
+          deviceId: device.id,
+          name: device.name,
+        });
+        feature.setId(device.id);
+        source.addFeature(feature);
+      }
+    });
+  }, [ecowittDevices]);
+
   // Fetch dữ liệu Ecowitt khi mở popup trạm
   useEffect(() => {
     if (!popupDeviceId) {
@@ -799,7 +1537,15 @@ export function MapStage({ startDateTime, endDateTime, ecowittEnabled, appliedDa
     setPopupError("");
     setPopupData([]);
 
-    fetch(`/api/ecowitt/proxy?action=get_data&deviceId=${encodeURIComponent(popupDeviceId)}`)
+    const sdate = `${popupDate} 00:00`;
+    const edate = `${popupDate} 23:59`;
+    const params = new URLSearchParams({
+      action: "get_data",
+      deviceId: popupDeviceId,
+      sdate,
+      edate,
+    });
+    fetch(`/api/ecowitt/proxy?${params}`)
       .then((res) => res.json() as Promise<{ data?: Record<string, unknown>; error?: string }>)
       .then((result) => {
         if (!isActive) return;
@@ -820,7 +1566,7 @@ export function MapStage({ startDateTime, endDateTime, ecowittEnabled, appliedDa
     return () => {
       isActive = false;
     };
-  }, [popupDeviceId]);
+  }, [popupDeviceId, popupDate]);
 
   // Update map size on window resize
   useEffect(() => {
@@ -930,17 +1676,19 @@ export function MapStage({ startDateTime, endDateTime, ecowittEnabled, appliedDa
             <div className="map-player-dropdown">
               <div className="map-player-dropdown-title">Select Data Layer</div>
               <div className="map-player-list">
-                {playerLayers.map((layer) => (
+                {playerLayers.map((layer) => {
+                  const layerKey = getLayerKey(layer);
+                  return (
                   <div
-                    key={layer.id}
-                    className={`map-player-item ${dragLayerId === layer.id ? "is-dragging" : ""}`}
+                    key={layerKey}
+                    className={`map-player-item ${dragLayerId === layerKey ? "is-dragging" : ""}`}
                     draggable
-                    onDragStart={() => setDragLayerId(layer.id)}
+                    onDragStart={() => setDragLayerId(layerKey)}
                     onDragEnd={() => setDragLayerId(null)}
                     onDragOver={(e) => e.preventDefault()}
                     onDrop={(e) => {
                       e.preventDefault();
-                      if (dragLayerId) reorderLayers(dragLayerId, layer.id);
+                      if (dragLayerId) reorderLayers(dragLayerId, layerKey);
                     }}
                   >
                     {/* Drag handle */}
@@ -995,7 +1743,7 @@ export function MapStage({ startDateTime, endDateTime, ecowittEnabled, appliedDa
                         className="map-player-item-tick is-added"
                         title="Added - Click to remove"
                         type="button"
-                        onClick={() => removeLayer(layer.id)}
+                        onClick={() => removeLayer(layerKey)}
                       >
                         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
                           <polyline points="20 6 9 17 4 12"/>
@@ -1003,15 +1751,15 @@ export function MapStage({ startDateTime, endDateTime, ecowittEnabled, appliedDa
                       </button>
                     ) : (
                       <button
-                        className={`map-player-item-tick ${pendingLayerId === layer.id ? "is-pending" : ""}`}
+                        className={`map-player-item-tick ${pendingLayerId === layerKey ? "is-pending" : ""}`}
                         title="Add layer"
                         type="button"
                         onClick={() => {
                           if (layer.type) {
                             // Already has type from sidebar — add directly
-                            confirmAddLayer(layer.id, layer.type as "raster" | "vector");
+                            confirmAddLayer(layerKey, layer.type as "raster" | "vector");
                           } else {
-                            setPendingLayerId(pendingLayerId === layer.id ? null : layer.id);
+                            setPendingLayerId(pendingLayerId === layerKey ? null : layerKey);
                           }
                         }}
                       >
@@ -1023,14 +1771,14 @@ export function MapStage({ startDateTime, endDateTime, ecowittEnabled, appliedDa
                     )}
 
                     {/* Inline type-picker popover */}
-                    {pendingLayerId === layer.id && (
+                    {pendingLayerId === layerKey && (
                       <div className="map-player-type-popover">
                         <div className="map-player-type-popover-label">Select layer format:</div>
                         <div className="map-player-type-popover-options">
                           <button
                             className="map-player-type-opt"
                             type="button"
-                            onClick={() => confirmAddLayer(layer.id, "raster")}
+                            onClick={() => confirmAddLayer(layerKey, "raster")}
                           >
                             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><rect x="3" y="3" width="18" height="18"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="3" y1="15" x2="21" y2="15"/><line x1="9" y1="3" x2="9" y2="21"/><line x1="15" y1="3" x2="15" y2="21"/></svg>
                             Raster
@@ -1038,7 +1786,7 @@ export function MapStage({ startDateTime, endDateTime, ecowittEnabled, appliedDa
                           <button
                             className="map-player-type-opt"
                             type="button"
-                            onClick={() => confirmAddLayer(layer.id, "vector")}
+                            onClick={() => confirmAddLayer(layerKey, "vector")}
                           >
                             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="3,18 8,8 13,13 18,6"/><circle cx="3" cy="18" r="1.5" fill="currentColor"/><circle cx="8" cy="8" r="1.5" fill="currentColor"/><circle cx="13" cy="13" r="1.5" fill="currentColor"/><circle cx="18" cy="6" r="1.5" fill="currentColor"/></svg>
                             Vector
@@ -1047,7 +1795,8 @@ export function MapStage({ startDateTime, endDateTime, ecowittEnabled, appliedDa
                       </div>
                     )}
                   </div>
-                ))}
+                );
+              })}
               </div>
 
               {/* Summary of added layers */}
@@ -1160,27 +1909,25 @@ export function MapStage({ startDateTime, endDateTime, ecowittEnabled, appliedDa
                 className="map-timeline-scroller" 
                 onClick={(event) => event.stopPropagation()}
                 onMouseMove={(e) => {
-                  const rect = e.currentTarget.getBoundingClientRect();
                   const containerRect = e.currentTarget.parentElement?.getBoundingClientRect();
                   if (!containerRect) return;
 
-                  const x = e.clientX - rect.left + e.currentTarget.scrollLeft;
-                  const totalWidth = e.currentTarget.scrollWidth;
-                  const ratio = Math.max(0, Math.min(1, (x - 20) / (totalWidth - 40)));
+                  const rect = e.currentTarget.getBoundingClientRect();
+                  const x = e.clientX - rect.left;
+                  const ratio = Math.max(0, Math.min(1, x / rect.width));
                   const index = Math.round(ratio * (timelineUnits.length - 1));
                   const unit = timelineUnits[index];
-                  
+
                   if (unit) {
                     setHoverTime(unit.label);
-                    // Position relative to the CONTAINER, not the scroller content
-                    setHoverPos({ 
-                      x: e.clientX - containerRect.left, 
-                      y: e.clientY - containerRect.top - 25 
+                    setHoverPos({
+                      x: e.clientX - containerRect.left,
+                      y: e.clientY - containerRect.top - 25,
                     });
                   }
                 }}
               >
-                <div className="map-timeline-inner" style={{ width: `${Math.max(600, timelineUnits.length * 20)}px` }}>
+                <div className="map-timeline-inner">
                   <div className="map-timeline-track-wrap">
                     <input
                       className="map-timeline-slider"
@@ -1380,263 +2127,22 @@ export function MapStage({ startDateTime, endDateTime, ecowittEnabled, appliedDa
         )}
 
         {/* ---- Ecowitt Station Popup ---- */}
-        {(() => {
-          if (!popupDeviceId) return null;
-          const device = ECOWITT_DEVICES.find((d) => d.id === popupDeviceId);
+        {popupDeviceId && (() => {
+          const device = ecowittDevices.find((d) => d.id === popupDeviceId);
           if (!device) return null;
-          const latestData = popupData.length > 0 ? popupData[popupData.length - 1] : null;
-
-          // Build SVG line+area path from sensor values
-          const buildChart = (key: EcowittPopupSensorKey) => {
-            const vals = popupData
-              .map((d) => d[key])
-              .filter((v): v is number => v !== undefined && !Number.isNaN(Number(v)));
-            if (vals.length < 2) return null;
-            const max = Math.max(...vals);
-            const min = Math.min(...vals);
-            const range = max - min || 1;
-            const W = 100; const H = 38;
-            const pts = vals.map((v, i) => ({
-              x: (i / (vals.length - 1)) * W,
-              y: H - 2 - ((v - min) / range) * (H - 4),
-            }));
-            const line = `M ${pts.map((p) => `${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(" L ")}`;
-            const area = `M 0,${H} L ${pts.map((p) => `${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(" L ")} L ${W},${H} Z`;
-            return { line, area, latest: vals[vals.length - 1] };
-          };
-
-          const popupW = popupExpanded ? "340px" : "290px";
-
           return (
-            <div
-              style={{
-                position: "absolute",
-                top: "72px",
-                ...(popupExpanded ? { bottom: "110px" } : {}),
-                right: "12px",
-                width: popupW,
-                background: "#fff",
-                borderRadius: "14px",
-                boxShadow: "0 6px 32px rgba(0,0,0,0.18)",
-                zIndex: 500,
-                fontFamily: "system-ui, -apple-system, sans-serif",
-                display: "flex",
-                flexDirection: "column",
-                overflow: "hidden",
-              }}
-            >
-              {/* ── Header ── */}
-              <div style={{
-                background: "linear-gradient(135deg, #0d6efd 0%, #0dcaf0 100%)",
-                color: "#fff",
-                padding: "10px 12px 9px",
-                position: "relative",
-                flexShrink: 0,
-              }}>
-                <div style={{ fontSize: "0.6rem", opacity: 0.78, fontWeight: "600", letterSpacing: "0.05em", textTransform: "uppercase" }}>
-                  Trạm Ecowitt · {device.id}
-                </div>
-                <div style={{ fontSize: "0.9rem", fontWeight: "700", lineHeight: 1.25, paddingRight: "24px", marginTop: "2px" }}>
-                  {device.name}
-                </div>
-                {device.lat != null && (
-                  <div style={{ fontSize: "0.63rem", opacity: 0.72, marginTop: "2px" }}>
-                    {device.lat.toFixed(4)}°N, {device.lng?.toFixed(4)}°E
-                  </div>
-                )}
-                <button
-                  type="button"
-                  onClick={() => setPopupDeviceId(null)}
-                  style={{
-                    position: "absolute", top: "8px", right: "8px",
-                    background: "rgba(255,255,255,0.2)", border: "none", color: "#fff",
-                    width: "20px", height: "20px", borderRadius: "50%",
-                    cursor: "pointer", fontSize: "0.95rem", lineHeight: "20px", textAlign: "center",
-                    display: "flex", alignItems: "center", justifyContent: "center", padding: 0,
-                  }}
-                  title="Đóng"
-                >×</button>
-              </div>
-
-              {/* ── Body ── */}
-              <div style={{ flex: 1, overflowY: popupExpanded ? "auto" : "hidden", minHeight: 0 }}>
-
-                {/* Loading */}
-                {popupLoading && (
-                  <div style={{ textAlign: "center", padding: "20px 0", color: "#64748b", fontSize: "0.82rem" }}>
-                    Đang tải dữ liệu...
-                  </div>
-                )}
-
-                {/* Error */}
-                {!popupLoading && popupError && (
-                  <div style={{ margin: "10px", background: "#fef2f2", border: "1px solid #fca5a5", borderRadius: "8px", padding: "9px 11px", color: "#b91c1c", fontSize: "0.78rem" }}>
-                    ⚠ {popupError}
-                  </div>
-                )}
-
-                {/* ═══ COMPACT VIEW ═══ */}
-                {!popupLoading && !popupError && !popupExpanded && (
-                  <div style={{ padding: "10px" }}>
-                    {latestData ? (
-                      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "6px" }}>
-                        {ECOWITT_POPUP_SENSORS.slice(0, 4).map((sensor) => {
-                          const chart = buildChart(sensor.key);
-                          const val = latestData[sensor.key];
-                          const display = val !== undefined && !Number.isNaN(Number(val)) ? Number(val).toFixed(1) : "--";
-                          return (
-                            <div key={sensor.key} style={{
-                              borderRadius: "10px",
-                              background: `${sensor.color}0e`,
-                              border: `1px solid ${sensor.color}28`,
-                              overflow: "hidden",
-                              padding: "8px 9px 0",
-                            }}>
-                              <div style={{ fontSize: "0.6rem", color: "#64748b", fontWeight: "600", textTransform: "uppercase", letterSpacing: "0.04em" }}>
-                                {sensor.label}
-                              </div>
-                              <div style={{ fontSize: "1.1rem", fontWeight: "800", color: sensor.color, marginTop: "1px" }}>
-                                {display}
-                                <span style={{ fontSize: "0.62rem", fontWeight: "500", color: "#94a3b8", marginLeft: "2px" }}>{sensor.unit}</span>
-                              </div>
-                              {chart ? (
-                                <svg viewBox="0 0 100 38" style={{ width: "100%", height: "26px", display: "block", marginTop: "3px" }} preserveAspectRatio="none">
-                                  <path d={chart.area} fill={sensor.color} fillOpacity="0.14" />
-                                  <path d={chart.line} fill="none" stroke={sensor.color} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
-                                </svg>
-                              ) : (
-                                <div style={{ height: "26px", marginTop: "3px" }} />
-                              )}
-                            </div>
-                          );
-                        })}
-                      </div>
-                    ) : (
-                      !popupLoading && (
-                        <div style={{ textAlign: "center", padding: "16px 0", color: "#94a3b8", fontSize: "0.8rem" }}>
-                          Không có dữ liệu hôm nay
-                        </div>
-                      )
-                    )}
-
-                    {/* Expand button */}
-                    <button
-                      type="button"
-                      onClick={() => setPopupExpanded(true)}
-                      style={{
-                        width: "100%", marginTop: "8px",
-                        padding: "6px 0",
-                        background: "linear-gradient(135deg,rgba(13,110,253,0.07),rgba(13,202,240,0.07))",
-                        border: "1px solid rgba(13,110,253,0.18)",
-                        borderRadius: "8px",
-                        color: "#0d6efd",
-                        fontSize: "0.72rem", fontWeight: "700",
-                        cursor: "pointer",
-                        display: "flex", alignItems: "center", justifyContent: "center", gap: "4px",
-                      }}
-                    >
-                      Xem chi tiết
-                      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                        <polyline points="6 9 12 15 18 9"/>
-                      </svg>
-                    </button>
-                  </div>
-                )}
-
-                {/* ═══ EXPANDED VIEW ═══ */}
-                {!popupLoading && !popupError && popupExpanded && (
-                  <div style={{ padding: "10px" }}>
-
-                    {/* Collapse button */}
-                    <button
-                      type="button"
-                      onClick={() => setPopupExpanded(false)}
-                      style={{
-                        width: "100%", marginBottom: "9px",
-                        padding: "5px 0",
-                        background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: "7px",
-                        color: "#64748b", fontSize: "0.68rem", fontWeight: "700",
-                        cursor: "pointer",
-                        display: "flex", alignItems: "center", justifyContent: "center", gap: "4px",
-                      }}
-                    >
-                      <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                        <polyline points="18 15 12 9 6 15"/>
-                      </svg>
-                      Thu gọn
-                    </button>
-
-                    {/* All 7 metrics 2x2 */}
-                    {latestData && (
-                      <>
-                        <div style={{ fontSize: "0.6rem", fontWeight: "700", color: "#94a3b8", textTransform: "uppercase", letterSpacing: "0.07em", marginBottom: "6px" }}>
-                          Thông số mới nhất
-                        </div>
-                        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "5px", marginBottom: "12px" }}>
-                          {ECOWITT_POPUP_SENSORS.map((sensor) => {
-                            const val = latestData[sensor.key];
-                            const display = val !== undefined && !Number.isNaN(Number(val)) ? Number(val).toFixed(1) : "--";
-                            return (
-                              <div key={sensor.key} style={{
-                                padding: "6px 8px",
-                                borderRadius: "8px",
-                                background: `${sensor.color}0e`,
-                                borderLeft: `2.5px solid ${sensor.color}`,
-                              }}>
-                                <div style={{ fontSize: "0.59rem", color: "#64748b", fontWeight: "600", textTransform: "uppercase", letterSpacing: "0.03em" }}>{sensor.label}</div>
-                                <div style={{ fontSize: "0.95rem", fontWeight: "800", color: sensor.color, marginTop: "1px" }}>
-                                  {display}
-                                  <span style={{ fontSize: "0.6rem", fontWeight: "400", color: "#94a3b8", marginLeft: "2px" }}>{sensor.unit}</span>
-                                </div>
-                              </div>
-                            );
-                          })}
-                        </div>
-                      </>
-                    )}
-
-                    {/* Charts for all 7 sensors */}
-                    {popupData.length > 0 && (
-                      <>
-                        <div style={{ fontSize: "0.6rem", fontWeight: "700", color: "#94a3b8", textTransform: "uppercase", letterSpacing: "0.07em", marginBottom: "8px" }}>
-                          Biểu đồ trong ngày
-                        </div>
-                        {ECOWITT_POPUP_SENSORS.map((sensor) => {
-                          const chart = buildChart(sensor.key);
-                          if (!chart) return null;
-                          return (
-                            <div key={sensor.key} style={{ marginBottom: "10px" }}>
-                              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: "2px" }}>
-                                <span style={{ fontSize: "0.67rem", color: "#475569", fontWeight: "600" }}>
-                                  {sensor.label}
-                                  {sensor.unit && <span style={{ color: "#94a3b8", fontWeight: "400", marginLeft: "2px" }}>({sensor.unit})</span>}
-                                </span>
-                                <span style={{ fontSize: "0.7rem", color: sensor.color, fontWeight: "700" }}>
-                                  {chart.latest.toFixed(1)}
-                                </span>
-                              </div>
-                              <div style={{ background: "#f8fafc", borderRadius: "5px", overflow: "hidden", padding: "2px 2px 0" }}>
-                                <svg viewBox="0 0 100 38" style={{ width: "100%", height: "36px", display: "block" }} preserveAspectRatio="none">
-                                  <path d={chart.area} fill={sensor.color} fillOpacity="0.18" />
-                                  <path d={chart.line} fill="none" stroke={sensor.color} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
-                                </svg>
-                              </div>
-                            </div>
-                          );
-                        })}
-                      </>
-                    )}
-
-                    {/* No data */}
-                    {popupData.length === 0 && (
-                      <div style={{ textAlign: "center", padding: "16px 0", color: "#94a3b8", fontSize: "0.8rem" }}>
-                        Không có dữ liệu hôm nay
-                      </div>
-                    )}
-                  </div>
-                )}
-              </div>
-            </div>
+            <EcowittStationPopup
+              device={device}
+              data={popupData}
+              loading={popupLoading}
+              error={popupError}
+              expanded={popupExpanded}
+              dateStr={popupDate}
+              onDateChange={setPopupDate}
+              onClose={() => setPopupDeviceId(null)}
+              onExpand={() => setPopupExpanded(true)}
+              onCollapse={() => setPopupExpanded(false)}
+            />
           );
         })()}
 
