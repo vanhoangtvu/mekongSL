@@ -104,6 +104,37 @@ function getFolderName(path: string) {
   return parts[parts.length - 1] || "";
 }
 
+function truncatePath(path: string, maxLen: number = 60): string {
+  if (path.length <= maxLen) return path;
+  const sep = '/';
+  const parts = path.split(sep);
+  if (parts.length <= 2) return path;
+  const fileName = parts.pop() || '';
+  const prefix = parts[0];
+  const suffix = parts[parts.length - 1];
+  const middle = '...';
+  const remaining = maxLen - prefix.length - suffix.length - fileName.length - middle.length - 3;
+  if (remaining < 10) {
+    return prefix + sep + middle + sep + suffix + sep + fileName;
+  }
+  const dirs = parts.slice(1, -1);
+  let total = prefix.length + suffix.length + fileName.length + middle.length + 3;
+  const kept: string[] = [];
+  for (const d of dirs) {
+    if (total + d.length + 1 <= maxLen) {
+      kept.push(d);
+      total += d.length + 1;
+    } else {
+      break;
+    }
+  }
+  const keptStr = kept.join(sep);
+  if (!keptStr) {
+    return prefix + sep + middle + sep + suffix + sep + fileName;
+  }
+  return prefix + sep + keptStr + sep + middle + sep + suffix + sep + fileName;
+}
+
 function getFileExtension(filename: string) {
   const i = filename.lastIndexOf(".");
   return i > 0 ? filename.slice(i).toLowerCase() : "";
@@ -1147,7 +1178,7 @@ export default function S3Manager() {
               </div>
               <div className="s3-pi-row">
                 <span className="s3-pi-label">Đường dẫn</span>
-                <span className="s3-pi-value mono">{showFileInfo.key}</span>
+                <span className="s3-pi-value mono" title={showFileInfo.key} style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '220px' }}>{truncatePath(showFileInfo.key, 50)}</span>
               </div>
               <div className="s3-pi-row">
                 <span className="s3-pi-label">Kích thước</span>
@@ -1313,7 +1344,7 @@ export default function S3Manager() {
               <div className="s3-form-row">
                 <label className="s3-label">
                   Đường dẫn hiện tại
-                  <div className="s3-path-preview mono">{showRename.key}</div>
+                  <div className="s3-path-preview mono" title={showRename.key}>{truncatePath(showRename.key, 70)}</div>
                 </label>
               </div>
               <div className="s3-form-row">
@@ -1392,7 +1423,7 @@ export default function S3Manager() {
               <br />
               Hành động này không thể hoàn tác.
             </p>
-            <div className="s3-confirm-path mono">{showDeleteConfirm}</div>
+            <div className="s3-confirm-path mono" title={showDeleteConfirm}>{truncatePath(showDeleteConfirm, 70)}</div>
             <div className="s3-modal-footer">
               <button className="s3-btn" onClick={() => setShowDeleteConfirm(null)}>Hủy</button>
               <button

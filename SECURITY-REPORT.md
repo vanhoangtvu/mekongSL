@@ -117,8 +117,8 @@ s3:
 ```java
 "http://localhost:3004"
 "http://localhost:3000"
-"http://113.170.158.188:3004"
-"http://113.170.158.188:3000"
+"http://14.183.200.227:3004"
+"http://14.183.200.227:3000"
 ```
 
 #### Allowed Methods
@@ -159,7 +159,7 @@ s3:
 
 ### Test 1: Không có token
 ```bash
-curl http://113.170.158.188:8084/api/data
+curl http://14.183.200.227:8084/api/data
 # Expected: HTTP 403 Forbidden ✅
 ```
 
@@ -171,25 +171,25 @@ curl http://113.170.158.188:8084/api/data
 
 ### Test 3: USER role truy cập /api/data
 ```bash
-curl -H "Authorization: Bearer <user_token>" http://113.170.158.188:8084/api/data
+curl -H "Authorization: Bearer <user_token>" http://14.183.200.227:8084/api/data
 # Expected: HTTP 403 Forbidden ✅
 ```
 
 ### Test 4: DATA_MANAGER role truy cập /api/data
 ```bash
-curl -H "Authorization: Bearer <manager_token>" http://113.170.158.188:8084/api/data
+curl -H "Authorization: Bearer <manager_token>" http://14.183.200.227:8084/api/data
 # Expected: HTTP 200 OK ✅
 ```
 
 ### Test 5: Direct MySQL API access
 ```bash
-curl http://113.170.158.188:3004/api/mysql?source=mekong
+curl http://14.183.200.227:3004/api/mysql?source=mekong
 # Expected: HTTP 403 "Unauthorized. DATA_MANAGER role required." ✅
 ```
 
 ### Test 6: S3 endpoints without token
 ```bash
-curl http://113.170.158.188:8084/api/s3/list
+curl http://14.183.200.227:8084/api/s3/list
 # Expected: HTTP 403 Forbidden ✅
 ```
 

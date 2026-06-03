@@ -13,7 +13,7 @@ export interface AccountResponse {
 }
 
 function getBackendUrl() {
-  return process.env.NEXT_PUBLIC_API_URL || 'http://113.170.158.188:8084/api';
+  return process.env.NEXT_PUBLIC_API_URL || 'http://14.183.200.227:8084/api';
 }
 
 function getBearerToken(request: NextRequest) {

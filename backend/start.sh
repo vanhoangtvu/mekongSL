@@ -34,5 +34,5 @@ nohup ./mvnw spring-boot:run > "$LOG_FILE" 2>&1 &
 echo $! > "$PID_FILE"
 
 echo "Backend started with PID: $(cat "$PID_FILE")"
-echo "Access at: http://113.170.158.188:8084"
+echo "Access at: http://14.183.200.227:8084"
 echo "Logs: tail -f $LOG_FILE"

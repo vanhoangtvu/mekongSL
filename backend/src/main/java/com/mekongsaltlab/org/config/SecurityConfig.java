@@ -60,8 +60,8 @@ public class SecurityConfig {
         configuration.setAllowedOrigins(List.of(
             "http://localhost:3004", 
             "http://localhost:3000",
-            "http://113.170.158.188:3004",
-            "http://113.170.158.188:3000"
+            "http://14.183.200.227:3004",
+            "http://14.183.200.227:3000"
         ));
         configuration.setAllowedMethods(List.of("GET", "POST", "PUT", "DELETE", "OPTIONS"));
         configuration.setAllowedHeaders(List.of("*"));

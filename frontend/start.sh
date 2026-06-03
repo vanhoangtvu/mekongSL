@@ -30,5 +30,5 @@ for _ in {1..20}; do
 done
 
 echo "Frontend đang chạy. PID: $(cat "$PID_FILE")"
-echo "Truy cập tại: http://113.170.158.188:3004"
+echo "Truy cập tại: http://14.183.200.227:3004"
 echo "Xem log: tail -f $LOG_FILE"

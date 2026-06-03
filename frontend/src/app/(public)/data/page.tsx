@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useState, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { authService } from '../../../lib/auth';
 import { DATA_SOURCE_OPTIONS, DEFAULT_DATA_SOURCE, type DataSourceKey } from '../../../lib/constants/data-sources';
-import { collectRecordKeys, formatRecordValue, type DataRecord } from '../../../lib/utils/record-utils';
+import { collectRecordKeys, formatRecordValue, truncatePath, getParentPath, type DataRecord } from '../../../lib/utils/record-utils';
 import { loadDataDevices, loadDataRows, loadDataTimeframes, uploadS3File, listS3Files, deleteS3File, downloadS3File } from '../../../lib/admin-api';
 import DataExportModal from '../../../components/DataExportModal';
 import Map from 'ol/Map';
@@ -31,7 +31,7 @@ import {
   RefreshCw, Server, 
   Search, MapPin, User, Lock, Key, Activity, AlertCircle, Download, Calendar, FileSpreadsheet, BarChart3,
   UploadCloud, FileCode, Trash2, CheckCircle2, XCircle,
-  Layers, Tag, Clock
+  Layers, Tag, Clock, Folder, Copy
 } from 'lucide-react';
 
 interface MekongData {
@@ -264,7 +264,8 @@ function S3FlatFileList({ prefix, onPreviewFile }: { prefix: string; onPreviewFi
   };
 
   const handleDelete = async (key: string) => {
-    if (!window.confirm(`Bạn có chắc chắn muốn xóa tệp tin:\n${key}?`)) {
+    const shortKey = key.split('/').pop() || key;
+    if (!window.confirm(`Bạn có chắc chắn muốn xóa "${shortKey}"?\n${getParentPath(key)}`)) {
       return;
     }
     try {
@@ -401,9 +402,14 @@ function S3FlatFileList({ prefix, onPreviewFile }: { prefix: string; onPreviewFi
                         cursor: onPreviewFile ? 'pointer' : 'default',
                       }}
                     >
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
-                        <span style={{ color: 'var(--text)', fontWeight: '500', fontSize: '0.9rem' }}>{filename}</span>
-                        <span style={{ color: 'var(--text-muted)', fontSize: '0.75rem', fontFamily: 'monospace' }}>{file.key}</span>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                        <span style={{ color: 'var(--text)', fontWeight: '600', fontSize: '0.92rem' }}>{filename}</span>
+                        <span style={{ display: 'flex', alignItems: 'center', gap: '4px', color: 'var(--text-muted)', fontSize: '0.72rem', overflow: 'hidden' }} title={file.key}>
+                          <Folder size={11} style={{ flexShrink: 0, opacity: 0.6 }} />
+                          <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                            {getParentPath(file.key) || '/'}
+                          </span>
+                        </span>
                       </div>
                     </td>
                     <td style={{ padding: '10px 16px', color: 'var(--text)', fontSize: '0.85rem', whiteSpace: 'nowrap' }}>
@@ -413,7 +419,15 @@ function S3FlatFileList({ prefix, onPreviewFile }: { prefix: string; onPreviewFi
                       {formatDate(file.lastModified)}
                     </td>
                     <td style={{ padding: '10px 16px', textAlign: 'center' }}>
-                      <div style={{ display: 'flex', justifyContent: 'center', gap: '6px' }}>
+                      <div style={{ display: 'flex', justifyContent: 'center', gap: '4px' }}>
+                        <button
+                          onClick={() => { navigator.clipboard.writeText(file.key); }}
+                          style={{ border: 'none', background: 'none', cursor: 'pointer', color: 'var(--text-muted)', padding: '6px', borderRadius: '6px' }}
+                          className="hover-bg-surface-strong"
+                          title="Sao chép đường dẫn"
+                        >
+                          <Copy size={13} />
+                        </button>
                         <button
                           onClick={() => void handleDownload(file.key)}
                           style={{ border: 'none', background: 'none', cursor: 'pointer', color: 'var(--accent)', padding: '6px', borderRadius: '6px' }}
@@ -489,7 +503,7 @@ interface FilePreviewModalProps {
 }
 
 const getBackendUrl = (path: string) => {
-  const base = process.env.NEXT_PUBLIC_API_URL || 'http://113.170.158.188:8084/api';
+  const base = process.env.NEXT_PUBLIC_API_URL || 'http://14.183.200.227:8084/api';
   return `${base}${path}`;
 };
 
@@ -856,8 +870,8 @@ function FilePreviewModal({ fileKey, onClose }: FilePreviewModalProps) {
               <h3 style={{ margin: 0, fontSize: '1.05rem', fontWeight: 'bold', color: 'var(--text)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                 Xem trước: {filename}
               </h3>
-              <p style={{ margin: '2px 0 0 0', fontSize: '0.8rem', color: 'var(--text-muted)', fontFamily: 'monospace', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                S3 Key: {fileKey}
+              <p style={{ margin: '2px 0 0 0', fontSize: '0.8rem', color: 'var(--text-muted)', fontFamily: 'monospace', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} title={fileKey}>
+                {truncatePath(fileKey, 80)}
               </p>
             </div>
           </div>
@@ -1950,7 +1964,7 @@ function ScheduleConfig({ source }: { source: string }) {
         setUploadProgress(0);
       }, 5000);
       
-      alert(`✓ Tải lên thành công!\nFile đã được lưu tại:\n${response.key}`);
+      alert(`✓ Tải lên thành công!\n${response.key.split('/').pop()} → ${truncatePath(getParentPath(response.key) || '/', 50)}`);
     } catch (error) {
       setUploadStatus('failed');
       setUploadErrorMessage(error instanceof Error ? error.message : 'Lỗi không xác định khi tải lên S3');
@@ -3225,8 +3239,8 @@ function ScheduleConfig({ source }: { source: string }) {
               <h3 style={{ margin: 0, fontSize: '1.15rem', fontWeight: 'bold', color: 'var(--text)', display: 'flex', alignItems: 'center', gap: '10px' }}>
                 <FileSpreadsheet size={20} color="var(--accent)" /> Tệp tin trong thư mục
               </h3>
-              <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)', background: 'var(--surface-strong)', padding: '4px 12px', borderRadius: '999px', fontFamily: 'monospace' }}>
-                {getS3PrefixForSelection()}
+              <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)', background: 'var(--surface-strong)', padding: '4px 12px', borderRadius: '999px', fontFamily: 'monospace', maxWidth: '360px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={getS3PrefixForSelection()}>
+                {truncatePath(getS3PrefixForSelection(), 50)}
               </span>
             </div>
             <S3FlatFileList prefix={getS3PrefixForSelection()} onPreviewFile={(file) => setPreviewFile(file)} />

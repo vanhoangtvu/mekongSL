@@ -82,7 +82,7 @@ Authorization: Bearer <manager_token>
 Content-Type: multipart/form-data
 
 # Upload GeoTIFF
-curl -X POST http://113.170.158.188:8084/api/s3/upload \
+curl -X POST http://14.183.200.227:8084/api/s3/upload \
   -H "Authorization: Bearer $TOKEN" \
   -F "file=@salinity_map.tif"
 ```
@@ -128,16 +128,16 @@ s3:
 
 ```bash
 # 1. Login
-TOKEN=$(curl -s -X POST http://113.170.158.188:8084/api/auth/login \
+TOKEN=$(curl -s -X POST http://14.183.200.227:8084/api/auth/login \
   -H "Content-Type: application/json" \
   -d '{"username":"manager","password":"manager123"}' | jq -r '.token')
 
 # 2. Trigger manual backup
-curl -X POST http://113.170.158.188:8084/api/backup/trigger \
+curl -X POST http://14.183.200.227:8084/api/backup/trigger \
   -H "Authorization: Bearer $TOKEN"
 
 # 3. List backups
-curl -X GET http://113.170.158.188:8084/api/s3/list?prefix=backups/mysql/ \
+curl -X GET http://14.183.200.227:8084/api/s3/list?prefix=backups/mysql/ \
   -H "Authorization: Bearer $TOKEN"
 ```
 

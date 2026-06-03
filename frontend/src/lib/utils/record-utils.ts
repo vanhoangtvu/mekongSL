@@ -115,6 +115,43 @@ export function formatRecordValue(value: unknown): string {
   }
 }
 
+export function truncatePath(path: string, maxLen: number = 60): string {
+  if (path.length <= maxLen) return path;
+  const separator = '/';
+  const parts = path.split(separator);
+  if (parts.length <= 2) return path;
+  const fileName = parts.pop() || '';
+  const prefix = parts[0];
+  const suffix = parts[parts.length - 1];
+  const middle = '...';
+  const remaining = maxLen - prefix.length - suffix.length - fileName.length - middle.length - 3;
+  if (remaining < 10) {
+    return prefix + separator + middle + separator + suffix + separator + fileName;
+  }
+  const dirs = parts.slice(1, -1);
+  let total = prefix.length + suffix.length + fileName.length + middle.length + 3;
+  const kept: string[] = [];
+  for (const d of dirs) {
+    if (total + d.length + 1 <= maxLen) {
+      kept.push(d);
+      total += d.length + 1;
+    } else {
+      break;
+    }
+  }
+  const keptStr = kept.join(separator);
+  if (!keptStr) {
+    return prefix + separator + middle + separator + suffix + separator + fileName;
+  }
+  return prefix + separator + keptStr + separator + middle + separator + suffix + separator + fileName;
+}
+
+export function getParentPath(key: string): string {
+  const idx = key.lastIndexOf('/');
+  if (idx === -1) return '';
+  return key.substring(0, idx);
+}
+
 export function recordsToCsv(records: DataRecord[]): string {
   if (!records.length) {
     return 'No data available';

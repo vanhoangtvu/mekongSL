@@ -74,16 +74,16 @@
 
 ### Test 1: USER xem files (OK)
 ```bash
-USER_TOKEN=$(curl -s -X POST http://113.170.158.188:8084/api/auth/login \
+USER_TOKEN=$(curl -s -X POST http://14.183.200.227:8084/api/auth/login \
   -H "Content-Type: application/json" \
   -d '{"username":"user","password":"user123"}' | jq -r '.token')
 
 # Xem danh sách files - OK
-curl http://113.170.158.188:8084/api/s3/list \
+curl http://14.183.200.227:8084/api/s3/list \
   -H "Authorization: Bearer $USER_TOKEN"
 
 # Download file - OK
-curl http://113.170.158.188:8084/api/s3/download/raster/salinity.tif \
+curl http://14.183.200.227:8084/api/s3/download/raster/salinity.tif \
   -H "Authorization: Bearer $USER_TOKEN" \
   -o salinity.tif
 ```
@@ -91,7 +91,7 @@ curl http://113.170.158.188:8084/api/s3/download/raster/salinity.tif \
 ### Test 2: USER upload (DENIED)
 ```bash
 # Upload file - DENIED
-curl -X POST http://113.170.158.188:8084/api/s3/upload \
+curl -X POST http://14.183.200.227:8084/api/s3/upload \
   -H "Authorization: Bearer $USER_TOKEN" \
   -F "file=@test.txt"
 # Expected: HTTP 403 Forbidden
@@ -99,29 +99,29 @@ curl -X POST http://113.170.158.188:8084/api/s3/upload \
 
 ### Test 3: MANAGER upload (OK)
 ```bash
-MANAGER_TOKEN=$(curl -s -X POST http://113.170.158.188:8084/api/auth/login \
+MANAGER_TOKEN=$(curl -s -X POST http://14.183.200.227:8084/api/auth/login \
   -H "Content-Type: application/json" \
   -d '{"username":"manager","password":"manager123"}' | jq -r '.token')
 
 # Upload file - OK
-curl -X POST http://113.170.158.188:8084/api/s3/upload \
+curl -X POST http://14.183.200.227:8084/api/s3/upload \
   -H "Authorization: Bearer $MANAGER_TOKEN" \
   -F "file=@test.txt"
 ```
 
 ### Test 4: ADMIN (OK)
 ```bash
-ADMIN_TOKEN=$(curl -s -X POST http://113.170.158.188:8084/api/auth/login \
+ADMIN_TOKEN=$(curl -s -X POST http://14.183.200.227:8084/api/auth/login \
   -H "Content-Type: application/json" \
   -d '{"username":"admin","password":"admin123"}' | jq -r '.token')
 
 # Upload - OK
-curl -X POST http://113.170.158.188:8084/api/s3/upload \
+curl -X POST http://14.183.200.227:8084/api/s3/upload \
   -H "Authorization: Bearer $ADMIN_TOKEN" \
   -F "file=@test.txt"
 
 # Delete - OK
-curl -X DELETE http://113.170.158.188:8084/api/s3/delete/uploads/test.txt \
+curl -X DELETE http://14.183.200.227:8084/api/s3/delete/uploads/test.txt \
   -H "Authorization: Bearer $ADMIN_TOKEN"
 ```
 

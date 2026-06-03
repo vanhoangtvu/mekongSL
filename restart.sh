@@ -24,5 +24,5 @@ bash "$SCRIPT_DIR/frontend/start.sh"
 
 echo ""
 echo "=== Done ==="
-echo "Backend:  http://113.170.158.188:8084"
-echo "Frontend: http://113.170.158.188:3004"
+echo "Backend:  http://14.183.200.227:8084"
+echo "Frontend: http://14.183.200.227:3004"
