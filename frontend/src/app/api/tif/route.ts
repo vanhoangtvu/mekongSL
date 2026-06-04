@@ -34,7 +34,8 @@ export async function GET(request: NextRequest) {
     const blob = await res.blob();
     const responseHeaders: Record<string, string> = {
       'Content-Type': res.headers.get('content-type') || 'image/tiff',
-      'Cache-Control': 'public, max-age=300',
+      'Cache-Control': 'no-store, no-cache, must-revalidate',
+      'Pragma': 'no-cache',
       'Accept-Ranges': 'bytes',
     };
     const contentRange = res.headers.get('content-range');

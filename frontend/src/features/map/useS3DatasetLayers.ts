@@ -109,9 +109,14 @@ export function useS3DatasetLayers(
         // Find the actual dataset entry from the applied list
         const dsEntry = (appliedDatasets ?? []).find((d) => `${d.id}-${d.type}` === dsKey);
         if (!dsEntry) continue;
-        
+
         const dsId = dsEntry.id;
         const isVector = dsEntry.type === "vector";
+
+        // Skip datasets that don't have GIS/S3 data (e.g. weather station items)
+        const dsInfoCheck = getDatasetById(dsId);
+        const parentCheck = getParentDataset(dsId);
+        if (dsInfoCheck?.gisData === false || parentCheck?.gisData === false) continue;
         
         showNotification(`Looking up "${dsId}" (${dsEntry.type})...`, "info");
 
@@ -131,10 +136,13 @@ export function useS3DatasetLayers(
         }
 
         const dsSlug = getDatasetSlug(datasetId) || datasetId;
-        const prefixes = [
+        const prefixes = timelineDate ? [
           `gis-data/${dsSlug}/${categorySlug}/${y}/${md}/${dd}/`,
           `gis-data/${dsSlug}/${categorySlug}/${y}/${md}/`,
           `gis-data/${dsSlug}/${categorySlug}/${y}/`,
+          `gis-data/${dsSlug}/${categorySlug}/`,
+        ] : [
+          `gis-data/${dsSlug}/${categorySlug}/`,
         ];
 
         let foundKey: string | null = null;
@@ -145,14 +153,23 @@ export function useS3DatasetLayers(
             if (!isActive) break;
             console.warn(`[S3] prefix="${prefix}" files=${allFiles.length}`, allFiles.slice(0, 10).map(f => f.key));
 
+            // When no timelineDate, sort by lastModified descending to get latest file first
+            const files = timelineDate
+              ? allFiles
+              : [...allFiles].sort((a, b) => {
+                  const ta = a.lastModified ? new Date(a.lastModified).getTime() : 0;
+                  const tb = b.lastModified ? new Date(b.lastModified).getTime() : 0;
+                  return tb - ta;
+                });
+
             if (isVector) {
-              const vFile = allFiles.find((f) => {
+              const vFile = files.find((f) => {
                 const k = f.key?.toLowerCase() ?? "";
                 return k.endsWith(".vct");
-              }) || allFiles.find((f) => {
+              }) || files.find((f) => {
                 const k = f.key?.toLowerCase() ?? "";
                 return VECTOR_EXTS.some((ext) => k.endsWith(ext) && !k.endsWith(".zip") && !k.endsWith(".vdc") && !k.endsWith(".vct"));
-              }) || allFiles.find((f) => {
+              }) || files.find((f) => {
                 const k = f.key?.toLowerCase() ?? "";
                 return k.endsWith(".zip");
               });
@@ -160,13 +177,13 @@ export function useS3DatasetLayers(
                 foundKey = vFile.key;
                 // Also look for companion .vdc file (case-insensitive)
                 const baseLower = foundKey.replace(/\.\w+$/, "").toLowerCase();
-                const comp = allFiles.find((f) => f.key?.toLowerCase() === baseLower + ".vdc");
+                const comp = files.find((f) => f.key?.toLowerCase() === baseLower + ".vdc");
                 if (comp) vdcKey = comp.key;
                 console.warn("[S3] FOUND vector:", foundKey, "companion .vdc:", vdcKey);
                 break;
               }
             } else {
-              const tif = allFiles.find((f) => f.key?.match(/\.tiff?$/i));
+              const tif = files.find((f) => f.key?.match(/\.tiff?$/i));
               if (tif) {
                 foundKey = tif.key;
                 console.warn("[S3] FOUND .tif:", foundKey);

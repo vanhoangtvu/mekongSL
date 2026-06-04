@@ -23,7 +23,6 @@ export default function PublicHomePage() {
   
   const [startDateTime, setStartDateTime] = useState("2026-05-01T00:00");
   const [endDateTime, setEndDateTime] = useState("2026-05-24T23:59");
-  const [ecowittEnabled, setEcowittEnabled] = useState(false);
   const [appliedDatasets, setAppliedDatasets] = useState<Array<{ id: string; type: string }>>([]);
 
   useEffect(() => {
@@ -32,6 +31,16 @@ export default function PublicHomePage() {
 
   const handleApplyDatasets = (datasets: Array<{ id: string; type: string }>) => {
     setAppliedDatasets(datasets);
+  };
+
+  const handleRemoveDataset = (id: string, type: string) => {
+    setAppliedDatasets(prev => prev.filter(d => !(d.id === id && d.type === type)));
+  };
+
+  const handleAddDataset = (id: string, type: string) => {
+    setAppliedDatasets(prev =>
+      prev.some(d => d.id === id && d.type === type) ? prev : [...prev, { id, type }]
+    );
   };
 
   return (
@@ -50,13 +59,12 @@ export default function PublicHomePage() {
               endDateTime={endDateTime}
               onStartDateTimeChange={setStartDateTime}
               onEndDateTimeChange={setEndDateTime}
-              ecowittEnabled={ecowittEnabled}
-              onEcowittToggle={setEcowittEnabled}
               onApply={handleApplyDatasets}
+              appliedDatasets={appliedDatasets}
             />
           </ResizablePanel>
           <div className="geo-panel">
-            <MapStage startDateTime={startDateTime} endDateTime={endDateTime} ecowittEnabled={ecowittEnabled} appliedDatasets={appliedDatasets} />
+            <MapStage startDateTime={startDateTime} endDateTime={endDateTime} appliedDatasets={appliedDatasets} onRemoveDataset={handleRemoveDataset} onAddDataset={handleAddDataset} />
           </div>
         </div>
       </main>

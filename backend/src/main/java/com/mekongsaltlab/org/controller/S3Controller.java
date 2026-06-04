@@ -70,10 +70,17 @@ public class S3Controller {
     /**
      * Download file from S3 (All authenticated users)
      */
-    @GetMapping("/download/{*key}")
+    @GetMapping(value = {"/download", "/download/{*key}"})
     @PreAuthorize("isAuthenticated()")
-    public ResponseEntity<InputStreamResource> downloadFile(@PathVariable String key) {
-        String cleanKey = key.startsWith("/") ? key.substring(1) : key;
+    public ResponseEntity<InputStreamResource> downloadFile(
+        @PathVariable(required = false) String key,
+        @RequestParam(value = "key", required = false) String queryKey
+    ) {
+        String keyToDownload = queryKey != null && !queryKey.isBlank() ? queryKey : key;
+        if (keyToDownload == null || keyToDownload.isBlank()) {
+            return ResponseEntity.badRequest().build();
+        }
+        String cleanKey = keyToDownload.startsWith("/") ? keyToDownload.substring(1) : keyToDownload;
         InputStream inputStream = s3Service.downloadFile(cleanKey);
         String filename = cleanKey.contains("/") ? cleanKey.substring(cleanKey.lastIndexOf("/") + 1) : cleanKey;
 
@@ -107,10 +114,19 @@ public class S3Controller {
     /**
      * Delete file from S3 (ADMIN + DATA_MANAGER only)
      */
-    @DeleteMapping("/delete/{*key}")
+    @DeleteMapping(value = {"/delete", "/delete/{*key}"})
     @PreAuthorize("hasAnyRole('ADMIN', 'DATA_MANAGER')")
-    public ResponseEntity<Map<String, String>> deleteFile(@PathVariable String key) {
-        String cleanKey = key.startsWith("/") ? key.substring(1) : key;
+    public ResponseEntity<Map<String, String>> deleteFile(
+        @PathVariable(required = false) String key,
+        @RequestParam(value = "key", required = false) String queryKey
+    ) {
+        String keyToDelete = queryKey != null && !queryKey.isBlank() ? queryKey : key;
+        if (keyToDelete == null || keyToDelete.isBlank()) {
+            Map<String, String> error = new HashMap<>();
+            error.put("error", "Key is required");
+            return ResponseEntity.badRequest().body(error);
+        }
+        String cleanKey = keyToDelete.startsWith("/") ? keyToDelete.substring(1) : keyToDelete;
         s3Service.deleteFile(cleanKey);
 
         Map<String, String> response = new HashMap<>();
@@ -122,10 +138,19 @@ public class S3Controller {
     /**
      * Check if file exists (All authenticated users)
      */
-    @GetMapping("/exists/{*key}")
+    @GetMapping(value = {"/exists", "/exists/{*key}"})
     @PreAuthorize("isAuthenticated()")
-    public ResponseEntity<Map<String, Boolean>> fileExists(@PathVariable String key) {
-        String cleanKey = key.startsWith("/") ? key.substring(1) : key;
+    public ResponseEntity<Map<String, Boolean>> fileExists(
+        @PathVariable(required = false) String key,
+        @RequestParam(value = "key", required = false) String queryKey
+    ) {
+        String keyToCheck = queryKey != null && !queryKey.isBlank() ? queryKey : key;
+        if (keyToCheck == null || keyToCheck.isBlank()) {
+            Map<String, Boolean> response = new HashMap<>();
+            response.put("exists", false);
+            return ResponseEntity.badRequest().body(response);
+        }
+        String cleanKey = keyToCheck.startsWith("/") ? keyToCheck.substring(1) : keyToCheck;
         boolean exists = s3Service.fileExists(cleanKey);
         
         Map<String, Boolean> response = new HashMap<>();

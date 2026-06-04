@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
+import Image from "next/image";
 import { authService } from "../../lib/auth";
 import { LogOut, User } from "lucide-react";
 
@@ -27,13 +28,14 @@ export function AppHeader() {
       <div className="app-header-content">
         <div className="app-header-left">
           <Link href="/" className="app-logo">
-            🌊 Mekong Salt Lab Data
+            <Image src="/logo.png" alt="Mekong Salt Lab" width={36} height={36} style={{ objectFit: "contain" }} />
+            Mekong Salt Lab Environment Data
           </Link>
         </div>
         <nav className="app-header-nav">
-          <Link href="/">Bản đồ</Link>
-          <Link href="/data">Dữ liệu</Link>
-          {user?.role === 'ADMIN' && <Link href="/dashboard">Quản trị</Link>}
+          {user && (user.role === 'ADMIN' || user.role === 'DATA_MANAGER') && (
+            <Link href="/data">Quản trị</Link>
+          )}
           {user ? (
             <>
               <span className="user-info">

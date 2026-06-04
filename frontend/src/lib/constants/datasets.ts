@@ -6,13 +6,16 @@ export type DatasetItem = {
   source?: string;
   scale?: string;
   gisData?: boolean;
+  group?: "gis" | "station" | "monitoring";
 };
 
 export const DATASETS: DatasetItem[] = [
+  // ── GIS Data ──────────────────────────────────────────────
   {
     id: "landsat",
     name: "Landsat Imagery",
     slug: "landsat-imagery",
+    group: "gis",
     children: [
       { id: "landsat-dry", name: "Dry Season", slug: "dry-season", source: "Download" },
       { id: "landsat-wet", name: "Wet Season", slug: "wet-season", source: "Download" },
@@ -22,6 +25,7 @@ export const DATASETS: DatasetItem[] = [
     id: "admin",
     name: "Administration",
     slug: "administration",
+    group: "gis",
     children: [
       { id: "admin-province", name: "Province", slug: "province", source: "GIS website Vinh Long", scale: "Province scale" },
       { id: "admin-community", name: "Community", slug: "community", scale: "Province scale" },
@@ -29,24 +33,10 @@ export const DATASETS: DatasetItem[] = [
     ],
   },
   {
-    id: "flooding",
-    name: "Flooding Modeling",
-    slug: "flooding-modeling",
-  },
-  {
-    id: "hydrology",
-    name: "Hydrology",
-    slug: "hydrology",
-    children: [
-      { id: "hydro-salinity", name: "Salinity Monitoring", slug: "salinity-monitoring" },
-      { id: "hydro-temp", name: "Water Temperature Monitoring", slug: "water-temperature-monitoring" },
-      { id: "hydro-ph", name: "pH Monitoring", slug: "ph-monitoring" },
-    ],
-  },
-  {
     id: "baseline",
     name: "Baseline Environment",
     slug: "baseline-environment",
+    group: "gis",
     children: [
       { id: "baseline-landuse-plan", name: "Landuse Planning", slug: "landuse-planning", scale: "Province, Community" },
       { id: "baseline-soil", name: "Soil Type", slug: "soil-type", scale: "Province" },
@@ -60,18 +50,40 @@ export const DATASETS: DatasetItem[] = [
     ],
   },
   {
-    id: "water-quality",
-    name: "Water Quality",
-    slug: "water-quality",
+    id: "ecology",
+    name: "Ecology",
+    slug: "ecology",
+    group: "gis",
     children: [
-      { id: "wq-surface", name: "Surface Water", slug: "surface-water", scale: "Province scale" },
-      { id: "wq-ground", name: "Ground Water", slug: "ground-water", scale: "Province scale" },
+      { id: "ecology-biodiversity", name: "Biodiversity", slug: "biodiversity", scale: "Province" },
+      { id: "ecology-vegetation", name: "Vegetation Index", slug: "vegetation-index", source: "Landsat GIS Interpretation" },
+      { id: "ecology-habitat", name: "Habitat Mapping", slug: "habitat-mapping", scale: "Province" },
+      { id: "ecology-species", name: "Species Distribution", slug: "species-distribution" },
     ],
   },
+  {
+    id: "flooding",
+    name: "Flooding Modeling",
+    slug: "flooding-modeling",
+    group: "gis",
+  },
+  {
+    id: "hydrology",
+    name: "Hydrology",
+    slug: "hydrology",
+    group: "gis",
+    children: [
+      { id: "hydro-salinity", name: "Salinity", slug: "salinity" },
+      { id: "hydro-temp", name: "Tidal", slug: "tidal" },
+      { id: "hydro-ph", name: "pH", slug: "ph" },
+    ],
+  },
+  // ── Station Data ──────────────────────────────────────────
   {
     id: "weather",
     name: "Weather",
     slug: "weather",
+    group: "station",
     children: [
       { id: "weather-rain", name: "Rain Monitoring", slug: "rain-monitoring", gisData: false },
       { id: "weather-wind", name: "Wind", slug: "wind", gisData: false },
@@ -79,15 +91,15 @@ export const DATASETS: DatasetItem[] = [
       { id: "weather-sun", name: "Sun Radiation", slug: "sun-radiation", gisData: false },
     ],
   },
+  // ── Monitoring Data ───────────────────────────────────────
   {
-    id: "ecology",
-    name: "Ecology",
-    slug: "ecology",
+    id: "water-quality",
+    name: "Water Quality",
+    slug: "water-quality",
+    group: "monitoring",
     children: [
-      { id: "ecology-biodiversity", name: "Biodiversity", slug: "biodiversity", scale: "Province" },
-      { id: "ecology-vegetation", name: "Vegetation Index", slug: "vegetation-index", source: "Landsat GIS Interpretation" },
-      { id: "ecology-habitat", name: "Habitat Mapping", slug: "habitat-mapping", scale: "Province" },
-      { id: "ecology-species", name: "Species Distribution", slug: "species-distribution" },
+      { id: "wq-surface", name: "Surface Water", slug: "surface-water", scale: "Province scale" },
+      { id: "wq-ground", name: "Ground Water", slug: "ground-water", scale: "Province scale" },
     ],
   },
 ];

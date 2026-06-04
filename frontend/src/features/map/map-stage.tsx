@@ -79,6 +79,7 @@ type PlayerLayer = {
   categoryName: string;
   added: boolean;
   type?: string;
+  opacity: number;
 };
 
 const ALL_AVAILABLE_LAYERS: PlayerLayer[] = DATASETS.flatMap((cat) =>
@@ -89,6 +90,7 @@ const ALL_AVAILABLE_LAYERS: PlayerLayer[] = DATASETS.flatMap((cat) =>
         categoryId: cat.id,
         categoryName: cat.name,
         added: false,
+        opacity: 0.7,
       }))
     : [{
         id: cat.id,
@@ -96,6 +98,7 @@ const ALL_AVAILABLE_LAYERS: PlayerLayer[] = DATASETS.flatMap((cat) =>
         categoryId: cat.id,
         categoryName: cat.name,
         added: false,
+        opacity: 0.7,
       }]
 );
 
@@ -260,8 +263,9 @@ type TimelineUnit = {
 type MapStageProps = {
   startDateTime: string;
   endDateTime: string;
-  ecowittEnabled?: boolean;
   appliedDatasets?: Array<{ id: string; type: string }>;
+  onRemoveDataset?: (id: string, type: string) => void;
+  onAddDataset?: (id: string, type: string) => void;
 };
 
 function parseDateTimeLocal(value: string) {
@@ -1053,7 +1057,7 @@ function EcowittStationPopup({
   );
 }
 
-export function MapStage({ startDateTime, endDateTime, ecowittEnabled, appliedDatasets }: MapStageProps) {
+export function MapStage({ startDateTime, endDateTime, appliedDatasets, onRemoveDataset, onAddDataset }: MapStageProps) {
   const mapContainerRef = useRef<HTMLDivElement | null>(null);
   const scrollerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<Map | null>(null);
@@ -1061,7 +1065,9 @@ export function MapStage({ startDateTime, endDateTime, ecowittEnabled, appliedDa
   const ecowittSourceRef = useRef<VectorSource | null>(null);
   const baseLayerRef = useRef<TileLayer | null>(null);
   const [pixelValue, setPixelValue] = useState<number | null>(null);
+  const [pixelValues, setPixelValues] = useState<Record<string, number>>({});
   const [mouseCoords, setMouseCoords] = useState<[number, number] | null>(null);
+  const [inspectorExpandedKey, setInspectorExpandedKey] = useState<string | null>(null);
 
   const [timelineUnitMode, setTimelineUnitMode] = useState<TimelineUnitMode>("auto");
 
@@ -1156,7 +1162,7 @@ export function MapStage({ startDateTime, endDateTime, ecowittEnabled, appliedDa
     setPlayerLayers([...selected, ...unselected]);
   }, [appliedDatasets]);
 
-  // Sync map layer z-order and visibility with playerLayers
+  // Sync map layer z-order, visibility and opacity with playerLayers
   useEffect(() => {
     const layers = layerRefs.current;
     playerLayers.forEach((pl) => {
@@ -1164,6 +1170,7 @@ export function MapStage({ startDateTime, endDateTime, ecowittEnabled, appliedDa
       const olLayer = layers[layerKey];
       if (olLayer) {
         olLayer.setVisible(pl.added);
+        olLayer.setOpacity(pl.opacity ?? 0.7);
       }
     });
     // z-order: first in list = on top
@@ -1271,10 +1278,16 @@ export function MapStage({ startDateTime, endDateTime, ecowittEnabled, appliedDa
   const confirmAddLayer = (key: string, layerType: "raster" | "vector") => {
     setPlayerLayers(prev => prev.map(l => getLayerKey(l) === key ? { ...l, added: true, type: layerType } : l));
     setPendingLayerId(null);
+    // Sync lên appliedDatasets — lấy id từ key (bỏ suffix -raster/-vector nếu có)
+    const id = key.replace(/-(?:raster|vector)$/, "");
+    onAddDataset?.(id, layerType);
   };
 
   const removeLayer = (key: string) => {
     setPlayerLayers(prev => prev.map(l => getLayerKey(l) === key ? { ...l, added: false } : l));
+    // Sync ngược lên appliedDatasets
+    const [id, type] = key.split(/-(?=[^-]*$)/); // split at last dash
+    onRemoveDataset?.(id, type ?? "raster");
   };
 
   // Drag-and-drop reordering
@@ -1401,7 +1414,7 @@ export function MapStage({ startDateTime, endDateTime, ecowittEnabled, appliedDa
       },
       zIndex: 200,
     });
-    ecowittLayer.setVisible(!!ecowittEnabled);
+    ecowittLayer.setVisible(false);
     map.addLayer(ecowittLayer);
     ecowittLayerRef.current = ecowittLayer;
 
@@ -1433,21 +1446,24 @@ export function MapStage({ startDateTime, endDateTime, ecowittEnabled, appliedDa
       const coordinate = evt.coordinate;
       setMouseCoords(coordinate as [number, number]);
 
-      let pixelData: number | null = null;
       const layers = layerRefs.current;
+      const collected: Record<string, number> = {};
+      let firstValue: number | null = null;
       if (layers && typeof layers === 'object') {
-        for (const [, layer] of Object.entries(layers)) {
+        for (const [key, layer] of Object.entries(layers)) {
           try {
             if (!('getData' in layer)) continue;
+            if (!layer.getVisible()) continue;
             const buf = (layer as import("ol/layer/WebGLTile").default).getData(evt.pixel);
             if (buf && !(buf instanceof DataView) && buf.length > 0 && buf[0] > 0) {
-              pixelData = buf[0];
-              break;
+              collected[key] = buf[0];
+              if (firstValue === null) firstValue = buf[0];
             }
           } catch { /* skip layer */ }
         }
       }
-      setPixelValue(pixelData);
+      setPixelValues(collected);
+      setPixelValue(firstValue);
     });
 
     return () => {
@@ -1465,12 +1481,13 @@ export function MapStage({ startDateTime, endDateTime, ecowittEnabled, appliedDa
     };
   }, []);
 
-  // Toggle ecowitt station markers visibility
+  // Toggle ecowitt station markers visibility based on applied datasets
   useEffect(() => {
     if (ecowittLayerRef.current) {
-      ecowittLayerRef.current.setVisible(!!ecowittEnabled);
+      const hasEcowitt = (appliedDatasets ?? []).some(ds => ds.id.startsWith("weather-"));
+      ecowittLayerRef.current.setVisible(hasEcowitt);
     }
-  }, [ecowittEnabled]);
+  }, [appliedDatasets]);
 
   // Fetch device info (coordinates, name) từ Ecowitt API
   // Re-fetch khi mở popup hoặc tab quay lại để đảm bảo luôn có device list mới nhất
@@ -1490,7 +1507,7 @@ export function MapStage({ startDateTime, endDateTime, ecowittEnabled, appliedDa
         if (active) setEcowittDevices([...ECOWITT_DEVICES] as EcowittDevice[]);
       });
     return () => { active = false; };
-  }, [popupDeviceId]);
+  }, []);
 
   // Pulse animation loop for selected marker
   useEffect(() => {
@@ -1731,6 +1748,22 @@ export function MapStage({ startDateTime, endDateTime, ecowittEnabled, appliedDa
 
                     {/* Layer name */}
                     <span className="map-player-item-name">{layer.name}</span>
+
+                    {/* Opacity slider — only when added */}
+                    {layer.added && (
+                      <input
+                        className="map-player-opacity-slider"
+                        type="range"
+                        min={0} max={1} step={0.05}
+                        value={layer.opacity ?? 0.7}
+                        title={`Opacity: ${Math.round((layer.opacity ?? 0.7) * 100)}%`}
+                        onClick={(e) => e.stopPropagation()}
+                        onChange={(e) => {
+                          const val = parseFloat(e.target.value);
+                          setPlayerLayers(prev => prev.map(l => getLayerKey(l) === layerKey ? { ...l, opacity: val } : l));
+                        }}
+                      />
+                    )}
 
                     {/* Layer type badge */}
                     {layer.type && (
@@ -2147,21 +2180,13 @@ export function MapStage({ startDateTime, endDateTime, ecowittEnabled, appliedDa
         })()}
 
 
-        {pixelValue !== null && mouseCoords !== null && (
+        {Object.keys(pixelValues).length > 0 && mouseCoords !== null && (
           <div className="geo-map-inspector">
             <div className="geo-map-inspector-header">
               <div className="geo-map-inspector-indicator" />
               <span>Map Inspector</span>
             </div>
             <div className="geo-map-inspector-body">
-              {Object.keys(renderedLayers).length > 0 && (
-                <div className="geo-map-inspector-row">
-                  <span className="geo-map-inspector-label">Active Layers:</span>
-                  <span className="geo-map-inspector-val">
-                    {Object.values(renderedLayers).map(l => l.name).join(', ')}
-                  </span>
-                </div>
-              )}
               <div className="geo-map-inspector-row">
                 <span className="geo-map-inspector-label">Coordinates:</span>
                 <span className="geo-map-inspector-val">
@@ -2171,25 +2196,40 @@ export function MapStage({ startDateTime, endDateTime, ecowittEnabled, appliedDa
                   })()}
                 </span>
               </div>
-              {(() => {
-                const firstLayer = Object.values(renderedLayers)[0];
-                if (!firstLayer) return null;
-                const label = translateLegendLabel(firstLayer.name);
-                const nameMatch = label.match(/^([^(]+)/);
+              {Object.entries(pixelValues).map(([key, val]) => {
+                const layerInfo = renderedLayers[key];
+                if (!layerInfo) return null;
+                const label = translateLegendLabel(layerInfo.name);
                 const unitMatch = label.match(/\(([^)]+)\)/);
+                const unit = unitMatch ? unitMatch[1] : "";
+                const isExpanded = inspectorExpandedKey === key;
+                // Extract date from S3 key if available
+                const s3Key = layerInfo.type === "raster" || layerInfo.type === "vector" ? layerInfo.proxyUrl : "";
+                const dateMatch = s3Key.match(/\/(\d{4})\/(\d{2})\/(\d{2})\//);
+                const dateStr = dateMatch ? `${dateMatch[1]}-${dateMatch[2]}-${dateMatch[3]}` : null;
                 return (
-                  <div className="geo-map-inspector-row highlighted">
-                    <span className="geo-map-inspector-label">
-                      {nameMatch ? nameMatch[1].trim() : label}:
-                    </span>
-                    <span className="geo-map-inspector-val value-highlight">
-                      {pixelValue !== null
-                        ? `${pixelValue.toFixed(2)} ${unitMatch ? unitMatch[1] : ""}`
-                        : "No Data"}
-                    </span>
+                  <div key={key} className="geo-map-inspector-layer">
+                    <button
+                      className="geo-map-inspector-layer-btn"
+                      type="button"
+                      onClick={() => setInspectorExpandedKey(isExpanded ? null : key)}
+                    >
+                      <span className="geo-map-inspector-layer-name">{layerInfo.name}</span>
+                      <span className="geo-map-inspector-val value-highlight">
+                        {val.toFixed(2)}{unit ? ` ${unit}` : ""}
+                      </span>
+                      <span className="geo-map-inspector-chevron">{isExpanded ? "▲" : "▼"}</span>
+                    </button>
+                    {isExpanded && (
+                      <div className="geo-map-inspector-detail">
+                        {dateStr && <div><span className="geo-map-inspector-label">Date:</span> {dateStr}</div>}
+                        <div><span className="geo-map-inspector-label">Layer key:</span> {key}</div>
+                        <div><span className="geo-map-inspector-label">Type:</span> {layerInfo.type}</div>
+                      </div>
+                    )}
                   </div>
                 );
-              })()}
+              })}
             </div>
           </div>
         )}

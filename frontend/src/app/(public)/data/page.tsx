@@ -1,12 +1,13 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState, useRef } from 'react';
+import { useCallback, useEffect, useMemo, useState, useRef, Fragment, type DragEvent, type FormEvent } from 'react';
 import { useRouter } from 'next/navigation';
 import { authService } from '../../../lib/auth';
 import { DATA_SOURCE_OPTIONS, DEFAULT_DATA_SOURCE, type DataSourceKey } from '../../../lib/constants/data-sources';
 import { collectRecordKeys, formatRecordValue, truncatePath, getParentPath, type DataRecord } from '../../../lib/utils/record-utils';
-import { loadDataDevices, loadDataRows, loadDataTimeframes, uploadS3File, listS3Files, deleteS3File, downloadS3File } from '../../../lib/admin-api';
+import { loadDataDevices, loadDataRows, loadDataTimeframes, uploadS3File, listS3Files, deleteS3File, downloadS3File, renameS3File, createS3Folder } from '../../../lib/admin-api';
 import DataExportModal from '../../../components/DataExportModal';
+import S3Explorer from '../../../components/S3Explorer';
 import Map from 'ol/Map';
 import View from 'ol/View';
 import TileLayer from 'ol/layer/Tile';
@@ -31,7 +32,8 @@ import {
   RefreshCw, Server, 
   Search, MapPin, User, Lock, Key, Activity, AlertCircle, Download, Calendar, FileSpreadsheet, BarChart3,
   UploadCloud, FileCode, Trash2, CheckCircle2, XCircle,
-  Layers, Tag, Clock, Folder, Copy
+  Layers, Tag, Clock, Folder, Copy,
+  ChevronRight, Plus, Move, Check, FolderPlus, ArrowLeft, CheckSquare, Square, Filter
 } from 'lucide-react';
 
 interface MekongData {
@@ -61,6 +63,47 @@ interface MekongData {
 }
 
 type ProvinceFilter = 'all' | 'TV' | 'BT' | 'VL';
+
+type S3FileEntry = {
+  key: string;
+  size: number;
+  lastModified: string;
+};
+
+type FolderPalette = {
+  accent: string;
+  tint: string;
+  border: string;
+};
+
+const FOLDER_PALETTES: FolderPalette[] = [
+  { accent: '#2563a8', tint: 'rgba(37, 99, 168, 0.12)', border: 'rgba(37, 99, 168, 0.2)' },
+  { accent: '#198754', tint: 'rgba(25, 135, 84, 0.12)', border: 'rgba(25, 135, 84, 0.2)' },
+  { accent: '#fd7e14', tint: 'rgba(253, 126, 20, 0.12)', border: 'rgba(253, 126, 20, 0.2)' },
+  { accent: '#0f766e', tint: 'rgba(15, 118, 110, 0.12)', border: 'rgba(15, 118, 110, 0.2)' },
+  { accent: '#d63384', tint: 'rgba(214, 51, 132, 0.12)', border: 'rgba(214, 51, 132, 0.2)' },
+  { accent: '#6f42c1', tint: 'rgba(111, 66, 193, 0.12)', border: 'rgba(111, 66, 193, 0.2)' },
+];
+
+function hashString(value: string) {
+  let hash = 0;
+  for (const char of value) {
+    hash = ((hash << 5) - hash + char.charCodeAt(0)) >>> 0;
+  }
+  return hash;
+}
+
+function getFolderPalette(folderPath: string) {
+  return FOLDER_PALETTES[hashString(folderPath) % FOLDER_PALETTES.length];
+}
+
+function splitFolderPath(folderPath: string) {
+  if (!folderPath || folderPath === '/') {
+    return [];
+  }
+
+  return folderPath.split('/').filter(Boolean);
+}
 
 function getLocalDateString(value: unknown) {
   if (value === null || value === undefined || value === '') {
@@ -161,9 +204,9 @@ const GIS_DATASETS = {
   'hydrology': {
     label: 'Hydrology',
     categories: [
-      { key: 'salinity-monitoring', label: 'Salinity' },
-      { key: 'water-temperature-monitoring', label: 'Temperature' },
-      { key: 'ph-monitoring', label: 'pH' }
+      { key: 'salinity', label: 'Salinity' },
+      { key: 'tidal', label: 'Tidal' },
+      { key: 'ph', label: 'pH' }
     ]
   },
   'baseline-environment': {
@@ -190,7 +233,7 @@ const STATION_DATA_TYPES = [
 const STATION_PARAMETERS = [
   { key: 'ph', label: 'pH' },
   { key: 'salinity', label: 'Độ mặn' },
-  { key: 'temperature', label: 'Nhiệt độ' },
+  { key: 'tidal', label: 'Thủy triều' },
   { key: 'do', label: 'DO' },
   { key: 'water-level', label: 'Mực nước' },
   { key: 'flow', label: 'Lưu lượng' }
@@ -198,7 +241,7 @@ const STATION_PARAMETERS = [
 
 const MONITORING_PARAMETERS = [
   { key: 'salinity', label: 'Độ mặn' },
-  { key: 'temperature', label: 'Nhiệt độ' },
+  { key: 'tidal', label: 'Thủy triều' },
   { key: 'ph', label: 'pH' },
   { key: 'water-level', label: 'Mực nước' }
 ];
@@ -225,250 +268,8 @@ function getNearestTimeSlot(): string {
   return TIME_SLOTS[nearestIdx];
 }
 
-// S3 Flat File List Component
-function S3FlatFileList({ prefix, onPreviewFile }: { prefix: string; onPreviewFile?: (file: any) => void }) {
-  const [files, setFiles] = useState<Array<{ key: string; size: number; lastModified: string }>>([]);
-  const [loading, setLoading] = useState(true);
-  const isAdmin = useMemo(() => authService.hasRole('ADMIN'), []);
-  const [searchQuery, setSearchQuery] = useState('');
-  const [error, setError] = useState('');
-
-  const fetchFiles = useCallback(async () => {
-    setLoading(true);
-    setError('');
-    try {
-      const data = await listS3Files(prefix);
-      data.sort((a, b) => {
-        const dateA = a.lastModified ? new Date(a.lastModified).getTime() : 0;
-        const dateB = b.lastModified ? new Date(b.lastModified).getTime() : 0;
-        return dateB - dateA;
-      });
-      setFiles(data as any);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Không thể tải danh sách tệp');
-    } finally {
-      setLoading(false);
-    }
-  }, [prefix]);
-
-  useEffect(() => {
-    void fetchFiles();
-  }, [fetchFiles]);
-
-  const handleDownload = async (key: string) => {
-    try {
-      await downloadS3File(key);
-    } catch (err) {
-      alert('Lỗi tải tệp: ' + (err instanceof Error ? err.message : String(err)));
-    }
-  };
-
-  const handleDelete = async (key: string) => {
-    const shortKey = key.split('/').pop() || key;
-    if (!window.confirm(`Bạn có chắc chắn muốn xóa "${shortKey}"?\n${getParentPath(key)}`)) {
-      return;
-    }
-    try {
-      await deleteS3File(key);
-      alert('Xóa tệp tin thành công!');
-      void fetchFiles();
-    } catch (err) {
-      alert('Lỗi khi xóa tệp: ' + (err instanceof Error ? err.message : String(err)));
-    }
-  };
-
-  const filteredFiles = files.filter(file => 
-    file.key.toLowerCase().includes(searchQuery.toLowerCase().trim())
-  );
-
-  const formatBytes = (bytes: number) => {
-    if (bytes === 0) return '0 B';
-    const k = 1024;
-    const sizes = ['B', 'KB', 'MB', 'GB'];
-    const i = Math.floor(Math.log(bytes) / Math.log(k));
-    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
-  };
-
-  const formatDate = (dateStr: string) => {
-    if (!dateStr) return '-';
-    const d = new Date(dateStr);
-    return Number.isNaN(d.getTime()) ? dateStr : d.toLocaleString('vi-VN');
-  };
-
-  const getFileIcon = (key: string) => {
-    const ext = key.substring(key.lastIndexOf('.')).toLowerCase();
-    if (['.tif', '.tiff'].includes(ext)) return { icon: Layers, color: '#0d6efd', type: 'Raster' };
-    if (['.geojson', '.kml', '.shp', '.gpkg'].includes(ext)) return { icon: MapPin, color: '#198754', type: 'Vector' };
-    if (ext === '.csv') return { icon: FileSpreadsheet, color: '#6f42c1', type: 'CSV' };
-    if (['.png', '.jpg', '.jpeg', '.gif'].includes(ext)) return { icon: FileCode, color: '#fd7e14', type: 'Image' };
-    return { icon: FileCode, color: 'var(--text-muted)', type: ext || 'File' };
-  };
-
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px' }}>
-        <div style={{ position: 'relative', flex: '1 1 300px' }}>
-          <Search size={16} style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
-          <input
-            type="text"
-            placeholder="Tìm kiếm tên tệp..."
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            style={{
-              width: '100%',
-              padding: '10px 12px 10px 38px',
-              border: '1px solid var(--border)',
-              borderRadius: 'var(--radius-md)',
-              background: 'var(--surface-strong)',
-              color: 'var(--text)',
-              fontSize: '0.9rem',
-              outline: 'none',
-              transition: 'border-color 0.2s'
-            }}
-          />
-        </div>
-        <button
-          onClick={() => void fetchFiles()}
-          disabled={loading}
-          style={{
-            padding: '10px 16px',
-            background: 'var(--surface-strong)',
-            color: 'var(--text)',
-            border: '1px solid var(--border)',
-            borderRadius: 'var(--radius-md)',
-            fontSize: '0.9rem',
-            fontWeight: '500',
-            cursor: 'pointer',
-            display: 'flex',
-            alignItems: 'center',
-            gap: '8px'
-          }}
-        >
-          <RefreshCw size={16} className={loading ? 'animate-spin' : ''} />
-          Làm mới
-        </button>
-      </div>
-
-      {error && (
-        <div style={{ padding: '12px 16px', background: 'rgba(220, 53, 69, 0.1)', border: '1px solid #dc3545', borderRadius: 'var(--radius-md)', color: '#dc3545', fontSize: '0.9rem' }}>
-          {error}
-        </div>
-      )}
-
-      <div style={{ overflowX: 'auto', borderRadius: 'var(--radius-lg)', border: '1px solid var(--border)' }}>
-        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.88rem', textAlign: 'left' }}>
-          <thead>
-            <tr style={{ background: 'var(--surface-strong)', borderBottom: '1px solid var(--border)' }}>
-              <th style={{ padding: '12px 16px', color: 'var(--text-muted)', fontWeight: '600', width: '50px' }}>Loại</th>
-              <th style={{ padding: '12px 16px', color: 'var(--text-muted)', fontWeight: '600' }}>Tên tệp tin</th>
-              <th style={{ padding: '12px 16px', color: 'var(--text-muted)', fontWeight: '600', width: '100px' }}>Kích thước</th>
-              <th style={{ padding: '12px 16px', color: 'var(--text-muted)', fontWeight: '600', width: '160px' }}>Ngày tải lên</th>
-              <th style={{ padding: '12px 16px', color: 'var(--text-muted)', fontWeight: '600', width: '90px', textAlign: 'center' }}>Thao tác</th>
-            </tr>
-          </thead>
-          <tbody>
-            {loading ? (
-              <tr>
-                <td colSpan={5} style={{ padding: '32px', textAlign: 'center', color: 'var(--text-muted)' }}>
-                  <RefreshCw size={24} className="animate-spin" style={{ margin: '0 auto 12px auto' }} />
-                  <p style={{ margin: 0, fontSize: '0.9rem' }}>Đang tải danh sách tệp tin...</p>
-                </td>
-              </tr>
-            ) : filteredFiles.length === 0 ? (
-              <tr>
-                <td colSpan={5} style={{ padding: '40px', textAlign: 'center', color: 'var(--text-muted)' }}>
-                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '8px' }}>
-                    <FileCode size={36} color="var(--border)" />
-                    <p style={{ margin: 0, fontWeight: '500', fontSize: '0.95rem' }}>Chưa có tệp tin nào</p>
-                    <p style={{ margin: 0, fontSize: '0.82rem' }}>Tải tệp lên để bắt đầu</p>
-                  </div>
-                </td>
-              </tr>
-            ) : (
-              filteredFiles.map((file) => {
-                const { icon: FileIcon, color, type } = getFileIcon(file.key);
-                const filename = file.key.split('/').pop() || file.key;
-                return (
-                  <tr key={file.key} style={{ borderBottom: '1px solid var(--border)' }} className="hover-bg-surface-strong">
-                    <td style={{ padding: '10px 16px', textAlign: 'center' }}>
-                      <span style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: '32px', height: '32px', borderRadius: '8px', background: `${color}12`, color }}>
-                        <FileIcon size={16} />
-                      </span>
-                    </td>
-                    <td 
-                      onClick={() => onPreviewFile?.(file)}
-                      style={{ 
-                        padding: '10px 16px',
-                        cursor: onPreviewFile ? 'pointer' : 'default',
-                      }}
-                    >
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                        <span style={{ color: 'var(--text)', fontWeight: '600', fontSize: '0.92rem' }}>{filename}</span>
-                        <span style={{ display: 'flex', alignItems: 'center', gap: '4px', color: 'var(--text-muted)', fontSize: '0.72rem', overflow: 'hidden' }} title={file.key}>
-                          <Folder size={11} style={{ flexShrink: 0, opacity: 0.6 }} />
-                          <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                            {getParentPath(file.key) || '/'}
-                          </span>
-                        </span>
-                      </div>
-                    </td>
-                    <td style={{ padding: '10px 16px', color: 'var(--text)', fontSize: '0.85rem', whiteSpace: 'nowrap' }}>
-                      {formatBytes(file.size)}
-                    </td>
-                    <td style={{ padding: '10px 16px', color: 'var(--text-muted)', fontSize: '0.82rem', whiteSpace: 'nowrap' }}>
-                      {formatDate(file.lastModified)}
-                    </td>
-                    <td style={{ padding: '10px 16px', textAlign: 'center' }}>
-                      <div style={{ display: 'flex', justifyContent: 'center', gap: '4px' }}>
-                        <button
-                          onClick={() => { navigator.clipboard.writeText(file.key); }}
-                          style={{ border: 'none', background: 'none', cursor: 'pointer', color: 'var(--text-muted)', padding: '6px', borderRadius: '6px' }}
-                          className="hover-bg-surface-strong"
-                          title="Sao chép đường dẫn"
-                        >
-                          <Copy size={13} />
-                        </button>
-                        <button
-                          onClick={() => void handleDownload(file.key)}
-                          style={{ border: 'none', background: 'none', cursor: 'pointer', color: 'var(--accent)', padding: '6px', borderRadius: '6px' }}
-                          className="hover-bg-accent-10"
-                          title="Tải xuống"
-                        >
-                          <Download size={15} />
-                        </button>
-                        {isAdmin && (
-                          <button
-                            onClick={() => void handleDelete(file.key)}
-                            style={{ border: 'none', background: 'none', cursor: 'pointer', color: '#dc3545', padding: '6px', borderRadius: '6px' }}
-                            className="hover-bg-danger-10"
-                            title="Xóa tệp"
-                          >
-                            <Trash2 size={15} />
-                          </button>
-                        )}
-                      </div>
-                    </td>
-                  </tr>
-                );
-              })
-            )}
-          </tbody>
-        </table>
-      </div>
-      <style jsx>{`
-        .hover-bg-surface-strong:hover {
-          background: var(--surface-strong);
-        }
-        .hover-bg-accent-10:hover {
-          background: rgba(13, 110, 253, 0.1);
-        }
-        .hover-bg-danger-10:hover {
-          background: rgba(220, 53, 69, 0.1);
-        }
-      `}</style>
-    </div>
-  );
-}
+// S3 Folder Explorer Component
+// S3 Flat File List component has been moved to src/components/S3Explorer.tsx
 
 function parseCSV(text: string, limit = 100): string[][] {
   const lines = text.split(/\r?\n/);
@@ -540,8 +341,10 @@ function FilePreviewModal({ fileKey, onClose }: FilePreviewModalProps) {
     if (isRaster) {
       setLoading(false);
       setError('');
-      const encodedKey = fileKey.split('/').map(seg => encodeURIComponent(seg)).join('/');
-      setBlobUrl(`/api/tif?key=${encodedKey}`);
+      // Encode the full key as a query param (encodeURIComponent encodes slashes too)
+      // Add cache-bust ts to prevent browser from returning stale file
+      const ts = Date.now();
+      setBlobUrl(`/api/tif?key=${encodeURIComponent(fileKey)}&_t=${ts}`);
       return;
     }
 
@@ -552,7 +355,7 @@ function FilePreviewModal({ fileKey, onClose }: FilePreviewModalProps) {
     setCsvData([]);
 
     const token = authService.getToken();
-    fetch(getBackendUrl(`/s3/download/${fileKey}`), {
+    fetch(getBackendUrl(`/s3/download?key=${encodeURIComponent(fileKey)}`), {
       headers: token ? { Authorization: `Bearer ${token}` } : undefined,
     })
       .then((res) => {
@@ -677,9 +480,12 @@ function FilePreviewModal({ fileKey, onClose }: FilePreviewModalProps) {
 
     if (isRaster) {
       const isSalinity = fileKey.toLowerCase().includes('salinity') || fileKey.toLowerCase().includes('salt');
-      const isPh = fileKey.toLowerCase().includes('ph');
+      const isPh = fileKey.toLowerCase().includes('/ph/') || fileKey.toLowerCase().includes('ph_') || fileKey.toLowerCase().includes('_ph_');
+      const isTidal = fileKey.toLowerCase().includes('tidal');
       const isWaterLevel = fileKey.toLowerCase().includes('water-level') || fileKey.toLowerCase().includes('waterlevel');
-      const isSingleBand = isSalinity || isPh || isWaterLevel || fileKey.toLowerCase().includes('monitoring') || fileKey.toLowerCase().includes('station');
+      const isSingleBand = isSalinity || isPh || isTidal || isWaterLevel
+        || fileKey.toLowerCase().includes('station')
+        || fileKey.toLowerCase().includes('monitoring');
 
       const geoTiffSource = new GeoTIFF({
         sources: [
@@ -709,19 +515,26 @@ function FilePreviewModal({ fileKey, onClose }: FilePreviewModalProps) {
               14, [128, 0, 128, 1]
             ]
           };
-        } else if (isWaterLevel) {
+        } else if (isTidal || isWaterLevel) {
+          // Tidal / water-level: blue gradient
           layerStyle = {
             color: [
-              'interpolate',
-              ['linear'],
-              ['band', 1],
-              -2, [0, 0, 0, 0],
-              0, [173, 216, 230, 0.8],
-              2, [0, 0, 255, 0.8],
-              5, [0, 0, 139, 0.8]
+              'case',
+              ['<=', ['band', 1], -9000], [0, 0, 0, 0],
+              [
+                'interpolate',
+                ['linear'],
+                ['band', 1],
+                -0.5, [173, 216, 230, 0.6],
+                0,    [135, 206, 235, 0.75],
+                0.5,  [30, 144, 255, 0.85],
+                1.5,  [0, 80, 200, 0.9],
+                3.0,  [0, 0, 139, 1]
+              ]
             ]
           };
         } else {
+          // Salinity and others: blue-to-red gradient
           layerStyle = {
             color: [
               'case',
@@ -731,11 +544,11 @@ function FilePreviewModal({ fileKey, onClose }: FilePreviewModalProps) {
                 ['linear'],
                 ['band', 1],
                 0.01, [0, 0, 255, 0.8],
-                4, [0, 255, 255, 0.8],
-                8, [0, 255, 0, 0.8],
-                15, [255, 255, 0, 0.8],
-                22, [255, 165, 0, 0.8],
-                30, [255, 0, 0, 0.8]
+                4,    [0, 255, 255, 0.8],
+                8,    [0, 255, 0, 0.8],
+                15,   [255, 255, 0, 0.8],
+                22,   [255, 165, 0, 0.8],
+                30,   [255, 0, 0, 0.8]
               ]
             ]
           };
@@ -812,86 +625,100 @@ function FilePreviewModal({ fileKey, onClose }: FilePreviewModalProps) {
 
   const filename = fileKey.split('/').pop() || fileKey;
 
+  // File type color + icon theming
+  const fileTheme = isCSV
+    ? { color: '#10b981', bg: 'rgba(16,185,129,0.12)', label: 'CSV Table', icon: <FileSpreadsheet size={22} /> }
+    : isImage
+    ? { color: '#f59e0b', bg: 'rgba(245,158,11,0.12)', label: 'Image', icon: <FileCode size={22} /> }
+    : isRaster
+    ? { color: '#8b5cf6', bg: 'rgba(139,92,246,0.12)', label: 'GeoTIFF', icon: <MapPin size={22} /> }
+    : isVector
+    ? { color: '#3b82f6', bg: 'rgba(59,130,246,0.12)', label: 'Vector Layer', icon: <Layers size={22} /> }
+    : { color: 'var(--accent)', bg: 'rgba(37,99,168,0.12)', label: ext.toUpperCase().replace('.',''), icon: <FileCode size={22} /> };
+
+  const pathParts = fileKey.split('/');
+  const dirPath = pathParts.slice(0, -1).join('/');
+
   return (
-    <div style={{
-      position: 'fixed',
-      top: 0,
-      left: 0,
-      right: 0,
-      bottom: 0,
-      zIndex: 9999,
-      background: 'rgba(9, 13, 22, 0.75)',
-      backdropFilter: 'blur(10px)',
-      display: 'flex',
-      alignItems: 'center',
-      justifyContent: 'center',
-      padding: '24px'
-    }}>
+    <div
+      onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
+      style={{
+        position: 'fixed',
+        top: 0, left: 0, right: 0, bottom: 0,
+        zIndex: 9999,
+        background: 'rgba(6, 8, 16, 0.82)',
+        backdropFilter: 'blur(18px) saturate(1.4)',
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        padding: '20px',
+        animation: 'modalOverlayIn 0.25s ease'
+      }}
+    >
       <div style={{
-        background: 'var(--surface)',
-        border: '1px solid var(--border)',
-        borderRadius: 'var(--radius-xl)',
-        boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.5), 0 10px 10px -5px rgba(0, 0, 0, 0.5)',
+        background: 'linear-gradient(160deg, rgba(22,27,46,0.98) 0%, rgba(13,17,33,0.99) 100%)',
+        border: '1px solid rgba(255,255,255,0.08)',
+        borderRadius: '20px',
+        boxShadow: `0 0 0 1px rgba(255,255,255,0.04), 0 32px 64px -12px rgba(0,0,0,0.8), 0 0 80px -20px ${fileTheme.color}33`,
         width: '100%',
-        maxWidth: isCSV ? '1100px' : '900px',
-        maxHeight: '90vh',
-        display: 'flex',
-        flexDirection: 'column',
+        maxWidth: isCSV ? '1160px' : '980px',
+        maxHeight: '92vh',
+        display: 'flex', flexDirection: 'column',
         overflow: 'hidden',
-        animation: 'fadeInUp 0.3s cubic-bezier(0.16, 1, 0.3, 1)'
+        animation: 'modalPanelIn 0.35s cubic-bezier(0.22, 1, 0.36, 1)'
       }}>
+
         {/* Header */}
         <div style={{
-          padding: '16px 24px',
-          borderBottom: '1px solid var(--border)',
-          display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'center',
-          background: 'var(--surface-strong)'
+          padding: '20px 24px 18px',
+          borderBottom: '1px solid rgba(255,255,255,0.06)',
+          background: `linear-gradient(135deg, ${fileTheme.bg} 0%, transparent 60%)`,
+          display: 'flex', alignItems: 'center', gap: '16px', flexShrink: 0
         }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '12px', minWidth: 0 }}>
-            <div style={{
-              width: '40px',
-              height: '40px',
-              borderRadius: 'var(--radius-md)',
-              background: 'rgba(37, 99, 168, 0.15)',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              color: 'var(--accent)',
-              flexShrink: 0
-            }}>
-              {isCSV && <FileSpreadsheet size={20} />}
-              {isImage && <FileCode size={20} />}
-              {isMap && <MapPin size={20} />}
-              {!isCSV && !isImage && !isMap && <FileCode size={20} />}
-            </div>
-            <div style={{ minWidth: 0 }}>
-              <h3 style={{ margin: 0, fontSize: '1.05rem', fontWeight: 'bold', color: 'var(--text)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                Xem trước: {filename}
-              </h3>
-              <p style={{ margin: '2px 0 0 0', fontSize: '0.8rem', color: 'var(--text-muted)', fontFamily: 'monospace', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} title={fileKey}>
-                {truncatePath(fileKey, 80)}
-              </p>
-            </div>
+          <div style={{
+            width: '48px', height: '48px', borderRadius: '14px',
+            background: fileTheme.bg, border: `1px solid ${fileTheme.color}33`,
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            color: fileTheme.color, flexShrink: 0,
+            boxShadow: `0 4px 16px ${fileTheme.color}22`
+          }}>
+            {fileTheme.icon}
           </div>
 
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+              <h3 style={{
+                margin: 0, fontSize: '1.05rem', fontWeight: '700', color: '#f1f5f9',
+                whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '500px'
+              }}>
+                {filename}
+              </h3>
+              <span style={{
+                padding: '2px 10px', borderRadius: '999px',
+                background: fileTheme.bg, border: `1px solid ${fileTheme.color}44`,
+                color: fileTheme.color, fontSize: '0.72rem', fontWeight: '700',
+                letterSpacing: '0.04em', textTransform: 'uppercase' as const, flexShrink: 0
+              }}>
+                {fileTheme.label}
+              </span>
+            </div>
+            <p style={{
+              margin: '5px 0 0', fontSize: '0.76rem',
+              color: 'rgba(148,163,184,0.7)',
+              fontFamily: '"JetBrains Mono","Fira Code",monospace',
+              whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '600px'
+            }} title={fileKey}>
+              📁 {dirPath}/
+            </p>
+          </div>
+
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0 }}>
             <button
               onClick={handleDownload}
               style={{
-                background: 'rgba(37, 99, 168, 0.1)',
-                border: '1px solid rgba(37, 99, 168, 0.2)',
-                color: 'var(--accent)',
-                padding: '8px 14px',
-                borderRadius: 'var(--radius-md)',
-                fontSize: '0.85rem',
-                fontWeight: '600',
-                cursor: 'pointer',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '6px',
-                transition: 'all 0.2s'
+                background: `linear-gradient(135deg, ${fileTheme.color}22, ${fileTheme.color}11)`,
+                border: `1px solid ${fileTheme.color}44`,
+                color: fileTheme.color, padding: '9px 16px', borderRadius: '10px',
+                fontSize: '0.83rem', fontWeight: '600', cursor: 'pointer',
+                display: 'flex', alignItems: 'center', gap: '7px', transition: 'all 0.18s ease'
               }}
               title="Tải tệp này xuống"
             >
@@ -900,83 +727,151 @@ function FilePreviewModal({ fileKey, onClose }: FilePreviewModalProps) {
             <button
               onClick={onClose}
               style={{
-                background: 'none',
-                border: 'none',
-                color: 'var(--text-muted)',
-                cursor: 'pointer',
-                padding: '8px',
-                borderRadius: 'var(--radius-md)',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                transition: 'all 0.2s'
+                background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.08)',
+                color: 'rgba(148,163,184,0.8)', cursor: 'pointer',
+                padding: '9px', borderRadius: '10px',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                transition: 'all 0.18s ease'
               }}
-              className="hover-bg-surface-strong"
-              title="Đóng xem trước"
+              title="Đóng (Esc)"
             >
-              <XCircle size={22} />
+              <XCircle size={20} />
             </button>
           </div>
         </div>
 
-        {/* Content Area */}
+        {/* Content */}
         <div style={{
-          flex: 1,
-          padding: '24px',
-          overflowY: 'auto',
-          background: 'var(--background)',
-          display: 'flex',
-          flexDirection: 'column',
-          minHeight: '350px',
-          justifyContent: loading ? 'center' : 'stretch',
-          alignItems: loading ? 'center' : 'stretch'
+          flex: 1, overflowY: 'auto',
+          background: 'rgba(8,12,24,0.6)',
+          display: 'flex', flexDirection: 'column', minHeight: 0
         }} className="custom-scrollbar">
+
           {loading ? (
-            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '12px' }}>
-              <RefreshCw size={36} className="animate-spin" color="var(--accent)" />
-              <p style={{ color: 'var(--text-muted)', fontSize: '0.95rem' }}>Đang nạp tệp tin và chuẩn bị bản xem trước...</p>
+            <div style={{
+              display: 'flex', flexDirection: 'column', alignItems: 'center',
+              justifyContent: 'center', gap: '20px', padding: '80px 24px', flex: 1
+            }}>
+              <div style={{ position: 'relative', width: '64px', height: '64px' }}>
+                <div style={{
+                  position: 'absolute', inset: 0, borderRadius: '50%',
+                  border: `3px solid ${fileTheme.color}22`
+                }} />
+                <div style={{
+                  position: 'absolute', inset: 0, borderRadius: '50%',
+                  border: `3px solid transparent`, borderTopColor: fileTheme.color,
+                  animation: 'spinLoader 0.9s linear infinite'
+                }} />
+                <div style={{
+                  position: 'absolute', inset: '16px', borderRadius: '50%',
+                  border: `2px solid transparent`, borderTopColor: `${fileTheme.color}88`,
+                  animation: 'spinLoader 1.4s linear infinite reverse'
+                }} />
+              </div>
+              <div style={{ textAlign: 'center' }}>
+                <p style={{ margin: 0, color: '#f1f5f9', fontWeight: '600', fontSize: '0.95rem' }}>
+                  Đang tải tệp tin...
+                </p>
+                <p style={{ margin: '6px 0 0', color: 'rgba(148,163,184,0.6)', fontSize: '0.82rem' }}>
+                  Chuẩn bị xem trước · {ext.toUpperCase().replace('.', '')}
+                </p>
+              </div>
             </div>
+
           ) : error ? (
-            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '16px', maxWidth: '450px', margin: '0 auto', textAlign: 'center' }}>
-              <AlertCircle size={48} color="#dc3545" />
-              <h4 style={{ margin: 0, color: 'var(--text)', fontWeight: 'bold' }}>Không Thể Xem Trước Tệp Tin</h4>
-              <p style={{ margin: 0, color: 'var(--text-muted)', fontSize: '0.88rem', lineHeight: '1.5' }}>{error}</p>
+            <div style={{
+              display: 'flex', flexDirection: 'column', alignItems: 'center',
+              justifyContent: 'center', gap: '16px', padding: '80px 24px',
+              flex: 1, textAlign: 'center'
+            }}>
+              <div style={{
+                width: '72px', height: '72px', borderRadius: '50%',
+                background: 'rgba(239,68,68,0.12)', border: '1px solid rgba(239,68,68,0.25)',
+                display: 'flex', alignItems: 'center', justifyContent: 'center'
+              }}>
+                <AlertCircle size={34} color="#f87171" />
+              </div>
+              <div>
+                <h4 style={{ margin: 0, color: '#f1f5f9', fontWeight: '700', fontSize: '1rem' }}>
+                  Không thể xem trước
+                </h4>
+                <p style={{ margin: '8px 0 0', color: 'rgba(148,163,184,0.7)', fontSize: '0.84rem', lineHeight: '1.6', maxWidth: '400px' }}>
+                  {error}
+                </p>
+              </div>
+              <button onClick={handleDownload} style={{
+                background: 'rgba(239,68,68,0.15)', border: '1px solid rgba(239,68,68,0.3)',
+                color: '#f87171', padding: '9px 20px', borderRadius: '10px',
+                fontWeight: '600', fontSize: '0.85rem', cursor: 'pointer',
+                display: 'flex', alignItems: 'center', gap: '7px'
+              }}>
+                <Download size={14} /> Tải xuống để xem cục bộ
+              </button>
             </div>
+
           ) : (
-            <>
+            <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+
+              {/* CSV Table */}
               {isCSV && (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', height: '100%' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '10px' }}>
-                    <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>
-                      Hiển thị tối đa 100 dòng đầu tiên của tệp tin. Tổng số dòng hiển thị: {csvData.length}
+                <div style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0 }}>
+                  <div style={{
+                    display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                    flexWrap: 'wrap', gap: '10px', padding: '14px 20px',
+                    borderBottom: '1px solid rgba(255,255,255,0.06)',
+                    background: 'rgba(255,255,255,0.02)'
+                  }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <span style={{
+                        padding: '3px 10px', borderRadius: '999px',
+                        background: 'rgba(16,185,129,0.12)', border: '1px solid rgba(16,185,129,0.25)',
+                        color: '#34d399', fontSize: '0.75rem', fontWeight: '600'
+                      }}>
+                        {csvData.length > 0 ? csvData.length - 1 : 0} hàng
+                      </span>
+                      <span style={{
+                        padding: '3px 10px', borderRadius: '999px',
+                        background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)',
+                        color: 'rgba(148,163,184,0.8)', fontSize: '0.75rem', fontWeight: '500'
+                      }}>
+                        {csvData[0]?.length || 0} cột · tối đa 100 dòng
+                      </span>
                     </div>
-                    <div style={{ position: 'relative', width: '300px' }}>
-                      <Search size={14} style={{ position: 'absolute', left: '10px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
+                    <div style={{ position: 'relative', width: '280px' }}>
+                      <Search size={13} style={{
+                        position: 'absolute', left: '11px', top: '50%',
+                        transform: 'translateY(-50%)', color: 'rgba(148,163,184,0.5)', pointerEvents: 'none'
+                      }} />
                       <input
                         type="text"
                         placeholder="Tìm kiếm trong bảng..."
                         value={csvSearch}
                         onChange={(e) => setCsvSearch(e.target.value)}
                         style={{
-                          width: '100%',
-                          padding: '6px 10px 6px 30px',
-                          border: '1px solid var(--border)',
-                          borderRadius: 'var(--radius-md)',
-                          background: 'var(--surface-strong)',
-                          color: 'var(--text)',
-                          fontSize: '0.85rem',
-                          outline: 'none'
+                          width: '100%', boxSizing: 'border-box' as const,
+                          padding: '8px 12px 8px 32px',
+                          border: '1px solid rgba(255,255,255,0.1)', borderRadius: '9px',
+                          background: 'rgba(255,255,255,0.05)',
+                          color: '#f1f5f9', fontSize: '0.83rem', outline: 'none'
                         }}
                       />
                     </div>
                   </div>
-
-                  <div style={{ flex: 1, overflow: 'auto', border: '1px solid var(--border)', borderRadius: 'var(--radius-lg)' }} className="custom-scrollbar">
-                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.82rem', textAlign: 'left' }}>
+                  <div style={{ flex: 1, overflow: 'auto', minHeight: '300px' }} className="custom-scrollbar">
+                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.81rem' }}>
                       <thead>
-                        <tr style={{ background: 'var(--surface-strong)', borderBottom: '1px solid var(--border)', position: 'sticky', top: 0, zIndex: 1 }}>
+                        <tr style={{
+                          background: 'rgba(16,185,129,0.08)',
+                          borderBottom: '1px solid rgba(16,185,129,0.2)',
+                          position: 'sticky', top: 0, zIndex: 2
+                        }}>
                           {csvData[0]?.map((cell, idx) => (
-                            <th key={idx} style={{ padding: '10px 14px', color: 'var(--text)', fontWeight: 'bold', borderRight: '1px solid var(--border)' }}>
+                            <th key={idx} style={{
+                              padding: '11px 16px', color: '#34d399', fontWeight: '700',
+                              borderRight: '1px solid rgba(255,255,255,0.05)',
+                              textAlign: 'left' as const, whiteSpace: 'nowrap' as const,
+                              fontSize: '0.78rem', letterSpacing: '0.03em', textTransform: 'uppercase' as const
+                            }}>
                               {cell}
                             </th>
                           ))}
@@ -984,9 +879,16 @@ function FilePreviewModal({ fileKey, onClose }: FilePreviewModalProps) {
                       </thead>
                       <tbody>
                         {filteredCsvRows.slice(1).map((row, rowIdx) => (
-                          <tr key={rowIdx} style={{ borderBottom: '1px solid var(--border)' }} className="hover-bg-surface-strong">
+                          <tr key={rowIdx} style={{
+                            borderBottom: '1px solid rgba(255,255,255,0.04)',
+                            background: rowIdx % 2 === 0 ? 'transparent' : 'rgba(255,255,255,0.015)'
+                          }}>
                             {row.map((cell, cellIdx) => (
-                              <td key={cellIdx} style={{ padding: '10px 14px', color: 'var(--text-muted)', borderRight: '1px solid var(--border)', whiteSpace: 'nowrap' }}>
+                              <td key={cellIdx} style={{
+                                padding: '9px 16px', color: 'rgba(203,213,225,0.85)',
+                                borderRight: '1px solid rgba(255,255,255,0.04)',
+                                whiteSpace: 'nowrap' as const
+                              }}>
                                 {cell}
                               </td>
                             ))}
@@ -994,8 +896,11 @@ function FilePreviewModal({ fileKey, onClose }: FilePreviewModalProps) {
                         ))}
                         {filteredCsvRows.length <= 1 && (
                           <tr>
-                            <td colSpan={csvData[0]?.length || 1} style={{ padding: '24px', textAlign: 'center', color: 'var(--text-muted)' }}>
-                              Không tìm thấy hàng nào khớp với từ khóa tìm kiếm.
+                            <td colSpan={csvData[0]?.length || 1} style={{
+                              padding: '40px', textAlign: 'center',
+                              color: 'rgba(148,163,184,0.5)', fontSize: '0.85rem'
+                            }}>
+                              Không tìm thấy kết quả nào
                             </td>
                           </tr>
                         )}
@@ -1005,132 +910,138 @@ function FilePreviewModal({ fileKey, onClose }: FilePreviewModalProps) {
                 </div>
               )}
 
+              {/* Image */}
               {isImage && (
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', flex: 1, padding: '20px' }}>
-                  <img
-                    src={blobUrl}
-                    alt={filename}
-                    style={{
-                      maxWidth: '100%',
-                      maxHeight: '60vh',
-                      objectFit: 'contain',
-                      borderRadius: 'var(--radius-lg)',
-                      boxShadow: '0 4px 20px rgba(0, 0, 0, 0.3)',
-                      border: '1px solid var(--border)'
-                    }}
-                  />
+                <div style={{
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  flex: 1, padding: '32px',
+                  background: 'repeating-conic-gradient(rgba(255,255,255,0.02) 0% 25%, transparent 0% 50%) 0 0 / 20px 20px'
+                }}>
+                  <img src={blobUrl} alt={filename} style={{
+                    maxWidth: '100%', maxHeight: '65vh', objectFit: 'contain',
+                    borderRadius: '14px', boxShadow: '0 8px 40px rgba(0,0,0,0.5)',
+                    border: '1px solid rgba(255,255,255,0.08)'
+                  }} />
                 </div>
               )}
 
+              {/* Map */}
               {isMap && (
-                <div style={{ position: 'relative', width: '100%', height: '550px', border: '1px solid var(--border)', borderRadius: 'var(--radius-lg)', overflow: 'hidden' }}>
-                  <div ref={mapElement} style={{ width: '100%', height: '100%', background: '#f8fafc' }} />
-                  
-                  {/* Map Float Info */}
+                <div style={{ position: 'relative', width: '100%', height: '580px', flexShrink: 0 }}>
+                  <div ref={mapElement} style={{ width: '100%', height: '100%', background: '#0d1117' }} />
                   <div style={{
-                    position: 'absolute',
-                    bottom: '12px',
-                    left: '12px',
-                    background: 'var(--surface)',
-                    border: '1px solid var(--border)',
-                    borderRadius: 'var(--radius-md)',
-                    padding: '8px 12px',
-                    fontSize: '0.78rem',
-                    color: 'var(--text)',
-                    boxShadow: 'var(--shadow-md)',
-                    zIndex: 10,
-                    display: 'flex',
-                    flexDirection: 'column',
-                    gap: '4px',
-                    maxWidth: '300px'
+                    position: 'absolute', bottom: '16px', left: '16px',
+                    background: 'rgba(6,8,16,0.88)', backdropFilter: 'blur(12px)',
+                    border: '1px solid rgba(255,255,255,0.1)', borderRadius: '12px',
+                    padding: '12px 16px', fontSize: '0.78rem', color: '#f1f5f9',
+                    boxShadow: '0 8px 24px rgba(0,0,0,0.4)', zIndex: 10,
+                    display: 'flex', flexDirection: 'column', gap: '6px', minWidth: '210px'
                   }}>
-                    <div style={{ fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                      <Layers size={12} color="var(--accent)" />
-                      {isVector ? 'Vector (GeoJSON/KML)' : 'Raster (GeoTIFF)'}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontWeight: '700', color: fileTheme.color }}>
+                      {isVector ? <Layers size={13} /> : <MapPin size={13} />}
+                      {isVector ? 'Vector Layer' : 'Raster GeoTIFF'}
                     </div>
-                    <div style={{ color: 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                      Hệ tọa độ: {isVector ? 'EPSG:4326 / EPSG:3857' : 'Auto-detected'}
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '3px', color: 'rgba(148,163,184,0.8)' }}>
+                      <span>📐 {isVector ? 'EPSG:4326 / 3857' : 'Auto-detected CRS'}</span>
+                      <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' as const, maxWidth: '200px' }}>
+                        🗂 {filename}
+                      </span>
                     </div>
+                  </div>
+                  <div style={{
+                    position: 'absolute', top: '12px', right: '12px',
+                    background: 'rgba(6,8,16,0.75)', backdropFilter: 'blur(8px)',
+                    border: '1px solid rgba(255,255,255,0.08)', borderRadius: '8px',
+                    padding: '6px 10px', fontSize: '0.71rem',
+                    color: 'rgba(148,163,184,0.6)', zIndex: 10
+                  }}>
+                    🖱 Scroll để zoom · Kéo để di chuyển
                   </div>
                 </div>
               )}
 
+              {/* Unsupported */}
               {!isCSV && !isImage && !isMap && (
-                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '16px', maxWidth: '450px', margin: 'auto', textAlign: 'center' }}>
-                  <FileCode size={48} color="var(--text-muted)" />
-                  <h4 style={{ margin: 0, color: 'var(--text)', fontWeight: 'bold' }}>Không Thể Xem Trực Tiếp Tệp Tin</h4>
-                  <p style={{ margin: 0, color: 'var(--text-muted)', fontSize: '0.88rem', lineHeight: '1.5' }}>
-                    Định dạng tệp tin này ({ext}) chưa được hỗ trợ xem trước tự động. Bạn vẫn có thể tải xuống tệp tin để xem cục bộ.
-                  </p>
-                  <button
-                    onClick={handleDownload}
-                    style={{
-                      background: 'var(--accent)',
-                      border: 'none',
-                      color: '#ffffff',
-                      padding: '10px 20px',
-                      borderRadius: 'var(--radius-md)',
-                      fontWeight: '600',
-                      fontSize: '0.9rem',
-                      cursor: 'pointer',
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: '8px',
-                      boxShadow: '0 4px 12px rgba(37, 99, 168, 0.25)',
-                      transition: 'all 0.2s'
-                    }}
-                  >
-                    <Download size={16} /> Tải xuống tệp tin
+                <div style={{
+                  display: 'flex', flexDirection: 'column', alignItems: 'center',
+                  justifyContent: 'center', gap: '18px', padding: '80px 24px',
+                  flex: 1, textAlign: 'center'
+                }}>
+                  <div style={{
+                    width: '80px', height: '80px', borderRadius: '50%',
+                    background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.1)',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center'
+                  }}>
+                    <FileCode size={36} color="rgba(148,163,184,0.5)" />
+                  </div>
+                  <div>
+                    <h4 style={{ margin: 0, color: '#f1f5f9', fontWeight: '700', fontSize: '1rem' }}>
+                      Chưa hỗ trợ xem trước
+                    </h4>
+                    <p style={{ margin: '8px 0 0', color: 'rgba(148,163,184,0.6)', fontSize: '0.84rem', lineHeight: '1.6', maxWidth: '380px' }}>
+                      Định dạng{' '}
+                      <code style={{ background: 'rgba(255,255,255,0.08)', padding: '1px 6px', borderRadius: '4px', fontSize: '0.8rem' }}>
+                        {ext}
+                      </code>{' '}
+                      chưa được hỗ trợ xem trực tiếp.
+                    </p>
+                  </div>
+                  <button onClick={handleDownload} style={{
+                    background: 'linear-gradient(135deg, rgba(37,99,168,0.3), rgba(37,99,168,0.15))',
+                    border: '1px solid rgba(37,99,168,0.4)', color: '#93c5fd',
+                    padding: '11px 24px', borderRadius: '11px',
+                    fontWeight: '700', fontSize: '0.88rem', cursor: 'pointer',
+                    display: 'flex', alignItems: 'center', gap: '8px',
+                    boxShadow: '0 4px 20px rgba(37,99,168,0.2)'
+                  }}>
+                    <Download size={15} /> Tải xuống tệp tin
                   </button>
                 </div>
               )}
-            </>
+            </div>
           )}
         </div>
 
         {/* Footer */}
         <div style={{
-          padding: '12px 24px',
-          borderTop: '1px solid var(--border)',
-          display: 'flex',
-          justifyContent: 'flex-end',
-          alignItems: 'center',
-          background: 'var(--surface-strong)',
-          gap: '12px'
+          padding: '12px 20px', borderTop: '1px solid rgba(255,255,255,0.06)',
+          background: 'rgba(255,255,255,0.02)',
+          display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexShrink: 0
         }}>
-          <button
-            onClick={onClose}
-            style={{
-              padding: '8px 20px',
-              borderRadius: 'var(--radius-md)',
-              background: 'var(--surface)',
-              border: '1px solid var(--border)',
-              color: 'var(--text-muted)',
-              fontSize: '0.88rem',
-              fontWeight: '500',
-              cursor: 'pointer',
-              transition: 'all 0.2s'
-            }}
-            className="hover-bg-surface-strong"
-          >
+          <span style={{ fontSize: '0.74rem', color: 'rgba(148,163,184,0.4)', fontFamily: 'monospace' }}>
+            Nhấn{' '}
+            <kbd style={{
+              padding: '1px 6px', background: 'rgba(255,255,255,0.07)',
+              borderRadius: '4px', fontSize: '0.7rem', border: '1px solid rgba(255,255,255,0.12)'
+            }}>Esc</kbd>
+            {' '}hoặc click nền để đóng
+          </span>
+          <button onClick={onClose} style={{
+            padding: '8px 20px', borderRadius: '9px',
+            background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)',
+            color: 'rgba(148,163,184,0.7)', fontSize: '0.84rem', fontWeight: '500', cursor: 'pointer'
+          }}>
             Đóng
           </button>
         </div>
       </div>
+
       <style jsx>{`
-        .hover-bg-surface-strong:hover {
-          background: var(--surface-strong) !important;
+        @keyframes modalOverlayIn {
+          from { opacity: 0; }
+          to   { opacity: 1; }
         }
-        @keyframes fadeInUp {
-          from {
-            opacity: 0;
-            transform: translateY(16px) scale(0.98);
-          }
-          to {
-            opacity: 1;
-            transform: translateY(0) scale(1);
-          }
+        @keyframes modalPanelIn {
+          from { opacity: 0; transform: translateY(24px) scale(0.97); }
+          to   { opacity: 1; transform: translateY(0) scale(1); }
         }
+        @keyframes spinLoader {
+          to { transform: rotate(360deg); }
+        }
+        .custom-scrollbar::-webkit-scrollbar { width: 6px; height: 6px; }
+        .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 3px; }
+        .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.2); }
       `}</style>
     </div>
   );
@@ -1244,7 +1155,7 @@ export default function DataPage() {
     }
     return 'browse';
   });
-  const [previewFile, setPreviewFile] = useState<any>(null);
+  const [previewFile, setPreviewFile] = useState<S3FileEntry | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [provinceFilter, setProvinceFilter] = useState<ProvinceFilter>('all');
   const [dateFilter, setDateFilter] = useState(() => getLocalDateInputValue());
@@ -1291,11 +1202,55 @@ export default function DataPage() {
   const [uploadStatus, setUploadStatus] = useState<'idle' | 'uploading' | 'completed' | 'failed' | 'cancelled'>('idle');
   const [uploadErrorMessage, setUploadErrorMessage] = useState<string>('');
   const [isDragActive, setIsDragActive] = useState<boolean>(false);
+  const [recentUploads, setRecentUploads] = useState<S3FileEntry[]>([]);
+  const [s3RefreshTrigger, setS3RefreshTrigger] = useState<number>(0);
+  const [selectedRecentKeys, setSelectedRecentKeys] = useState<string[]>([]);
+  const [visibleRecentCount, setVisibleRecentCount] = useState<number>(15);
+  const [isDeletingRecent, setIsDeletingRecent] = useState<boolean>(false);
 
   // Persist active tab across page reloads
   useEffect(() => {
     localStorage.setItem('dataPage:activeTab', activeTab);
   }, [activeTab]);
+
+  const fetchAndSetRecentUploads = async () => {
+    try {
+      const files = await listS3Files('');
+      const filtered = files.filter((file) => {
+        const keyLower = file.key.toLowerCase();
+        return !keyLower.startsWith('backups/') && !keyLower.endsWith('.sql') && !keyLower.endsWith('.sql.gz');
+      });
+      const sorted = filtered.sort((a, b) => {
+        const timeA = a.lastModified ? new Date(a.lastModified).getTime() : 0;
+        const timeB = b.lastModified ? new Date(b.lastModified).getTime() : 0;
+        return timeB - timeA;
+      });
+      const entries: S3FileEntry[] = sorted.map((file) => ({
+        key: file.key,
+        size: file.size ?? 0,
+        lastModified: file.lastModified || new Date().toISOString(),
+      }));
+      setRecentUploads(entries);
+    } catch {
+      setRecentUploads([]);
+    }
+  };
+
+  // Load recent uploads when switching to upload tab
+  useEffect(() => {
+    if (activeTab === 'upload') {
+      void fetchAndSetRecentUploads();
+      setVisibleRecentCount(15);
+      setSelectedRecentKeys([]);
+    }
+  }, [activeTab]);
+
+  const handleRecentScroll = (e: React.UIEvent<HTMLDivElement>) => {
+    const { scrollTop, scrollHeight, clientHeight } = e.currentTarget;
+    if (scrollHeight - scrollTop <= clientHeight + 50) {
+      setVisibleRecentCount(prev => Math.min(prev + 10, recentUploads.length));
+    }
+  };
 
   // Synchronize GIS Category when GIS Dataset changes
   useEffect(() => {
@@ -1958,10 +1913,15 @@ function ScheduleConfig({ source }: { source: string }) {
       setUploadProgress(100);
       setUploadStatus('completed');
       
-      setTimeout(() => {
+      setTimeout(async () => {
         setUploadFile(null);
         setUploadStatus('idle');
         setUploadProgress(0);
+        
+        await fetchAndSetRecentUploads();
+        setVisibleRecentCount(15);
+        setSelectedRecentKeys([]);
+        setS3RefreshTrigger(prev => prev + 1);
       }, 5000);
       
       alert(`✓ Tải lên thành công!\n${response.key.split('/').pop()} → ${truncatePath(getParentPath(response.key) || '/', 50)}`);
@@ -1969,6 +1929,41 @@ function ScheduleConfig({ source }: { source: string }) {
       setUploadStatus('failed');
       setUploadErrorMessage(error instanceof Error ? error.message : 'Lỗi không xác định khi tải lên S3');
       alert(`Lỗi tải lên: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  };
+
+  const handleDeleteSelectedRecent = async () => {
+    if (selectedRecentKeys.length === 0) return;
+    const confirmDelete = window.confirm(`Bạn có chắc chắn muốn xóa ${selectedRecentKeys.length} tệp đã chọn? Hành động này không thể hoàn tác.`);
+    if (!confirmDelete) return;
+
+    setIsDeletingRecent(true);
+    try {
+      for (const key of selectedRecentKeys) {
+        await deleteS3File(key);
+      }
+      alert("Đã xóa thành công các tệp tin đã chọn!");
+      setSelectedRecentKeys([]);
+      setS3RefreshTrigger(prev => prev + 1);
+      
+      await fetchAndSetRecentUploads();
+    } catch (err: any) {
+      alert("Lỗi khi xóa tệp: " + (err.message || err));
+    } finally {
+      setIsDeletingRecent(false);
+    }
+  };
+
+  const handleDeleteSingleRecent = async (key: string) => {
+    try {
+      await deleteS3File(key);
+      alert("Đã xóa tệp tin thành công!");
+      setSelectedRecentKeys(prev => prev.filter(k => k !== key));
+      setS3RefreshTrigger(prev => prev + 1);
+      
+      await fetchAndSetRecentUploads();
+    } catch (err: any) {
+      alert("Lỗi khi xóa tệp: " + (err.message || err));
     }
   };
 
@@ -2094,27 +2089,43 @@ function ScheduleConfig({ source }: { source: string }) {
         <div style={{ background: 'var(--surface)', borderRadius: 'var(--radius-lg)', padding: '24px', border: '1px solid var(--border)', boxShadow: 'var(--shadow)' }}>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: '10px', marginBottom: '20px' }}>
             {[
-              { key: 'browse', label: 'Tra cứu dữ liệu' },
-              ...(canManageData ? [{ key: 'ingest', label: 'Nhận dữ liệu' }] : []),
-              ...(canManageData ? [{ key: 'upload', label: 'Nhập dữ liệu' }] : []),
+              { key: 'browse', label: 'Tra cứu dữ liệu', icon: Search, accent: '#2563a8', tint: 'rgba(37, 99, 168, 0.12)', activeTint: 'rgba(37, 99, 168, 0.18)' },
+              ...(canManageData ? [{ key: 'ingest', label: 'Nhận dữ liệu', icon: Download, accent: '#198754', tint: 'rgba(25, 135, 84, 0.12)', activeTint: 'rgba(25, 135, 84, 0.18)' }] : []),
+              ...(canManageData ? [{ key: 'upload', label: 'Nhập dữ liệu', icon: UploadCloud, accent: '#fd7e14', tint: 'rgba(253, 126, 20, 0.12)', activeTint: 'rgba(253, 126, 20, 0.18)' }] : []),
             ].map((tab) => {
               const isActive = activeTab === tab.key;
+              const TabIcon = tab.icon;
               return (
                 <button
                   key={tab.key}
-                  onClick={() => setActiveTab(tab.key as any)}
+                  onClick={() => setActiveTab(tab.key as 'browse' | 'ingest' | 'upload')}
                   style={{
-                    padding: '8px 16px',
+                    padding: '10px 16px',
                     borderRadius: '999px',
-                    border: `1px solid ${isActive ? 'var(--accent)' : 'var(--border)'}`,
-                    background: isActive ? 'var(--accent)' : 'var(--surface)',
-                    color: isActive ? '#fff' : 'var(--text-muted)',
+                    border: `1px solid ${isActive ? tab.accent : 'var(--border)'}`,
+                    background: isActive
+                      ? `linear-gradient(135deg, ${tab.accent} 0%, ${tab.accent} 70%, ${tab.accent} 100%)`
+                      : `linear-gradient(180deg, ${tab.tint} 0%, var(--surface) 100%)`,
+                    color: isActive ? '#fff' : tab.accent,
                     fontSize: '0.85rem',
-                    fontWeight: '600',
+                    fontWeight: '700',
                     cursor: 'pointer',
-                    transition: 'all 0.2s',
+                    transition: 'transform 0.18s ease, box-shadow 0.18s ease, border-color 0.18s ease, background 0.18s ease',
+                    boxShadow: isActive
+                      ? `0 8px 18px ${tab.activeTint}`
+                      : '0 1px 2px rgba(15, 23, 42, 0.04)',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '8px',
+                  }}
+                  onMouseEnter={(event) => {
+                    event.currentTarget.style.transform = 'translateY(-1px)';
+                  }}
+                  onMouseLeave={(event) => {
+                    event.currentTarget.style.transform = 'translateY(0)';
                   }}
                 >
+                  <TabIcon size={15} />
                   {tab.label}
                 </button>
               );
@@ -2529,7 +2540,7 @@ function ScheduleConfig({ source }: { source: string }) {
                         key={group.key}
                         type="button"
                         onClick={() => {
-                          setUploadGroup(group.key as any);
+                          setUploadGroup(group.key as 'gis' | 'station' | 'monitoring');
                           setUploadFile(null);
                           setUploadStatus('idle');
                         }}
@@ -2590,7 +2601,7 @@ function ScheduleConfig({ source }: { source: string }) {
                           <select
                             value={gisDataType}
                             onChange={(e) => {
-                              setGisDataType(e.target.value as any);
+                              setGisDataType(e.target.value as 'raster' | 'vector');
                               setUploadFile(null);
                             }}
                             className={`form-input ${hasValue(gisDataType) ? 'has-value' : ''}`}
@@ -3190,7 +3201,7 @@ function ScheduleConfig({ source }: { source: string }) {
                           gisDay ? { icon: <Calendar size={14} />, label: 'Ngày', value: gisDay } : null,
                           gisTime ? { icon: <Clock size={14} />, label: 'Giờ', value: gisTime } : null,
                           gisDescription ? { icon: <FileCode size={14} />, label: 'Mô tả', value: gisDescription } : null,
-                        ].filter(Boolean).map((row: any, i) => (
+                        ].filter((row): row is NonNullable<typeof row> => row !== null).map((row, i) => (
                           <div key={i} style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.82rem', padding: '6px 8px', background: i % 2 === 0 ? 'var(--background)' : 'transparent', borderRadius: '6px' }}>
                             <span style={{ color: 'var(--text-muted)', display: 'flex' }}>{row.icon}</span>
                             <span style={{ color: 'var(--text-muted)', minWidth: '90px' }}>{row.label}</span>
@@ -3207,7 +3218,7 @@ function ScheduleConfig({ source }: { source: string }) {
                           selectedDate ? { icon: <Calendar size={14} />, label: 'Ngày', value: selectedDate } : null,
                           selectedTime ? { icon: <Clock size={14} />, label: 'Giờ', value: selectedTime } : null,
                           uploadDescription ? { icon: <FileCode size={14} />, label: 'Mô tả', value: uploadDescription } : null,
-                        ].filter(Boolean).map((row: any, i) => (
+                        ].filter((row): row is NonNullable<typeof row> => row !== null).map((row, i) => (
                           <div key={i} style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.82rem', padding: '6px 8px', background: i % 2 === 0 ? 'var(--background)' : 'transparent', borderRadius: '6px' }}>
                             <span style={{ color: 'var(--text-muted)', display: 'flex' }}>{row.icon}</span>
                             <span style={{ color: 'var(--text-muted)', minWidth: '90px' }}>{row.label}</span>
@@ -3230,6 +3241,194 @@ function ScheduleConfig({ source }: { source: string }) {
                   </div>
                 )}
               </div>
+
+              {/* Recent uploads when no selection */}
+              {recentUploads.length > 0 && !uploadFile && ((uploadGroup === 'gis' && !gisDataset) || (uploadGroup !== 'gis' && !selectedStation)) && (
+                <div className="glass-panel fade-in" style={{ background: 'var(--surface)', padding: '20px', borderRadius: 'var(--radius-xl)', border: '1px solid var(--border)', boxShadow: 'var(--shadow-md)', overflow: 'hidden' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '16px', borderBottom: '1px solid var(--border)', paddingBottom: '14px', flexWrap: 'wrap', gap: '8px' }}>
+                    <h4 style={{ margin: 0, fontSize: '0.95rem', fontWeight: 'bold', color: 'var(--text)', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <Clock size={16} color="var(--accent)" /> Tệp tải lên gần nhất
+                    </h4>
+                    {canManageData && selectedRecentKeys.length > 0 ? (
+                      <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                        <button
+                          onClick={handleDeleteSelectedRecent}
+                          disabled={isDeletingRecent}
+                          style={{
+                            border: 'none',
+                            background: '#dc3545',
+                            color: '#fff',
+                            cursor: 'pointer',
+                            padding: '4px 10px',
+                            borderRadius: '999px',
+                            fontSize: '0.75rem',
+                            fontWeight: '600',
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '4px',
+                            transition: 'all 0.2s'
+                          }}
+                        >
+                          <Trash2 size={12} /> {isDeletingRecent ? 'Đang xóa...' : `Xóa (${selectedRecentKeys.length})`}
+                        </button>
+                        <button
+                          onClick={() => setSelectedRecentKeys([])}
+                          style={{
+                            border: '1px solid var(--border)',
+                            background: 'var(--surface-strong)',
+                            color: 'var(--text)',
+                            cursor: 'pointer',
+                            padding: '3px 10px',
+                            borderRadius: '999px',
+                            fontSize: '0.75rem',
+                            fontWeight: '600',
+                            transition: 'all 0.2s'
+                          }}
+                        >
+                          Hủy chọn
+                        </button>
+                      </div>
+                    ) : (
+                      <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)', background: 'var(--surface-strong)', padding: '4px 12px', borderRadius: '999px', fontWeight: '600' }}>
+                        {recentUploads.length} tệp
+                      </span>
+                    )}
+                  </div>
+                  <div 
+                    onScroll={handleRecentScroll}
+                    style={{ 
+                      display: 'flex', 
+                      flexDirection: 'column', 
+                      gap: '8px', 
+                      maxHeight: '380px', 
+                      overflowY: 'auto', 
+                      paddingRight: '6px' 
+                    }}
+                  >
+                    {recentUploads.slice(0, visibleRecentCount).map((file) => {
+                      const fileName = file.key.split('/').pop() || file.key;
+                      const filePath = getParentPath(file.key) || '/';
+                      const fileExt = fileName.substring(fileName.lastIndexOf('.')).toLowerCase();
+                      const isRaster = ['.tif', '.tiff', '.cog', '.png', '.jpg', '.jpeg', '.rst'].includes(fileExt);
+                      const isVector = ['.geojson', '.shp', '.kml', '.gpkg', '.zip', '.vtc', '.vct', '.vdc'].includes(fileExt);
+                      
+                      return (
+                        <div 
+                          key={file.key}
+                          onClick={() => setPreviewFile(file)}
+                          style={{ 
+                            display: 'flex', 
+                            alignItems: 'center', 
+                            justifyContent: 'space-between',
+                            padding: '12px 16px', 
+                            background: 'var(--background)', 
+                            border: '1px solid var(--border)', 
+                            borderRadius: 'var(--radius-md)',
+                            cursor: 'pointer',
+                            transition: 'all 0.2s'
+                          }}
+                          className="hover-bg-surface-strong"
+                        >
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flex: 1, minWidth: 0 }}>
+                            {canManageData && (
+                              <input
+                                type="checkbox"
+                                checked={selectedRecentKeys.includes(file.key)}
+                                onClick={(e) => e.stopPropagation()}
+                                onChange={(e) => {
+                                  if (e.target.checked) {
+                                    setSelectedRecentKeys(prev => [...prev, file.key]);
+                                  } else {
+                                    setSelectedRecentKeys(prev => prev.filter(k => k !== file.key));
+                                  }
+                                }}
+                                style={{
+                                  cursor: 'pointer',
+                                  width: '16px',
+                                  height: '16px',
+                                  borderRadius: '4px',
+                                  border: '1px solid var(--border)',
+                                  accentColor: 'var(--accent)',
+                                  marginRight: '4px'
+                                }}
+                              />
+                            )}
+                            <div style={{ 
+                              width: '36px', 
+                              height: '36px', 
+                              borderRadius: 'var(--radius-md)', 
+                              background: isRaster ? 'rgba(13, 110, 253, 0.1)' : isVector ? 'rgba(25, 135, 84, 0.1)' : 'rgba(111, 66, 193, 0.1)',
+                              display: 'flex', 
+                              alignItems: 'center', 
+                              justifyContent: 'center',
+                              flexShrink: 0
+                            }}>
+                              <FileCode size={18} color={isRaster ? '#0d6efd' : isVector ? '#198754' : '#6f42c1'} />
+                            </div>
+                            <div style={{ flex: 1, minWidth: 0 }}>
+                              <p style={{ margin: '0 0 4px 0', fontSize: '0.9rem', fontWeight: '600', color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={fileName}>
+                                {fileName}
+                              </p>
+                              <p style={{ margin: 0, fontSize: '0.75rem', color: 'var(--text-muted)', fontFamily: 'monospace', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={filePath}>
+                                {truncatePath(filePath, 60)}
+                              </p>
+                            </div>
+                          </div>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexShrink: 0 }}>
+                            <div style={{ textAlign: 'right' }}>
+                              <p style={{ margin: '0 0 2px 0', fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                                {(file.size / 1024 / 1024).toFixed(2)} MB
+                              </p>
+                              <p style={{ margin: 0, fontSize: '0.7rem', color: 'var(--text-muted)' }}>
+                                {new Date(file.lastModified).toLocaleString('vi-VN')}
+                              </p>
+                            </div>
+                            <span style={{ 
+                              padding: '4px 10px', 
+                              borderRadius: '999px', 
+                              background: isRaster ? 'rgba(13, 110, 253, 0.1)' : isVector ? 'rgba(25, 135, 84, 0.1)' : 'rgba(111, 66, 193, 0.1)',
+                              color: isRaster ? '#0d6efd' : isVector ? '#198754' : '#6f42c1',
+                              fontSize: '0.7rem', 
+                              fontWeight: '700',
+                              textTransform: 'uppercase'
+                            }}>
+                              {isRaster ? 'Raster' : isVector ? 'Vector' : 'CSV'}
+                            </span>
+                            {canManageData && (
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  const confirmDelete = window.confirm(`Bạn có chắc chắn muốn xóa tệp này?\n${fileName}`);
+                                  if (confirmDelete) {
+                                    handleDeleteSingleRecent(file.key);
+                                  }
+                                }}
+                                style={{
+                                  border: 'none',
+                                  background: 'none',
+                                  cursor: 'pointer',
+                                  color: 'var(--text-muted)',
+                                  padding: '6px',
+                                  borderRadius: '50%',
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  justifyContent: 'center',
+                                  transition: 'all 0.2s',
+                                  marginLeft: '4px'
+                                }}
+                                className="hover-bg-red hover-red"
+                                title="Xóa tệp"
+                              >
+                                <Trash2 size={13} />
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
             </div>
           </div>
 
@@ -3243,8 +3442,10 @@ function ScheduleConfig({ source }: { source: string }) {
                 {truncatePath(getS3PrefixForSelection(), 50)}
               </span>
             </div>
-            <S3FlatFileList prefix={getS3PrefixForSelection()} onPreviewFile={(file) => setPreviewFile(file)} />
+            <S3Explorer prefix={getS3PrefixForSelection()} onPreviewFile={(file) => setPreviewFile(file)} refreshTrigger={s3RefreshTrigger} />
           </div>
+
+
         </div>
       )}
       </div>

@@ -114,11 +114,11 @@ select {
 }
 
 .public-home .geo-sidebar-content {
-  font-size: 0.82rem;
+  font-size: 0.75rem;
 }
 
 .public-home .app-logo {
-  font-size: 1.6rem;
+  font-size: 1.4rem;
 }
 
 
@@ -128,40 +128,40 @@ select {
 
 
 .public-home .app-header-nav a {
-  font-size: 0.8rem;
+  font-size: 0.75rem;
 }
 
 .public-home .search-tab {
-  font-size: 0.85rem;
-  padding: 0.75rem 1.2rem;
+  font-size: 0.78rem;
+  padding: 0.6rem 1rem;
 }
 
 .public-home .geo-block h2 {
-  font-size: 1rem;
+  font-size: 0.88rem;
 }
 
 .public-home .geo-block h3 {
-  font-size: 0.92rem;
-}
-
-.public-home .geo-label {
   font-size: 0.82rem;
 }
 
+.public-home .geo-label {
+  font-size: 0.75rem;
+}
+
 .public-home .geo-input {
-  padding: 0.6rem 0.75rem;
+  padding: 0.5rem 0.65rem;
 }
 
 .public-home .geo-dataset-name {
-  font-size: 0.8rem;
+  font-size: 0.74rem;
 }
 
 .public-home .geo-dataset-child-name {
-  font-size: 0.76rem;
+  font-size: 0.71rem;
 }
 
 .public-home .geo-dataset-child-meta {
-  font-size: 0.7rem;
+  font-size: 0.65rem;
 }
 
 .public-home .app-content {
@@ -1122,6 +1122,21 @@ html[data-theme="light"] .geo-settings-panel {
   background: var(--accent-strong);
 }
 
+.geo-dataset-group {
+  margin-bottom: 0.25rem;
+}
+
+.geo-dataset-group-header {
+  font-size: 0.7rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-muted, #888);
+  padding: 0.5rem 0.25rem 0.2rem;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 0.1rem;
+}
+
 .geo-dataset-category {
   display: flex;
   flex-direction: column;
@@ -1578,7 +1593,60 @@ html[data-theme="dark"] .geo-map-inspector-row.highlighted {
 .geo-map-inspector-val.value-highlight {
   font-size: 0.95rem;
   font-weight: 700;
-  color: #2563a8; /* brand primary blue */
+  color: #2563a8;
+}
+
+.geo-map-inspector-layer {
+  border-top: 1px solid rgba(255,255,255,0.08);
+  margin-top: 4px;
+  padding-top: 4px;
+}
+html[data-theme="light"] .geo-map-inspector-layer {
+  border-top-color: rgba(0,0,0,0.08);
+}
+
+.geo-map-inspector-layer-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 2px 0;
+  text-align: left;
+}
+
+.geo-map-inspector-layer-name {
+  flex: 1;
+  font-size: 0.78rem;
+  font-weight: 500;
+  color: var(--text, #e2e8f0);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+html[data-theme="light"] .geo-map-inspector-layer-name {
+  color: #1e293b;
+}
+
+.geo-map-inspector-chevron {
+  font-size: 0.6rem;
+  opacity: 0.5;
+  flex-shrink: 0;
+}
+
+.geo-map-inspector-detail {
+  font-size: 0.72rem;
+  opacity: 0.75;
+  padding: 4px 0 2px 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  color: var(--text, #e2e8f0);
+}
+html[data-theme="light"] .geo-map-inspector-detail {
+  color: #475569;
 }
 
 .geo-status-dot {
@@ -2428,6 +2496,14 @@ html[data-theme="dark"] .map-player-item-type--ecology       { color: #86efac; b
   overflow: hidden;
   text-overflow: ellipsis;
   min-width: 0;
+}
+.map-player-opacity-slider {
+  flex-shrink: 0;
+  width: 64px;
+  height: 4px;
+  accent-color: var(--primary, #2563eb);
+  cursor: pointer;
+  margin: 0 4px;
 }
 .map-player-item-type-badge {
   flex-shrink: 0;

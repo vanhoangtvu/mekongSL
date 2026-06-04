@@ -193,13 +193,13 @@ export async function uploadS3File(file: File, key?: string) {
 }
 
 export async function deleteS3File(key: string) {
-  return requestJson<{ message: string }>(getBackendAdminUrl(`/s3/delete/${key}`), {
+  return requestJson<{ message: string }>(getBackendAdminUrl(`/s3/delete?key=${encodeURIComponent(key)}`), {
     method: 'DELETE',
   });
 }
 
 export async function checkS3FileExists(key: string) {
-  const payload = await requestJson<{ exists: boolean }>(getBackendAdminUrl(`/s3/exists/${key}`));
+  const payload = await requestJson<{ exists: boolean }>(getBackendAdminUrl(`/s3/exists?key=${encodeURIComponent(key)}`));
   return payload.exists;
 }
 
@@ -259,7 +259,7 @@ export async function getS3SignedUrl(key: string, expires: number = 3600) {
 
 export async function downloadS3File(key: string) {
   const token = authService.getToken();
-  const response = await fetch(getBackendAdminUrl(`/s3/download/${key}`), {
+  const response = await fetch(getBackendAdminUrl(`/s3/download?key=${encodeURIComponent(key)}`), {
     headers: token ? { Authorization: `Bearer ${token}` } : undefined,
   });
 

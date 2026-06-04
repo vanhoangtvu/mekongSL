@@ -1,7 +1,7 @@
 "use client";
 
-import { useState } from "react";
-import { AREA_TYPES, DATASETS } from "../../lib/constants/datasets";
+import { useState, useEffect } from "react";
+import { AREA_TYPES, DATASETS, getDatasetById } from "../../lib/constants/datasets";
 
 type TabType = "criteria" | "datasets" | "additional" | "results";
 
@@ -12,9 +12,8 @@ type GeoSearchSidebarProps = {
   endDateTime: string;
   onStartDateTimeChange: (value: string) => void;
   onEndDateTimeChange: (value: string) => void;
-  ecowittEnabled?: boolean;
-  onEcowittToggle?: (enabled: boolean) => void;
   onApply?: (datasets: Array<{ id: string; type: "raster" | "vector" }>) => void;
+  appliedDatasets?: Array<{ id: string; type: string }>;
 };
 
 type SearchTabsProps = {
@@ -64,14 +63,27 @@ export function GeoSearchSidebar({
   endDateTime,
   onStartDateTimeChange,
   onEndDateTimeChange,
-  ecowittEnabled,
-  onEcowittToggle,
   onApply,
+  appliedDatasets,
 }: GeoSearchSidebarProps) {
   const [expandedCategories, setExpandedCategories] = useState<Set<string>>(new Set(["landsat"]));
   const [selectedLayers, setSelectedLayers] = useState<Record<string, ("raster" | "vector")[]>>({});
   const [showTypePicker, setShowTypePicker] = useState<string | null>(null);
   const [appliedCount, setAppliedCount] = useState(0);
+
+  // Sync selectedLayers khi appliedDatasets thay đổi từ bên ngoài (vd: xóa từ player)
+  useEffect(() => {
+    if (!appliedDatasets) return;
+    setSelectedLayers(() => {
+      const next: Record<string, ("raster" | "vector")[]> = {};
+      for (const { id, type } of appliedDatasets) {
+        if (type === "raster" || type === "vector") {
+          next[id] = [...(next[id] ?? []), type];
+        }
+      }
+      return next;
+    });
+  }, [appliedDatasets]);
   const [selectionOrder, setSelectionOrder] = useState<{id: string; type: "raster" | "vector"}[]>([]);
 
   const toggleCategory = (categoryId: string) => {
@@ -221,7 +233,7 @@ export function GeoSearchSidebar({
             </label>
             <select id="data-type" className="geo-input">
               <option value="salinity">Salinity</option>
-              <option value="temperature">Temperature</option>
+              <option value="tidal">Tidal</option>
               <option value="ph">pH Level</option>
               <option value="conductivity">Conductivity</option>
             </select>
@@ -310,7 +322,7 @@ export function GeoSearchSidebar({
                       <span className="geo-dataset-name">{category.name}</span>
                     </label>
                     {/* Only GIS leaf datasets need type picker/badge */}
-                    {!category.children && category.gisData !== false && (
+                    {!category.children && category.gisData !== false && (category.group ?? "gis") === "gis" && (
                       <div className="geo-layer-type-col">
                         {showTypePicker === category.id ? (
                           <div className="geo-layer-type-picker" style={{ display: 'flex', gap: '4px', alignItems: 'center' }}>
@@ -343,7 +355,7 @@ export function GeoSearchSidebar({
                               <span className="geo-dataset-child-name">{child.name}</span>
                             </span>
                           </label>
-                          {child.gisData !== false && (
+                          {child.gisData !== false && (category.group ?? "gis") === "gis" && (
                             <div className="geo-layer-type-col">
                               {showTypePicker === child.id ? (
                                 <div className="geo-layer-type-picker" style={{ display: 'flex', gap: '4px', alignItems: 'center' }}>
@@ -367,20 +379,6 @@ export function GeoSearchSidebar({
                 </div>
               ))}
             </div>
-          </section>
-
-          <section className="geo-block" style={{ marginTop: '12px', borderTop: '1px solid #e2e8f0', paddingTop: '16px' }}>
-            <label className="geo-dataset-label" style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }}>
-              <input
-                type="checkbox"
-                checked={!!ecowittEnabled}
-                onChange={(e) => onEcowittToggle?.(e.target.checked)}
-              />
-              <span className="geo-dataset-name" style={{ fontWeight: 600 }}>Ecowitt Stations</span>
-            </label>
-            <p style={{ margin: '6px 0 0 24px', fontSize: '0.8rem', color: '#94a3b8' }}>
-              Hiển thị trạm quan trắc thời tiết Ecowitt trên bản đồ
-            </p>
           </section>
         </div>
       )}
