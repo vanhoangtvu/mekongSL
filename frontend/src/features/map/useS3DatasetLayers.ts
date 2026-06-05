@@ -46,7 +46,8 @@ const defaultVectorStyle = new Style({
 export function useS3DatasetLayers(
   appliedDatasets: Array<{ id: string; type: string }> | undefined,
   mapRef: React.MutableRefObject<Map | null>,
-  timelineDate?: string
+  timelineDate?: string,
+  activeTimeLabel?: string
 ) {
   const layerRefs = useRef<Record<string, WebGLTileLayer | VectorLayer>>({});
   const prevDateRef = useRef<string | undefined>(undefined);
@@ -77,6 +78,17 @@ export function useS3DatasetLayers(
     if (dateChanged && prevKeys.length > 0) {
       const cached = layersCacheRef.current[dateStr];
       if (cached) {
+        if (activeTimeLabel) {
+          const filtered: Record<string, RenderedLayer> = {};
+          for (const [k, v] of Object.entries(cached)) {
+            if (k.endsWith(`__${activeTimeLabel}`)) filtered[k] = v;
+          }
+          if (Object.keys(filtered).length > 0) {
+            setRenderedLayers(filtered);
+            activeDateRef.current = dateStr;
+            return;
+          }
+        }
         setRenderedLayers(cached);
         activeDateRef.current = dateStr;
         return;
@@ -146,6 +158,7 @@ export function useS3DatasetLayers(
         }
 
         const dsSlug = getDatasetSlug(datasetId) || datasetId;
+        const catName = dsInfo?.name || dsId;
         const prefixes = timelineDate ? [
           `gis-data/${dsSlug}/${categorySlug}/${y}/${md}/${dd}/`,
           `gis-data/${dsSlug}/${categorySlug}/${y}/${md}/`,
@@ -193,10 +206,23 @@ export function useS3DatasetLayers(
                 break;
               }
             } else {
-              const tif = files.find((f) => f.key?.match(/\.tiff?$/i));
-              if (tif) {
-                foundKey = tif.key;
-                console.warn("[S3] FOUND .tif:", foundKey);
+              // Find ALL .tif files (multiple time frames per day)
+              const allTifs = files.filter((f) => f.key?.match(/\.tiff?$/i));
+              if (allTifs.length > 0) {
+                for (const tif of allTifs) {
+                  // Extract time label: .../YYYY/MM/DD/HH-MM/raster/file.tif
+                  const timeMatch = tif.key.match(/\/(\d{2}-\d{2})\//);
+                  const timeLabel = timeMatch ? timeMatch[1] : "00-00";
+                  const frameKey = `${dsKey}__${timeLabel}`;
+                  const proxyUrl = `/api/tif?key=${encodeURIComponent(tif.key)}`;
+                  additions[frameKey] = {
+                    name: parent ? `${parent.name} - ${catName} (${timeLabel})` : `${catName} (${timeLabel})`,
+                    proxyUrl,
+                    type: "raster",
+                    bbox: [594885, 1052655, 688485, 1117455],
+                    nodata: -9999,
+                  };
+                }
                 break;
               }
             }
@@ -206,16 +232,16 @@ export function useS3DatasetLayers(
         }
         if (!isActive) break;
 
-        const catName = dsInfo?.name || dsId;
-        if (!foundKey) {
-          showNotification(`No ${isVector ? 'vector' : 'raster'} data found for "${catName}" on ${dateStr}`, "error");
+        // For vector, if no foundKey, show error
+        if (isVector && !foundKey) {
+          showNotification(`No vector data found for "${catName}" on ${dateStr}`, "error");
           continue;
         }
 
-        try {
-          const proxyUrl = `/api/tif?key=${encodeURIComponent(foundKey)}`;
-          if (isVector) {
-            const ext = "." + (foundKey.split(".").pop() || "").toLowerCase();
+        if (isVector) {
+          try {
+            const proxyUrl = `/api/tif?key=${encodeURIComponent(foundKey!)}`;
+            const ext = "." + (foundKey!.split(".").pop() || "").toLowerCase();
             additions[dsKey] = {
               name: parent ? `${parent.name} - ${catName}` : catName,
               proxyUrl,
@@ -223,17 +249,9 @@ export function useS3DatasetLayers(
               ext,
               vdcUrl: vdcKey ? `/api/tif?key=${encodeURIComponent(vdcKey)}` : undefined,
             };
-          } else {
-            additions[dsKey] = {
-              name: parent ? `${parent.name} - ${catName}` : catName,
-              proxyUrl,
-              type: "raster",
-              bbox: [594885, 1052655, 688485, 1117455],
-              nodata: -9999,
-            };
+          } catch {
+            if (isActive) showNotification(`Failed to load "${catName}"`, "error");
           }
-        } catch {
-          if (isActive) showNotification(`Failed to load "${catName}"`, "error");
         }
       }
 
@@ -243,11 +261,26 @@ export function useS3DatasetLayers(
       layersCacheRef.current[dateStr] = additions;
       activeDateRef.current = dateStr;
 
-      setRenderedLayers((prev) => {
-        const nextMap = { ...prev };
-        for (const [key, info] of Object.entries(additions)) nextMap[key] = info;
-        return nextMap;
-      });
+      if (!activeTimeLabel) {
+        // Normal view: only show the latest time slot per base key
+        const latest: Record<string, [string, RenderedLayer]> = {};
+        for (const [k, v] of Object.entries(additions)) {
+          const baseKey = k.replace(/__\d{2}-\d{2}$/, "");
+          if (!latest[baseKey] || k > latest[baseKey][0]) {
+            latest[baseKey] = [k, v];
+          }
+        }
+        const display: Record<string, RenderedLayer> = {};
+        for (const [, [k, v]] of Object.entries(latest)) display[k] = v;
+        setRenderedLayers((prev) => ({ ...prev, ...display }));
+      } else {
+        // Playback: only show entry matching activeTimeLabel
+        const filtered: Record<string, RenderedLayer> = {};
+        for (const [k, v] of Object.entries(additions)) {
+          if (k.endsWith(`__${activeTimeLabel}`)) filtered[k] = v;
+        }
+        setRenderedLayers((prev) => ({ ...prev, ...filtered }));
+      }
 
       const count = Object.keys(additions).length;
       if (count > 0) {

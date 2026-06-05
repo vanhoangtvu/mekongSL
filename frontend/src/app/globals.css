@@ -3087,6 +3087,12 @@ html[data-theme="dark"] .map-player-item-type--ecology       { color: #86efac; b
   margin: 0 0.3rem;
   white-space: nowrap;
 }
+.map-player-counter {
+  font-size: 0.55rem;
+  color: var(--text-muted);
+  margin-right: 0.3rem;
+  font-weight: 500;
+}
 .map-player-speed {
   display: flex;
   align-items: center;

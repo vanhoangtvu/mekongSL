@@ -18,8 +18,10 @@ import VectorSource from 'ol/source/Vector';
 import GeoTIFF from 'ol/source/GeoTIFF';
 import GeoJSON from 'ol/format/GeoJSON';
 import KML from 'ol/format/KML';
-import { fromLonLat, transformExtent } from 'ol/proj';
+import { fromLonLat, transformExtent, transform } from 'ol/proj';
 import { Style, Stroke, Fill, Circle as CircleStyle } from 'ol/style';
+import Feature from 'ol/Feature';
+import Point from 'ol/geom/Point';
 import proj4 from 'proj4';
 import { register } from 'ol/proj/proj4';
 
@@ -1047,6 +1049,360 @@ function FilePreviewModal({ fileKey, onClose }: FilePreviewModalProps) {
   );
 }
 
+function StationImage({ imageKey }: { imageKey: string }) {
+  const [url, setUrl] = useState<string>('');
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(false);
+
+  useEffect(() => {
+    let active = true;
+    const token = authService.getToken();
+    fetch(getBackendUrl(`/s3/download?key=${encodeURIComponent(imageKey)}`), {
+      headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+    })
+      .then((res) => {
+        if (!res.ok) throw new Error("Image load failed");
+        return res.blob();
+      })
+      .then((blob) => {
+        if (!active) return;
+        const objUrl = URL.createObjectURL(blob);
+        setUrl(objUrl);
+        setLoading(false);
+      })
+      .catch((err) => {
+        console.error(err);
+        if (active) {
+          setError(true);
+          setLoading(false);
+        }
+      });
+
+    return () => {
+      active = false;
+      if (url) {
+        URL.revokeObjectURL(url);
+      }
+    };
+  }, [imageKey]);
+
+  if (loading) {
+    return (
+      <div style={{
+        width: '100%',
+        height: '140px',
+        background: 'rgba(255, 255, 255, 0.03)',
+        borderRadius: '8px',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        border: '1px dashed var(--border)',
+        color: 'var(--text-muted)',
+        fontSize: '0.8rem'
+      }}>
+        Đang tải ảnh...
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div style={{
+        width: '100%',
+        height: '140px',
+        background: 'rgba(255, 255, 255, 0.03)',
+        borderRadius: '8px',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        border: '1px solid var(--border)',
+        color: 'var(--red)',
+        fontSize: '0.8rem'
+      }}>
+        Lỗi tải ảnh
+      </div>
+    );
+  }
+
+  return (
+    <img
+      src={url}
+      alt="Ảnh hiện trường"
+      style={{
+        width: '100%',
+        height: '140px',
+        objectFit: 'cover',
+        borderRadius: '8px',
+        border: '1px solid var(--border)'
+      }}
+    />
+  );
+}
+
+interface MapPreviewModalProps {
+  station: ManualStation;
+  onClose: () => void;
+}
+
+function MapPreviewModal({ station, onClose }: MapPreviewModalProps) {
+  const mapRef = useRef<HTMLDivElement>(null);
+  const mapInstanceRef = useRef<Map | null>(null);
+  const { x, y, location, stationType, stationId, hydroChar, isActive } = station;
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        onClose();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [onClose]);
+
+  useEffect(() => {
+    if (!mapRef.current || x == null || y == null) return;
+
+    // Detect coordinate projection system
+    const isWgs84 = Math.abs(x) <= 180 && Math.abs(y) <= 90;
+    const sourceProj = isWgs84 ? 'EPSG:4326' : 'EPSG:32648';
+
+    let coords3857: [number, number];
+    try {
+      coords3857 = transform([x, y], sourceProj, 'EPSG:3857') as [number, number];
+    } catch (err) {
+      console.error("Coordinate projection transformation failed:", err);
+      coords3857 = fromLonLat([106.12, 9.87]) as [number, number];
+    }
+
+    const marker = new Feature({
+      geometry: new Point(coords3857)
+    });
+
+    const markerStyle = new Style({
+      image: new CircleStyle({
+        radius: 8,
+        fill: new Fill({
+          color: stationType === 'groundwater' ? '#0d6efd' : '#198754'
+        }),
+        stroke: new Stroke({
+          color: '#ffffff',
+          width: 2
+        })
+      })
+    });
+    marker.setStyle(markerStyle);
+
+    const vectorSource = new VectorSource({
+      features: [marker]
+    });
+
+    const vectorLayer = new VectorLayer({
+      source: vectorSource
+    });
+
+    const tileLayer = new TileLayer({
+      source: new OSM()
+    });
+
+    const map = new Map({
+      target: mapRef.current,
+      layers: [tileLayer, vectorLayer],
+      view: new View({
+        center: coords3857,
+        zoom: 11,
+        maxZoom: 19
+      })
+    });
+
+    mapInstanceRef.current = map;
+
+    return () => {
+      if (mapInstanceRef.current) {
+        mapInstanceRef.current.setTarget(undefined);
+        mapInstanceRef.current = null;
+      }
+    };
+  }, [x, y, stationType]);
+
+  return (
+    <div
+      onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
+      style={{
+        position: 'fixed',
+        top: 0, left: 0, right: 0, bottom: 0,
+        zIndex: 10000,
+        background: 'rgba(6, 8, 16, 0.4)',
+        backdropFilter: 'blur(12px) saturate(1.2)',
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        padding: '20px',
+        animation: 'modalOverlayIn 0.25s ease'
+      }}
+    >
+      <div style={{
+        background: 'var(--surface)',
+        border: '1px solid var(--border)',
+        borderRadius: '20px',
+        boxShadow: 'var(--shadow-xl)',
+        width: '100%',
+        maxWidth: '900px',
+        display: 'flex', flexDirection: 'column',
+        overflow: 'hidden',
+        animation: 'modalPanelIn 0.35s cubic-bezier(0.22, 1, 0.36, 1)'
+      }}>
+        {/* Header */}
+        <div style={{
+          padding: '16px 24px',
+          borderBottom: '1px solid var(--border)',
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center'
+        }}>
+          <div>
+            <h3 style={{ margin: 0, fontSize: '1.1rem', fontWeight: '700', color: 'var(--text)' }}>
+              Xem trước Trạm đo thủ công
+            </h3>
+            <p style={{ margin: '4px 0 0 0', fontSize: '0.8rem', color: 'var(--text-muted)' }}>
+              {stationId ? `Mã trạm: ${stationId} - ` : ''}{location}
+            </p>
+          </div>
+          <button
+            onClick={onClose}
+            style={{
+              background: 'none',
+              border: 'none',
+              color: 'var(--text-muted)',
+              cursor: 'pointer',
+              padding: '6px',
+              borderRadius: '50%',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              transition: 'background 0.2s'
+            }}
+            className="hover-bg-muted"
+          >
+            <X size={20} />
+          </button>
+        </div>
+
+        {/* Content Body: Chia 2 cột */}
+        <div style={{ display: 'flex', flexDirection: 'row', flexWrap: 'wrap', width: '100%', minHeight: '450px' }}>
+          {/* Cột trái: Bản đồ */}
+          <div style={{ flex: '1 1 500px', position: 'relative', height: '450px', background: 'var(--background-soft)' }}>
+            <div ref={mapRef} style={{ width: '100%', height: '100%' }} />
+          </div>
+
+          {/* Cột phải: Thông tin chi tiết + Ảnh */}
+          <div style={{
+            flex: '1 1 300px',
+            padding: '24px',
+            borderLeft: '1px solid var(--border)',
+            background: 'var(--surface-strong)',
+            maxHeight: '450px',
+            overflowY: 'auto',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '20px'
+          }} className="custom-scrollbar">
+            {/* Mục thông tin trạm */}
+            <div>
+              <h4 style={{ margin: '0 0 12px 0', fontSize: '0.9rem', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--accent)' }}>
+                Thông tin chi tiết
+              </h4>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', fontSize: '0.85rem' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid var(--border)', paddingBottom: '6px' }}>
+                  <span style={{ color: 'var(--text-muted)' }}>Mã trạm:</span>
+                  <span style={{ fontWeight: '600', color: 'var(--text)' }}>{stationId || '—'}</span>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid var(--border)', paddingBottom: '6px' }}>
+                  <span style={{ color: 'var(--text-muted)' }}>Địa điểm:</span>
+                  <span style={{ fontWeight: '600', color: 'var(--text)', textAlign: 'right' }}>{location}</span>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid var(--border)', paddingBottom: '6px' }}>
+                  <span style={{ color: 'var(--text-muted)' }}>Loại nguồn nước:</span>
+                  <span style={{ fontWeight: '600', color: stationType === 'groundwater' ? '#0d6efd' : '#198754' }}>
+                    {stationType === 'groundwater' ? 'Nước ngầm' : 'Nước mặt'}
+                  </span>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid var(--border)', paddingBottom: '6px' }}>
+                  <span style={{ color: 'var(--text-muted)' }}>Đặc tính thủy vực:</span>
+                  <span style={{ fontWeight: '600', color: 'var(--text)', textAlign: 'right' }}>{hydroChar || '—'}</span>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid var(--border)', paddingBottom: '6px' }}>
+                  <span style={{ color: 'var(--text-muted)' }}>Tọa độ X:</span>
+                  <span style={{ fontFamily: 'monospace', fontWeight: '600', color: 'var(--text)' }}>{x}</span>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid var(--border)', paddingBottom: '6px' }}>
+                  <span style={{ color: 'var(--text-muted)' }}>Tọa độ Y:</span>
+                  <span style={{ fontFamily: 'monospace', fontWeight: '600', color: 'var(--text)' }}>{y}</span>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid var(--border)', paddingBottom: '6px' }}>
+                  <span style={{ color: 'var(--text-muted)' }}>Trạng thái:</span>
+                  <span style={{
+                    fontWeight: '700',
+                    color: isActive ? '#198754' : '#ef4444'
+                  }}>
+                    {isActive ? 'Hoạt động' : 'Không hoạt động'}
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            {/* Mục ảnh hiện trường (chỉ nước mặt mới có) */}
+            {stationType === 'surface_water' && (
+              <div>
+                <h4 style={{ margin: '0 0 12px 0', fontSize: '0.9rem', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--accent)' }}>
+                  Ảnh hiện trường
+                </h4>
+                {station.imageCode ? (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                    {station.imageCode.split(',').map((key, idx) => {
+                      const trimmed = key.trim();
+                      if (!trimmed) return null;
+                      return <StationImage key={idx} imageKey={trimmed} />;
+                    })}
+                  </div>
+                ) : (
+                  <p style={{ margin: 0, fontSize: '0.8rem', color: 'var(--text-muted)', fontStyle: 'italic' }}>
+                    Không có ảnh hiện trường.
+                  </p>
+                )}
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Footer */}
+        <div style={{
+          padding: '12px 24px',
+          borderTop: '1px solid var(--border)',
+          display: 'flex',
+          justifyContent: 'flex-end',
+          background: 'var(--background)'
+        }}>
+          <button
+            onClick={onClose}
+            style={{
+              padding: '8px 16px',
+              borderRadius: '8px',
+              border: '1px solid var(--border)',
+              background: 'var(--surface-strong)',
+              color: 'var(--text)',
+              fontSize: '0.85rem',
+              fontWeight: '600',
+              cursor: 'pointer',
+              transition: 'all 0.2s'
+            }}
+            className="hover-bg-muted"
+          >
+            Đóng
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function DeviceItem({ device, onRefresh }: { device: { id: string; name: string }; onRefresh: () => void }) {
   const [editing, setEditing] = useState(false);
   const [newName, setNewName] = useState(device.name);
@@ -1214,6 +1570,7 @@ export default function DataPage() {
   const [manualStationTypeFilter, setManualStationTypeFilter] = useState<'all' | 'groundwater' | 'surface_water'>('all');
   const [showManualStationForm, setShowManualStationForm] = useState(false);
   const [editingManualStation, setEditingManualStation] = useState<ManualStation | null>(null);
+  const [mapPreviewStation, setMapPreviewStation] = useState<ManualStation | null>(null);
 
   // Form states for manual station
   const [manualStationType, setManualStationType] = useState<'groundwater' | 'surface_water'>('groundwater');
@@ -2922,10 +3279,75 @@ function ScheduleConfig({ source }: { source: string }) {
                                   {st.stationType === 'groundwater' ? 'Nước ngầm' : 'Nước mặt'}
                                 </span>
                               </td>
-                              <td style={{ padding: '12px 16px', fontWeight: '500', color: 'var(--text)' }}>{st.location}</td>
+                              <td style={{ padding: '12px 16px', fontWeight: '500', color: 'var(--text)' }}>
+                                <button
+                                  onClick={() => setMapPreviewStation(st)}
+                                  type="button"
+                                  style={{
+                                    background: 'none',
+                                    border: 'none',
+                                    padding: 0,
+                                    margin: 0,
+                                    color: 'var(--text)',
+                                    fontWeight: '500',
+                                    cursor: 'pointer',
+                                    textAlign: 'left',
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    gap: '6px',
+                                    transition: 'color 0.2s'
+                                  }}
+                                  className="hover-underline text-accent-hover"
+                                  title="Xem vị trí trên bản đồ"
+                                >
+                                  <MapPin size={12} color="var(--accent)" /> {st.location}
+                                </button>
+                              </td>
                               <td style={{ padding: '12px 16px', color: 'var(--text-muted)' }}>{st.hydroChar || '—'}</td>
-                              <td style={{ padding: '12px 16px', fontFamily: 'monospace', color: 'var(--text-muted)' }}>{st.x != null ? parseFloat(st.x.toFixed(6)) : '—'}</td>
-                              <td style={{ padding: '12px 16px', fontFamily: 'monospace', color: 'var(--text-muted)' }}>{st.y != null ? parseFloat(st.y.toFixed(6)) : '—'}</td>
+                              <td style={{ padding: '12px 16px', fontFamily: 'monospace', color: 'var(--text-muted)' }}>
+                                {st.x != null ? (
+                                  <button
+                                    onClick={() => setMapPreviewStation(st)}
+                                    type="button"
+                                    style={{
+                                      background: 'none',
+                                      border: 'none',
+                                      padding: 0,
+                                      margin: 0,
+                                      fontFamily: 'monospace',
+                                      color: 'var(--text-muted)',
+                                      cursor: 'pointer',
+                                      transition: 'color 0.2s'
+                                    }}
+                                    className="hover-underline text-accent-hover"
+                                    title="Xem vị trí trên bản đồ"
+                                  >
+                                    {parseFloat(st.x.toFixed(6))}
+                                  </button>
+                                ) : '—'}
+                              </td>
+                              <td style={{ padding: '12px 16px', fontFamily: 'monospace', color: 'var(--text-muted)' }}>
+                                {st.y != null ? (
+                                  <button
+                                    onClick={() => setMapPreviewStation(st)}
+                                    type="button"
+                                    style={{
+                                      background: 'none',
+                                      border: 'none',
+                                      padding: 0,
+                                      margin: 0,
+                                      fontFamily: 'monospace',
+                                      color: 'var(--text-muted)',
+                                      cursor: 'pointer',
+                                      transition: 'color 0.2s'
+                                    }}
+                                    className="hover-underline text-accent-hover"
+                                    title="Xem vị trí trên bản đồ"
+                                  >
+                                    {parseFloat(st.y.toFixed(6))}
+                                  </button>
+                                ) : '—'}
+                              </td>
                               <td style={{ padding: '12px 16px', color: 'var(--text-muted)' }}>
                                 {st.stationType === 'surface_water' ? (
                                   st.imageCode ? (
@@ -4079,6 +4501,13 @@ function ScheduleConfig({ source }: { source: string }) {
         <FilePreviewModal
           fileKey={previewFile.key}
           onClose={() => setPreviewFile(null)}
+        />
+      )}
+
+      {mapPreviewStation && mapPreviewStation.x != null && mapPreviewStation.y != null && (
+        <MapPreviewModal
+          station={mapPreviewStation}
+          onClose={() => setMapPreviewStation(null)}
         />
       )}
 

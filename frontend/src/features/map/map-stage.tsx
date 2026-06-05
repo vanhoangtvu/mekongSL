@@ -1503,7 +1503,7 @@ export function MapStage({ startDateTime, endDateTime, appliedDatasets, onRemove
   // Toggle ecowitt station markers visibility based on applied datasets
   useEffect(() => {
     if (ecowittLayerRef.current) {
-      const hasEcowitt = (appliedDatasets ?? []).some(ds => ds.id.startsWith("weather-"));
+      const hasEcowitt = (appliedDatasets ?? []).some(ds => ds.id.startsWith("weather"));
       ecowittLayerRef.current.setVisible(hasEcowitt);
     }
   }, [appliedDatasets]);
