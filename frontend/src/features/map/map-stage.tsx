@@ -5,7 +5,7 @@ import TileLayer from "ol/layer/Tile";
 import VectorLayer from "ol/layer/Vector";
 import Map from "ol/Map";
 import View from "ol/View";
-import { fromLonLat, toLonLat } from "ol/proj";
+import { fromLonLat, toLonLat, transform } from "ol/proj";
 import OSM from "ol/source/OSM";
 import XYZ from "ol/source/XYZ";
 import VectorSource from "ol/source/Vector";
@@ -17,6 +17,8 @@ import { register } from "ol/proj/proj4";
 import { DATASETS } from "../../lib/constants/datasets";
 import { ECOWITT_DEVICES, type EcowittDevice } from "../../lib/constants/data-sources";
 import { useS3DatasetLayers } from "./useS3DatasetLayers";
+import type { ManualStation } from "../../lib/admin-api";
+import { listWaterQualitySamples, getWaterQualitySample, getBackendAdminUrl, type WaterQualitySampleDto } from "../../lib/admin-api";
 
 // Register UTM 48N projection
 proj4.defs("EPSG:32648", "+proj=utm +zone=48 +datum=WGS84 +units=m +no_defs");
@@ -269,6 +271,7 @@ type MapStageProps = {
   hasExplicitRange?: boolean;
   onStartDateTimeChange?: (val: string) => void;
   onEndDateTimeChange?: (val: string) => void;
+  waterQualityStations?: ManualStation[];
 };
 
 function parseDateTimeLocal(value: string) {
@@ -318,56 +321,35 @@ function resolveTimelineMode(startDate: Date, endDate: Date, preferredMode: Time
 
   const diffDays = Math.max(1, Math.ceil((endDate.getTime() - startDate.getTime()) / 86_400_000));
 
-  if (diffDays < 7) {
-    return "hour4";
-  }
-
   if (diffDays < 30) {
-    return "day";
+    return "hour4";
   }
 
   return "month";
 }
 
+// Fixed observation hours matching S3 data (00:00, 05:00, 10:00, 15:00, 20:00)
+const OBS_HOURS = [0, 5, 10, 15, 20];
+
 function buildTimelineUnits(startDate: Date, endDate: Date, mode: TimelineResolvedMode) {
   if (mode === "hour4") {
     const units: TimelineUnit[] = [];
-
-    // One tick every 2 hours (double the density)
-    for (let index = 0; index < 480; index += 1) {
-      const current = addHours(startDate, index * 2);
-      if (current > endDate) {
-        break;
+    let cur = new Date(startDate);
+    cur.setHours(0, 0, 0, 0);
+    while (cur <= endDate) {
+      for (const h of OBS_HOURS) {
+        const t = new Date(cur);
+        t.setHours(h, 0, 0, 0);
+        if (t > endDate) break;
+        const hh = String(h).padStart(2, "0");
+        units.push({
+          label: `${t.getDate()}/${t.getMonth() + 1} ${hh}:00`,
+          value: t.toISOString(),
+          isMajor: h === 0,
+        });
       }
-
-      units.push({
-        label: formatHourLabel(current),
-        value: current.toISOString(),
-        isMajor: index % 12 === 0, // Every 24 hours
-      });
+      cur.setDate(cur.getDate() + 1);
     }
-
-    return { mode, units };
-  }
-
-  if (mode === "day") {
-    const units: TimelineUnit[] = [];
-    const diffHours = Math.ceil((endDate.getTime() - startDate.getTime()) / 3_600_000);
-    const limit = Math.min(diffHours / 12 + 1, 240); // One tick every 12 hours
-
-    for (let index = 0; index < limit; index += 1) {
-      const current = addHours(startDate, index * 12);
-      if (current > endDate) {
-        break;
-      }
-
-      units.push({
-        label: formatDayLabel(current),
-        value: current.toISOString(),
-        isMajor: index % 2 === 0, // Every day
-      });
-    }
-
     return { mode, units };
   }
 
@@ -1060,12 +1042,15 @@ function EcowittStationPopup({
   );
 }
 
-export function MapStage({ startDateTime, endDateTime, appliedDatasets, onRemoveDataset, onAddDataset }: MapStageProps) {
+export function MapStage({ startDateTime, endDateTime, appliedDatasets, onRemoveDataset, onAddDataset, onStartDateTimeChange, onEndDateTimeChange, waterQualityStations }: MapStageProps) {
   const mapContainerRef = useRef<HTMLDivElement | null>(null);
   const scrollerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<Map | null>(null);
   const ecowittLayerRef = useRef<VectorLayer<VectorSource> | null>(null);
   const ecowittSourceRef = useRef<VectorSource | null>(null);
+  const wqLayerRef = useRef<VectorLayer<VectorSource> | null>(null);
+  const wqSourceRef = useRef<VectorSource | null>(null);
+  const wqStationsRef = useRef<ManualStation[]>([]);
   const baseLayerRef = useRef<TileLayer | null>(null);
   const [pixelValue, setPixelValue] = useState<number | null>(null);
   const [pixelValues, setPixelValues] = useState<Record<string, number>>({});
@@ -1112,13 +1097,37 @@ export function MapStage({ startDateTime, endDateTime, appliedDatasets, onRemove
     return unit?.value ? unit.value.slice(0, 10) : undefined;
   }, [timelineIndex, timelineUnits]);
 
-  const [timelineDate, setTimelineDate] = useState(rawTimelineDate);
-  useEffect(() => {
-    const timer = setTimeout(() => setTimelineDate(rawTimelineDate), 300);
-    return () => clearTimeout(timer);
-  }, [rawTimelineDate]);
+  // Active time slot HH-MM matching S3 folder structure
+  const rawTimeSlot = useMemo(() => {
+    const unit = timelineUnits[timelineIndex];
+    if (!unit?.value) return "00-00";
+    const d = new Date(unit.value);
+    return `${String(d.getHours()).padStart(2, "0")}-${String(d.getMinutes()).padStart(2, "0")}`;
+  }, [timelineIndex, timelineUnits]);
 
-  const { renderedLayers, layerRefs, layersCacheRef } = useS3DatasetLayers(appliedDatasets, mapRef, timelineDate);
+  // Next date in timeline for prefetching
+  const prefetchDate = useMemo(() => {
+    // Find next index with a different date
+    for (let i = timelineIndex + 1; i < timelineUnits.length; i++) {
+      const d = timelineUnits[i].value.slice(0, 10);
+      if (d !== rawTimelineDate) return d;
+    }
+    return undefined;
+  }, [timelineIndex, timelineUnits, rawTimelineDate]);
+
+  // All unique dates in timeline range for bulk prefetch
+  const allTimelineDates = useMemo(() =>
+    [...new Set(timelineUnits.map(u => u.value.slice(0, 10)))],
+  [timelineUnits]);
+
+  const [timelineDate, setTimelineDate] = useState(rawTimelineDate);
+  const [timeSlot, setTimeSlot] = useState(rawTimeSlot);
+  useEffect(() => {
+    setTimelineDate(rawTimelineDate);
+    setTimeSlot(rawTimeSlot);
+  }, [rawTimelineDate, rawTimeSlot]);
+
+  const { renderedLayers, layerRefs, layersCacheRef } = useS3DatasetLayers(appliedDatasets, mapRef, timelineDate, timeSlot, prefetchDate, allTimelineDates);
 
   // Prepare state: preload all frames before playing
   const [isPreparing, setIsPreparing] = useState(false);
@@ -1174,21 +1183,18 @@ export function MapStage({ startDateTime, endDateTime, appliedDatasets, onRemove
   // Sync map layer z-order, visibility and opacity with playerLayers
   useEffect(() => {
     const layers = layerRefs.current;
-    playerLayers.forEach((pl) => {
-      const layerKey = pl.type ? `${pl.id}-${pl.type}` : pl.id;
-      const olLayer = layers[layerKey];
-      if (olLayer) {
-        olLayer.setVisible(pl.added);
-        olLayer.setOpacity(pl.opacity ?? 0.7);
-      }
-    });
-    // z-order: first in list = on top
+    const renderedIds = new Set(Object.keys(renderedLayers));
     playerLayers.forEach((pl, idx) => {
-      const layerKey = pl.type ? `${pl.id}-${pl.type}` : pl.id;
-      const olLayer = layers[layerKey];
-      if (olLayer) {
-        const z = 100 + (playerLayers.length - idx);
-        olLayer.setZIndex(z);
+      const prefix = pl.type ? `${pl.id}-${pl.type}` : pl.id;
+      const matchingKeys = Object.keys(layers).filter(k => k === prefix || k.startsWith(prefix + "__"));
+      for (const key of matchingKeys) {
+        if (!renderedIds.has(key)) continue;
+        const olLayer = layers[key];
+        if (olLayer) {
+          olLayer.setVisible(pl.added);
+          olLayer.setOpacity(pl.opacity ?? 0.7);
+          olLayer.setZIndex(100 + (playerLayers.length - idx));
+        }
       }
     });
   }, [playerLayers, renderedLayers]);
@@ -1200,6 +1206,7 @@ export function MapStage({ startDateTime, endDateTime, appliedDatasets, onRemove
   const [pbError, setPbError] = useState("");
   const [isTimelinePlaying, setIsTimelinePlaying] = useState(false);
   const [playbackSpeed, setPlaybackSpeed] = useState(0.5);
+  const [pendingPlayback, setPendingPlayback] = useState<{ start: string; end: string } | null>(null);
 
   const handleOpenPlayback = () => {
     setPbStartDate("");
@@ -1209,19 +1216,24 @@ export function MapStage({ startDateTime, endDateTime, appliedDatasets, onRemove
     setShowPlaybackPicker(true);
   };
 
-  // Auto-advance timeline during playback
+  // Store playback frames for controlling auto-advance range
+  const playbackFramesRef = useRef<TimelineUnit[]>([]);
+
+  // Auto-advance timeline during playback (only within selected frames)
   const playbackInterval = useMemo(() => Math.max(200, 1000 / playbackSpeed), [playbackSpeed]);
 
   useEffect(() => {
     if (!isTimelinePlaying || timelineUnits.length === 0) return;
+    const frames = playbackFramesRef.current;
+    if (frames.length === 0) return;
+    const lastFrameIdx = timelineUnits.findIndex(u => u.value === frames[frames.length - 1].value);
     const interval = setInterval(() => {
       setTimelineIndex((prev) => {
-        const next = prev + 1;
-        if (next >= timelineUnits.length) {
+        if (prev >= lastFrameIdx) {
           setIsTimelinePlaying(false);
           return prev;
         }
-        return next;
+        return prev + 1;
       });
     }, playbackInterval);
     return () => clearInterval(interval);
@@ -1236,31 +1248,60 @@ export function MapStage({ startDateTime, endDateTime, appliedDatasets, onRemove
       setPbError("Start date must be before end date.");
       return;
     }
+
+    // Check if timelineUnits already covers the playback range
+    const firstInTimeline = timelineUnits.length > 0 ? timelineUnits[0].value.slice(0, 10) : null;
+    const lastInTimeline = timelineUnits.length > 0 ? timelineUnits[timelineUnits.length - 1].value.slice(0, 10) : null;
+    const rangeCoversPlayback = firstInTimeline && lastInTimeline &&
+      firstInTimeline <= pbStartDate && lastInTimeline >= pbEndDate;
+
+    if (!rangeCoversPlayback) {
+      // Expand sidebar date range to cover the playback period
+      if (onStartDateTimeChange) {
+        const currentStart = startDateTime.slice(0, 10);
+        if (pbStartDate < currentStart) {
+          onStartDateTimeChange(pbStartDate + "T00:00");
+        }
+      }
+      if (onEndDateTimeChange) {
+        const currentEnd = endDateTime.slice(0, 10);
+        if (pbEndDate > currentEnd) {
+          onEndDateTimeChange(pbEndDate + "T23:59");
+        }
+      }
+      // Defer playback start until timelineUnits expands to cover the range
+      setShowPlaybackPicker(false);
+      setPendingPlayback({ start: pbStartDate, end: pbEndDate });
+      return;
+    }
+
+    // Timeline already covers the range — start playback immediately
     setIsPreparing(true);
     setIsReady(false);
 
-    // Build frame list from timeline units within the selected range
     const frames = timelineUnits.filter(u => {
       const d = u.value.slice(0, 10);
       return d >= pbStartDate && d <= pbEndDate;
     });
 
+    playbackFramesRef.current = frames;
+
     setPrepareProgress({ current: 0, total: frames.length, label: 'Starting...' });
 
-    // Preload: fetch proxy URL for each unique date to warm cache
     const cache = layersCacheRef.current;
     const loadedDates = new Set(Object.keys(cache));
     const uniqueDates = [...new Set(frames.map(f => f.value.slice(0, 10)))].filter(d => !loadedDates.has(d));
 
+    const firstFrameValue = frames.length > 0 ? frames[0].value : null;
+
     let idx = 0;
     const preloadNext = () => {
       if (idx >= uniqueDates.length) {
-        // All preloaded → start playback
         setIsPreparing(false);
         setIsReady(true);
         setShowPlaybackPicker(false);
-        if (frames.length > 0) {
-          const firstUnit = timelineUnits.indexOf(frames[0]);
+        if (firstFrameValue) {
+          const firstUnit = timelineUnits.findIndex(u => u.value === firstFrameValue);
           if (firstUnit >= 0) setTimelineIndex(firstUnit);
         }
         setPrepareProgress({ current: frames.length, total: frames.length, label: 'Playing' });
@@ -1269,22 +1310,20 @@ export function MapStage({ startDateTime, endDateTime, appliedDatasets, onRemove
       }
       const date = uniqueDates[idx];
       setPrepareProgress({ current: idx + 1, total: uniqueDates.length, label: date });
-      // Trigger cache by setting timelineDate directly (bypass debounce)
       setTimelineDate(date);
-      // Also update timelineIndex to keep slider in sync
+      setTimeSlot("00-00");
       const matchIdx = timelineUnits.findIndex(u => u.value.startsWith(date));
       if (matchIdx >= 0) setTimelineIndex(matchIdx);
       idx++;
-      setTimeout(preloadNext, 1300);
+      setTimeout(preloadNext, 1500);
     };
 
     if (uniqueDates.length === 0) {
-      // Already cached
       setIsPreparing(false);
       setIsReady(true);
       setShowPlaybackPicker(false);
-      if (frames.length > 0) {
-        const firstUnit = timelineUnits.indexOf(frames[0]);
+      if (firstFrameValue) {
+        const firstUnit = timelineUnits.findIndex(u => u.value === firstFrameValue);
         if (firstUnit >= 0) setTimelineIndex(firstUnit);
       }
       setPrepareProgress({ current: frames.length, total: frames.length, label: 'Playing' });
@@ -1324,6 +1363,13 @@ export function MapStage({ startDateTime, endDateTime, appliedDatasets, onRemove
   });
   const popupDeviceIdRef = useRef(popupDeviceId);
   popupDeviceIdRef.current = popupDeviceId;
+  const [selectedWqStation, setSelectedWqStation] = useState<ManualStation | null>(null);
+  const [wqStationSamples, setWqStationSamples] = useState<WaterQualitySampleDto[]>([]);
+  const [wqStationSampleDate, setWqStationSampleDate] = useState<string>('');
+  const [wqStationSample, setWqStationSample] = useState<WaterQualitySampleDto | null>(null);
+  const [wqStationImages, setWqStationImages] = useState<string[]>([]);
+  const [wqSamplesLoading, setWqSamplesLoading] = useState(false);
+  const [wqImagePreviewUrl, setWqImagePreviewUrl] = useState<string | null>(null);
   const [ecowittDevices, setEcowittDevices] = useState<EcowittDevice[]>([...ECOWITT_DEVICES] as EcowittDevice[]);
 
   const getLayerKey = (l: {id: string, type?: string}) => l.type ? `${l.id}-${l.type}` : l.id;
@@ -1351,6 +1397,8 @@ export function MapStage({ startDateTime, endDateTime, appliedDatasets, onRemove
 
   useEffect(() => {
     if (timelineUnits.length === 0) return;
+    // Don't reset timeline position during playback or preload
+    if (isTimelinePlaying || isPreparing) return;
     const today = new Date();
     const todayMs = today.getTime();
     let bestIdx = 0;
@@ -1363,7 +1411,7 @@ export function MapStage({ startDateTime, endDateTime, appliedDatasets, onRemove
       }
     }
     setTimelineIndex(bestIdx);
-  }, [startDateTime, endDateTime, appliedDatasets]);
+  }, [startDateTime, endDateTime, appliedDatasets, isTimelinePlaying, isPreparing]);
 
   useEffect(() => {
     if (timelineUnits.length === 0) {
@@ -1372,6 +1420,31 @@ export function MapStage({ startDateTime, endDateTime, appliedDatasets, onRemove
 
     setTimelineIndex((currentIndex) => Math.min(currentIndex, timelineUnits.length - 1));
   }, [timelineUnits.length]);
+
+  // ── When timelineUnits expands to cover pending playback range, start playback ──
+  useEffect(() => {
+    if (!pendingPlayback) return;
+    const { start, end } = pendingPlayback;
+    // Check if timelineUnits now covers the requested range
+    const firstInTimeline = timelineUnits.length > 0 ? timelineUnits[0].value.slice(0, 10) : null;
+    const lastInTimeline = timelineUnits.length > 0 ? timelineUnits[timelineUnits.length - 1].value.slice(0, 10) : null;
+    if (!firstInTimeline || !lastInTimeline) return;
+    if (firstInTimeline <= start && lastInTimeline >= end) {
+      setPendingPlayback(null);
+      // Now build frames and start playback
+      const frames = timelineUnits.filter(u => {
+        const d = u.value.slice(0, 10);
+        return d >= start && d <= end;
+      });
+      playbackFramesRef.current = frames;
+      if (frames.length === 0) return;
+
+      const firstFrameValue = frames[0].value;
+      const firstUnit = timelineUnits.findIndex(u => u.value === firstFrameValue);
+      if (firstUnit >= 0) setTimelineIndex(firstUnit);
+      setIsTimelinePlaying(true);
+    }
+  }, [timelineUnits, pendingPlayback]);
 
 
 
@@ -1437,6 +1510,48 @@ export function MapStage({ startDateTime, endDateTime, appliedDatasets, onRemove
     map.addLayer(ecowittLayer);
     ecowittLayerRef.current = ecowittLayer;
 
+    // Manual station markers layer (Water Quality)
+    const wqSource = new VectorSource();
+    wqSourceRef.current = wqSource;
+    const wqLayer = new VectorLayer({
+      source: wqSource,
+      style: (feature) => {
+        const stationType = feature.get("stationType") as string | undefined;
+        const isSelected = feature.get("selected") as boolean | undefined;
+        const color = stationType === 'groundwater' ? '#0d6efd' : '#198754';
+        if (isSelected) {
+          const now = Date.now();
+          const pulse = Math.sin(now / 150) * 0.2 + 0.8;
+          return [
+            new Style({
+              image: new Circle({
+                radius: 12,
+                fill: new Fill({ color: `${color}33` }),
+              }),
+            }),
+            new Style({
+              image: new Circle({
+                radius: 8,
+                fill: new Fill({ color: color + Math.round(pulse * 255).toString(16).padStart(2, '0') }),
+                stroke: new Stroke({ color: '#fff', width: 2 }),
+              }),
+            }),
+          ];
+        }
+        return new Style({
+          image: new Circle({
+            radius: 7,
+            fill: new Fill({ color }),
+            stroke: new Stroke({ color: '#fff', width: 2 }),
+          }),
+        });
+      },
+      zIndex: 190,
+    });
+    wqLayer.setVisible(false);
+    map.addLayer(wqLayer);
+    wqLayerRef.current = wqLayer;
+
     // Click handler for station markers — mở popup inline thay vì điều hướng trang
     map.on("click", (evt) => {
       const feature = map.forEachFeatureAtPixel(evt.pixel, (f) => f as Feature | undefined);
@@ -1446,9 +1561,18 @@ export function MapStage({ startDateTime, endDateTime, appliedDatasets, onRemove
           setPopupDeviceId((prev) => (prev === devId ? null : devId));
           return;
         }
+        const wqId = feature.get("wqStationId") as number | undefined;
+        if (wqId) {
+          setSelectedWqStation((prev) => {
+            if (prev?.id === wqId) return null;
+            const st = wqStationsRef.current?.find(s => s.id === wqId);
+            return st || null;
+          });
+          return;
+        }
       }
-      // Click vào vùng trống → đóng popup
       setPopupDeviceId(null);
+      setSelectedWqStation(null);
     });
 
     // Force multiple size updates to ensure proper rendering
@@ -1506,6 +1630,10 @@ export function MapStage({ startDateTime, endDateTime, appliedDatasets, onRemove
       const hasEcowitt = (appliedDatasets ?? []).some(ds => ds.id.startsWith("weather"));
       ecowittLayerRef.current.setVisible(hasEcowitt);
     }
+    if (wqLayerRef.current) {
+      const hasWq = (appliedDatasets ?? []).some(ds => ds.id === "wq-surface" || ds.id === "wq-ground");
+      wqLayerRef.current.setVisible(hasWq);
+    }
   }, [appliedDatasets]);
 
   // Fetch device info (coordinates, name) từ Ecowitt API
@@ -1558,6 +1686,118 @@ export function MapStage({ startDateTime, endDateTime, appliedDatasets, onRemove
       }
     });
   }, [ecowittDevices]);
+
+  // Update manual station markers when waterQualityStations changes
+  useEffect(() => {
+    const source = wqSourceRef.current;
+    if (!source) return;
+    wqStationsRef.current = waterQualityStations ?? [];
+    source.clear();
+    (waterQualityStations ?? []).forEach((st) => {
+      if (st.x != null && st.y != null) {
+        const isWgs84 = Math.abs(st.x) <= 180 && Math.abs(st.y) <= 90;
+        const sourceProj = isWgs84 ? 'EPSG:4326' : 'EPSG:32648';
+        const coords = isWgs84
+          ? fromLonLat([st.x, st.y])
+          : transform([st.x, st.y], 'EPSG:32648', 'EPSG:3857');
+        const feature = new Feature({
+          geometry: new Point(coords),
+          wqStationId: st.id,
+          stationType: st.stationType,
+          name: st.location,
+          stationId: st.stationId,
+        });
+        feature.setId(st.id);
+        source.addFeature(feature);
+      }
+    });
+  }, [waterQualityStations]);
+
+  // Fetch WQ samples + images when a manual station is selected
+  useEffect(() => {
+    if (!selectedWqStation || !selectedWqStation.id) {
+      setWqStationSamples([]);
+      setWqStationSampleDate('');
+      setWqStationSample(null);
+      setWqStationImages([]);
+      return;
+    }
+    const st = selectedWqStation;
+    const stId = st.id!;
+    setWqSamplesLoading(true);
+
+    // Fetch samples
+    listWaterQualitySamples(stId).then(samples => {
+      const sorted = (samples || []).sort((a, b) => b.sampleDate.localeCompare(a.sampleDate));
+      setWqStationSamples(sorted);
+      if (sorted.length > 0) {
+        setWqStationSampleDate(sorted[0].sampleDate);
+        getWaterQualitySample(sorted[0].id).then(detail => {
+          setWqStationSample(detail);
+        }).catch(e => {
+          console.warn("[WQ] Failed to load sample detail:", e);
+          setWqStationSample(null);
+        });
+      } else {
+        setWqStationSampleDate('');
+        setWqStationSample(null);
+      }
+      setWqSamplesLoading(false);
+    }).catch(e => {
+      console.warn("[WQ] Failed to load samples list:", e);
+      setWqStationSamples([]);
+      setWqStationSampleDate('');
+      setWqStationSample(null);
+      setWqSamplesLoading(false);
+    });
+
+    // Load images
+    if (st.stationType === 'surface_water' && st.imageCode) {
+      console.log("[WQ] Loading images for station:", st.id, st.imageCode);
+      const keys = st.imageCode.split(',').map(k => k.trim()).filter(Boolean);
+      console.log("[WQ] Image keys:", keys);
+      Promise.all(keys.map(async (key) => {
+        try {
+          const url = getBackendAdminUrl(`/s3/download?key=${encodeURIComponent(key)}`);
+          console.log("[WQ] Fetching image:", url);
+          const res = await fetch(url);
+          console.log("[WQ] Image response:", res.status, res.ok);
+          if (res.ok) {
+            const blob = await res.blob();
+            const objUrl = URL.createObjectURL(blob);
+            console.log("[WQ] Image loaded, blob size:", blob.size);
+            return objUrl;
+          } else {
+            console.warn("[WQ] Image fetch not OK:", res.status, res.statusText);
+          }
+        } catch (e) {
+          console.warn("[WQ] Failed to load image:", key, e);
+        }
+        return '';
+      })).then(urls => {
+        console.log("[WQ] All images loaded:", urls.filter(Boolean).length);
+        setWqStationImages(urls.filter(Boolean));
+      });
+    } else {
+      console.log("[WQ] No images to load. stationType:", st.stationType, "imageCode:", st.imageCode);
+      setWqStationImages([]);
+    }
+  }, [selectedWqStation]);
+
+  // Fetch sample detail when date changes
+  useEffect(() => {
+    if (!selectedWqStation || !wqStationSampleDate) return;
+    const sample = wqStationSamples.find(s => s.sampleDate === wqStationSampleDate);
+    if (sample) {
+      if (sample.parameters) {
+        setWqStationSample(sample);
+      } else {
+        getWaterQualitySample(sample.id).then(detail => {
+          setWqStationSample(detail);
+        }).catch(() => setWqStationSample(null));
+      }
+    }
+  }, [wqStationSampleDate, wqStationSamples, selectedWqStation]);
 
   // Fetch dữ liệu Ecowitt khi mở popup trạm
   useEffect(() => {
@@ -2152,6 +2392,180 @@ export function MapStage({ startDateTime, endDateTime, appliedDatasets, onRemove
           );
         })()}
 
+        {/* ---- Water Quality Station Popup ---- */}
+        {selectedWqStation && (
+          <div style={{
+            position: 'absolute', top: '90px', right: '10px',
+            background: '#fff', borderRadius: '12px', zIndex: 1000,
+            boxShadow: '0 4px 24px rgba(0,0,0,0.18)', width: '680px', maxHeight: '85vh', overflowY: 'auto',
+            border: `2px solid ${selectedWqStation.stationType === 'groundwater' ? '#0d6efd' : '#198754'}`,
+          }}>
+            {/* Header */}
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px 16px', borderBottom: '1px solid #eee' }}>
+              <strong style={{ fontSize: '0.95rem', color: '#1a1a2e' }}>
+                📍 {selectedWqStation.stationId || 'Trạm thủ công'} — {selectedWqStation.location}
+              </strong>
+              <button onClick={() => setSelectedWqStation(null)}
+                style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#999', padding: '4px', fontSize: '1.1rem', lineHeight: 1 }}
+              >✕</button>
+            </div>
+
+            {/* Body: 2 columns (only for surface_water with images) */}
+            {selectedWqStation.stationType === 'surface_water' ? (
+              <div style={{ display: 'flex', gap: '16px', padding: '12px 16px' }}>
+                {/* LEFT: Images */}
+                <div style={{ width: '240px', flexShrink: 0, display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                  {wqStationImages.length > 0 ? (
+                    wqStationImages.map((url, idx) => (
+                      <img key={idx} src={url} alt={`Ảnh ${idx + 1}`}
+                        onClick={() => setWqImagePreviewUrl(url)}
+                        style={{ width: '100%', borderRadius: '8px', border: '1px solid #ddd', cursor: 'zoom-in', display: 'block' }} />
+                    ))
+                  ) : (
+                    <div style={{
+                      width: '100%', height: '180px', borderRadius: '8px', border: '1px dashed #ddd',
+                      background: '#f8f9fa', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      color: '#ccc', fontSize: '0.85rem'
+                    }}>🖼️ Chưa có ảnh</div>
+                  )}
+                </div>
+
+                {/* RIGHT: Station Info + Data */}
+                <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                  {/* Station Info */}
+                  <div style={{ fontSize: '0.82rem', color: '#555', display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                    <div><strong>Loại:</strong>{' '}
+                      <span style={{ display: 'inline-block', padding: '2px 8px', borderRadius: '4px', fontSize: '0.75rem', fontWeight: '700',
+                        background: 'rgba(25,135,84,0.12)', color: '#198754' }}>
+                        Nước mặt
+                      </span>
+                    </div>
+                    {selectedWqStation.hydroChar && <div><strong>Đặc tính thủy vực:</strong> {selectedWqStation.hydroChar}</div>}
+                    <div><strong>Tọa độ:</strong> X={selectedWqStation.x?.toFixed(4)}, Y={selectedWqStation.y?.toFixed(4)}</div>
+                  </div>
+                  {/* WQ Data Panel */}
+                  <div style={{ borderTop: '1px solid #eee', paddingTop: '8px' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
+                      <strong style={{ fontSize: '0.82rem', color: '#1a1a2e' }}>📊 Dữ liệu quan trắc</strong>
+                      {wqSamplesLoading && <span style={{ fontSize: '0.72rem', color: '#999' }}>Đang tải...</span>}
+                    </div>
+                    {wqStationSamples.length > 0 && (<>
+                      <div style={{ display: 'flex', gap: '8px', alignItems: 'center', marginBottom: '8px' }}>
+                        <label style={{ fontSize: '0.75rem', color: '#666', fontWeight: 600 }}>Ngày:</label>
+                        <select value={wqStationSampleDate} onChange={e => setWqStationSampleDate(e.target.value)}
+                          style={{ flex: 1, padding: '5px 8px', fontSize: '0.78rem', border: '1px solid #ddd', borderRadius: '6px', background: '#f8f9fa', cursor: 'pointer' }}>
+                          {wqStationSamples.map(s => (<option key={s.id} value={s.sampleDate}>{s.sampleDate}</option>))}
+                        </select>
+                      </div>
+                      {wqStationSample && wqStationSample.parameters && wqStationSample.parameters.length > 0 ? (
+                        <div style={{ overflowX: 'auto', borderRadius: '8px', border: '1px solid #eee', maxHeight: '250px', overflowY: 'auto' }}>
+                          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.73rem' }}>
+                            <thead><tr style={{ background: '#f2f2f2', position: 'sticky', top: 0, zIndex: 1 }}>
+                              {['Thông số', 'Đơn vị', 'Giá trị', 'Tiêu chuẩn'].map(h => (
+                                <th key={h} style={{ padding: '5px 8px', textAlign: 'left', fontWeight: '600', borderBottom: '1px solid #ddd', whiteSpace: 'nowrap' }}>{h}</th>
+                              ))}
+                            </tr></thead>
+                            <tbody>
+                              {wqStationSample.parameters.map((p, idx) => (
+                                <tr key={idx} style={{ borderBottom: '1px solid #eee' }}>
+                                  <td style={{ padding: '4px 8px', fontWeight: '600', color: '#333' }}>{p.parameterName}</td>
+                                  <td style={{ padding: '4px 8px', color: '#666' }}>{p.unit || '—'}</td>
+                                  <td style={{ padding: '4px 8px', fontFamily: 'monospace', color: '#333' }}>{p.valueRaw || '—'}</td>
+                                  <td style={{ padding: '4px 8px', color: '#666', fontSize: '0.7rem' }}>{p.referenceStandard || '—'}</td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      ) : wqSamplesLoading ? null : (
+                        <p style={{ fontSize: '0.75rem', color: '#999', fontStyle: 'italic', margin: '4px 0' }}>Chưa tải được chi tiết dữ liệu.</p>
+                      )}
+                    </>)}
+                    {!wqSamplesLoading && wqStationSamples.length === 0 && (
+                      <p style={{ fontSize: '0.75rem', color: '#999', fontStyle: 'italic', margin: '4px 0' }}>Chưa có dữ liệu import cho trạm này.</p>
+                    )}
+                  </div>
+                </div>
+              </div>
+            ) : (
+              /* Groundwater: No images, full-width data */
+              <div style={{ padding: '12px 16px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                <div style={{ fontSize: '0.82rem', color: '#555', display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                  <div><strong>Loại:</strong>{' '}
+                    <span style={{ display: 'inline-block', padding: '2px 8px', borderRadius: '4px', fontSize: '0.75rem', fontWeight: '700',
+                      background: '#0d6efd18', color: '#0d6efd' }}>
+                      Nước ngầm
+                    </span>
+                  </div>
+                  {selectedWqStation.hydroChar && <div><strong>Đặc tính thủy vực:</strong> {selectedWqStation.hydroChar}</div>}
+                  <div><strong>Tọa độ:</strong> X={selectedWqStation.x?.toFixed(4)}, Y={selectedWqStation.y?.toFixed(4)}</div>
+                </div>
+                <div style={{ borderTop: '1px solid #eee', paddingTop: '8px' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
+                    <strong style={{ fontSize: '0.82rem', color: '#1a1a2e' }}>📊 Dữ liệu quan trắc</strong>
+                    {wqSamplesLoading && <span style={{ fontSize: '0.72rem', color: '#999' }}>Đang tải...</span>}
+                  </div>
+                  {wqStationSamples.length > 0 && (<>
+                    <div style={{ display: 'flex', gap: '8px', alignItems: 'center', marginBottom: '8px' }}>
+                      <label style={{ fontSize: '0.75rem', color: '#666', fontWeight: 600 }}>Ngày:</label>
+                      <select value={wqStationSampleDate} onChange={e => setWqStationSampleDate(e.target.value)}
+                        style={{ flex: 1, padding: '5px 8px', fontSize: '0.78rem', border: '1px solid #ddd', borderRadius: '6px', background: '#f8f9fa', cursor: 'pointer' }}>
+                        {wqStationSamples.map(s => (<option key={s.id} value={s.sampleDate}>{s.sampleDate}</option>))}
+                      </select>
+                    </div>
+                    {wqStationSample && wqStationSample.parameters && wqStationSample.parameters.length > 0 ? (
+                      <div style={{ overflowX: 'auto', borderRadius: '8px', border: '1px solid #eee', maxHeight: '250px', overflowY: 'auto' }}>
+                        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.73rem' }}>
+                          <thead><tr style={{ background: '#f2f2f2', position: 'sticky', top: 0, zIndex: 1 }}>
+                            {['Thông số', 'Đơn vị', 'Giá trị', 'Tiêu chuẩn'].map(h => (
+                              <th key={h} style={{ padding: '5px 8px', textAlign: 'left', fontWeight: '600', borderBottom: '1px solid #ddd', whiteSpace: 'nowrap' }}>{h}</th>
+                            ))}
+                          </tr></thead>
+                          <tbody>
+                            {wqStationSample.parameters.map((p, idx) => (
+                              <tr key={idx} style={{ borderBottom: '1px solid #eee' }}>
+                                <td style={{ padding: '4px 8px', fontWeight: '600', color: '#333' }}>{p.parameterName}</td>
+                                <td style={{ padding: '4px 8px', color: '#666' }}>{p.unit || '—'}</td>
+                                <td style={{ padding: '4px 8px', fontFamily: 'monospace', color: '#333' }}>{p.valueRaw || '—'}</td>
+                                <td style={{ padding: '4px 8px', color: '#666', fontSize: '0.7rem' }}>{p.referenceStandard || '—'}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    ) : wqSamplesLoading ? null : (
+                      <p style={{ fontSize: '0.75rem', color: '#999', fontStyle: 'italic', margin: '4px 0' }}>Chưa tải được chi tiết dữ liệu.</p>
+                    )}
+                  </>)}
+                  {!wqSamplesLoading && wqStationSamples.length === 0 && (
+                    <p style={{ fontSize: '0.75rem', color: '#999', fontStyle: 'italic', margin: '4px 0' }}>Chưa có dữ liệu import cho trạm này.</p>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Image Lightbox */}
+        {wqImagePreviewUrl && (
+          <div onClick={() => setWqImagePreviewUrl(null)}
+            style={{
+              position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
+              background: 'rgba(0,0,0,0.85)', zIndex: 9999,
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              cursor: 'zoom-out'
+            }}>
+            <img src={wqImagePreviewUrl} alt="Preview"
+              onClick={e => e.stopPropagation()}
+              style={{ maxWidth: '95vw', maxHeight: '95vh', borderRadius: '8px', boxShadow: '0 8px 40px rgba(0,0,0,0.4)' }} />
+            <button onClick={() => setWqImagePreviewUrl(null)}
+              style={{
+                position: 'absolute', top: '20px', right: '20px',
+                background: 'rgba(255,255,255,0.2)', border: 'none', color: '#fff',
+                fontSize: '1.5rem', cursor: 'pointer', padding: '8px 14px', borderRadius: '8px'
+              }}>✕</button>
+          </div>
+        )}
 
         {Object.keys(pixelValues).length > 0 && mouseCoords !== null && (
           <div className="geo-map-inspector">

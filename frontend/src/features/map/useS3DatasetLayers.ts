@@ -6,7 +6,6 @@ import WebGLTileLayer from "ol/layer/WebGLTile";
 import VectorLayer from "ol/layer/Vector";
 import VectorSource from "ol/source/Vector";
 import Feature from "ol/Feature";
-import { Point, LineString, Polygon } from "ol/geom";
 import GeoJSON from "ol/format/GeoJSON";
 import KML from "ol/format/KML";
 import GeoTIFF from "ol/source/GeoTIFF";
@@ -43,11 +42,58 @@ const defaultVectorStyle = new Style({
   }),
 });
 
+const FADE_MS = 350;
+
+function animateLayer(
+  layer: WebGLTileLayer | VectorLayer,
+  from: number,
+  to: number,
+  duration: number,
+): Promise<void> {
+  if (from === to) return Promise.resolve();
+  return new Promise((resolve) => {
+    const start = performance.now();
+    function step(now: number) {
+      const elapsed = now - start;
+      const t = Math.min(1, elapsed / duration);
+      const eased = t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2; // ease-in-out quad
+      layer.setOpacity(from + (to - from) * eased);
+      if (t < 1) {
+        requestAnimationFrame(step);
+      } else {
+        layer.setOpacity(to);
+        resolve();
+      }
+    }
+    requestAnimationFrame(step);
+  });
+}
+
+function removeLayerFromMap(
+  map: Map,
+  layer: WebGLTileLayer | VectorLayer,
+  refs: Record<string, WebGLTileLayer | VectorLayer>,
+  id: string,
+) {
+  map.removeLayer(layer);
+  const src = layer.getSource?.();
+  if (src && typeof src === "object" && "dispose" in src) {
+    try { (src as { dispose: () => void }).dispose(); } catch {}
+  }
+  delete refs[id];
+}
+
+function getPrefix(key: string): string {
+  return key.split("__")[0];
+}
+
 export function useS3DatasetLayers(
   appliedDatasets: Array<{ id: string; type: string }> | undefined,
   mapRef: React.MutableRefObject<Map | null>,
   timelineDate?: string,
-  activeTimeLabel?: string
+  timeSlot?: string,
+  prefetchDate?: string,
+  allTimelineDates?: string[]
 ) {
   const layerRefs = useRef<Record<string, WebGLTileLayer | VectorLayer>>({});
   const prevDateRef = useRef<string | undefined>(undefined);
@@ -56,9 +102,47 @@ export function useS3DatasetLayers(
   const prebuiltLayersRef = useRef<Record<string, Record<string, WebGLTileLayer | VectorLayer>>>({});
   const activeDateRef = useRef<string>("");
 
-  // ── Applied datasets: smart diff — keep existing, remove stale, fetch new ──
+  // Track old layers waiting for replacement. prefix → { oldId, done }
+  // When a new layer loads, we cross-fade: fade-in new + fade-out old simultaneously.
+  const pendingReplaceRef = useRef<Record<string, { oldId: string; done: boolean }>>({});
+
+  function pickFrame(cache: Record<string, RenderedLayer>, slot?: string): Record<string, RenderedLayer> {
+    if (slot) {
+      const exact: Record<string, RenderedLayer> = {};
+      for (const [k, v] of Object.entries(cache)) {
+        if (k.endsWith(`__${slot}`)) exact[k] = v;
+      }
+      if (Object.keys(exact).length > 0) return exact;
+      const slotNum = parseInt(slot.replace("-", ""), 10);
+      const best: Record<string, [number, RenderedLayer]> = {};
+      for (const [k, v] of Object.entries(cache)) {
+        const m = k.match(/__(\d{2})-(\d{2})$/);
+        if (!m) continue;
+        const baseKey = k.replace(/__\d{4}-\d{2}-\d{2}__\d{2}-\d{2}$/, "");
+        const diff = Math.abs(parseInt(m[1] + m[2], 10) - slotNum);
+        if (!best[baseKey] || diff < best[baseKey][0]) best[baseKey] = [diff, v];
+      }
+      const result: Record<string, RenderedLayer> = {};
+      for (const [k, v] of Object.entries(cache)) {
+        const m = k.match(/__(\d{2})-(\d{2})$/);
+        if (!m) continue;
+        const baseKey = k.replace(/__\d{4}-\d{2}-\d{2}__\d{2}-\d{2}$/, "");
+        if (best[baseKey] && best[baseKey][1] === v) result[k] = v;
+      }
+      if (Object.keys(result).length > 0) return result;
+    }
+    const latest: Record<string, [string, RenderedLayer]> = {};
+    for (const [k, v] of Object.entries(cache)) {
+      const baseKey = k.replace(/__\d{4}-\d{2}-\d{2}__\d{2}-\d{2}$/, "");
+      if (!latest[baseKey] || k > latest[baseKey][0]) latest[baseKey] = [k, v];
+    }
+    const display: Record<string, RenderedLayer> = {};
+    for (const [, [k, v]] of Object.entries(latest)) display[k] = v;
+    return display;
+  }
+
+  // ── Main data-fetching effect ──
   useEffect(() => {
-    console.warn("[AppliedDatasets] effect triggered with:", appliedDatasets, "timelineDate:", timelineDate);
     const filtered = (appliedDatasets ?? []).map((d) => `${d.id}-${d.type}`);
     const next = new Set(filtered);
     const prevKeys = Object.keys(renderedLayers);
@@ -74,73 +158,69 @@ export function useS3DatasetLayers(
     const dateChanged = prevDateRef.current !== undefined && prevDateRef.current !== timelineDate;
     prevDateRef.current = timelineDate;
 
-    // Date changed: check cache first
-    if (dateChanged && prevKeys.length > 0) {
+    // Always remove datasets no longer applied
+    const toRemove = prevKeys.filter((key) => !next.has(getPrefix(key)));
+
+    // Date or slot changed: check cache first — instant switch, no flash
+    if (dateChanged || (timeSlot && prevKeys.length > 0)) {
       const cached = layersCacheRef.current[dateStr];
       if (cached) {
-        if (activeTimeLabel) {
-          const filtered: Record<string, RenderedLayer> = {};
-          for (const [k, v] of Object.entries(cached)) {
-            if (k.endsWith(`__${activeTimeLabel}`)) filtered[k] = v;
-          }
-          if (Object.keys(filtered).length > 0) {
-            setRenderedLayers(filtered);
-            activeDateRef.current = dateStr;
-            return;
+        activeDateRef.current = dateStr;
+        const newFrame = pickFrame(cached, timeSlot);
+
+        // Filter: only keep layers matching currently applied datasets
+        const filtered: Record<string, RenderedLayer> = {};
+        for (const [k, v] of Object.entries(newFrame)) {
+          const prefix = k.split("__")[0];
+          if (next.has(prefix)) {
+            filtered[k] = v;
           }
         }
-        setRenderedLayers(cached);
-        activeDateRef.current = dateStr;
-        return;
+
+        // Check if all applied datasets have cached data
+        const cachedPrefixes = new Set(Object.keys(filtered).map(k => k.split("__")[0]));
+        const allInCache = [...next].every(key => cachedPrefixes.has(key));
+
+        if (allInCache) {
+          setRenderedLayers(filtered);
+          return;
+        }
+        // Not all in cache — set what we have from cache, fall through to fetchNew
+        if (Object.keys(filtered).length > 0) {
+          setRenderedLayers(filtered);
+        }
       }
-      setRenderedLayers({});
-    }
-
-    const toRemove = prevKeys.filter((key) => !next.has(key));
-    const toKeep = prevKeys.filter((key) => next.has(key));
-    const toAdd = dateChanged
-      ? [...next]
-      : [...next].filter((key) => !prev.has(key));
-
-    if (!dateChanged && toRemove.length > 0) {
+    } else if (toRemove.length > 0) {
       setRenderedLayers((prev) => {
         const nextMap = { ...prev };
         for (const key of toRemove) delete nextMap[key];
         return nextMap;
       });
-      if (toAdd.length === 0) {
-        showNotification(`Removed ${toRemove.length} layer(s)`, "info");
-      }
+      if (![...next].some(key => !prev.has(key))) return;
     }
+
+    const toAdd = dateChanged
+      ? [...next]
+      : [...next].filter((key) => !prev.has(key));
 
     let isActive = true;
-
     if (toAdd.length === 0) return;
-    if (dateChanged) {
-      showNotification(`Loading data for ${dateStr}...`, "info");
-    } else if (toKeep.length > 0) {
-      showNotification(`Keeping ${toKeep.length}, fetching ${toAdd.length} new...`, "info");
-    }
 
     async function fetchNew() {
       const additions: Record<string, RenderedLayer> = {};
 
       for (const dsKey of toAdd) {
         if (!isActive) break;
-        
-        // Find the actual dataset entry from the applied list
         const dsEntry = (appliedDatasets ?? []).find((d) => `${d.id}-${d.type}` === dsKey);
         if (!dsEntry) continue;
 
         const dsId = dsEntry.id;
         const isVector = dsEntry.type === "vector";
 
-        // Skip datasets that don't have GIS/S3 data (e.g. weather station items)
         const dsInfoCheck = getDatasetById(dsId);
         const parentCheck = getParentDataset(dsId);
         if (dsInfoCheck?.gisData === false || parentCheck?.gisData === false) continue;
-        
-        showNotification(`Looking up "${dsId}" (${dsEntry.type})...`, "info");
+        if (dsId === "wq-surface" || dsId === "wq-ground") continue;
 
         const parent = getParentDataset(dsId);
         const dsInfo = getDatasetById(dsId);
@@ -159,31 +239,22 @@ export function useS3DatasetLayers(
 
         const dsSlug = getDatasetSlug(datasetId) || datasetId;
         const catName = dsInfo?.name || dsId;
+        const basePrefix = `gis-data/${dsSlug}/${categorySlug}/`;
         const prefixes = timelineDate ? [
-          `gis-data/${dsSlug}/${categorySlug}/${y}/${md}/${dd}/`,
-          `gis-data/${dsSlug}/${categorySlug}/${y}/${md}/`,
-          `gis-data/${dsSlug}/${categorySlug}/${y}/`,
-          `gis-data/${dsSlug}/${categorySlug}/`,
-        ] : [
-          `gis-data/${dsSlug}/${categorySlug}/`,
-        ];
+          `${basePrefix}${y}/${md}/${dd}/`,
+          `${basePrefix}${y}/${md}/`,
+          `${basePrefix}${y}/`,
+          basePrefix,
+        ] : [basePrefix];
 
         let foundKey: string | null = null;
         let vdcKey: string | null = null;
+        let rasterFound = false;
         for (const prefix of prefixes) {
           try {
             const allFiles = await listS3Files(prefix);
             if (!isActive) break;
-            console.warn(`[S3] prefix="${prefix}" files=${allFiles.length}`, allFiles.slice(0, 10).map(f => f.key));
-
-            // When no timelineDate, sort by lastModified descending to get latest file first
-            const files = timelineDate
-              ? allFiles
-              : [...allFiles].sort((a, b) => {
-                  const ta = a.lastModified ? new Date(a.lastModified).getTime() : 0;
-                  const tb = b.lastModified ? new Date(b.lastModified).getTime() : 0;
-                  return tb - ta;
-                });
+            const files = [...allFiles].sort((a, b) => (b.key ?? "").localeCompare(a.key ?? ""));
 
             if (isVector) {
               const vFile = files.find((f) => {
@@ -192,38 +263,65 @@ export function useS3DatasetLayers(
               }) || files.find((f) => {
                 const k = f.key?.toLowerCase() ?? "";
                 return VECTOR_EXTS.some((ext) => k.endsWith(ext) && !k.endsWith(".zip") && !k.endsWith(".vdc") && !k.endsWith(".vct"));
-              }) || files.find((f) => {
-                const k = f.key?.toLowerCase() ?? "";
-                return k.endsWith(".zip");
-              });
+              }) || files.find((f) => (f.key?.toLowerCase() ?? "").endsWith(".zip"));
               if (vFile) {
                 foundKey = vFile.key;
-                // Also look for companion .vdc file (case-insensitive)
                 const baseLower = foundKey.replace(/\.\w+$/, "").toLowerCase();
                 const comp = files.find((f) => f.key?.toLowerCase() === baseLower + ".vdc");
                 if (comp) vdcKey = comp.key;
-                console.warn("[S3] FOUND vector:", foundKey, "companion .vdc:", vdcKey);
                 break;
               }
             } else {
-              // Find ALL .tif files (multiple time frames per day)
               const allTifs = files.filter((f) => f.key?.match(/\.tiff?$/i));
               if (allTifs.length > 0) {
-                for (const tif of allTifs) {
-                  // Extract time label: .../YYYY/MM/DD/HH-MM/raster/file.tif
-                  const timeMatch = tif.key.match(/\/(\d{2}-\d{2})\//);
-                  const timeLabel = timeMatch ? timeMatch[1] : "00-00";
-                  const frameKey = `${dsKey}__${timeLabel}`;
-                  const proxyUrl = `/api/tif?key=${encodeURIComponent(tif.key)}`;
-                  additions[frameKey] = {
-                    name: parent ? `${parent.name} - ${catName} (${timeLabel})` : `${catName} (${timeLabel})`,
-                    proxyUrl,
-                    type: "raster",
-                    bbox: [594885, 1052655, 688485, 1117455],
-                    nodata: -9999,
-                  };
+                const targetDateStr = `${y}/${md}/${dd}`;
+                const dateOf = (key: string) => {
+                  const m = key.match(/\/(\d{4})\/(\d{2})\/(\d{2})\//);
+                  return m ? `${m[1]}/${m[2]}/${m[3]}` : "";
+                };
+                const uniqueDates = [...new Set(allTifs.map(f => dateOf(f.key ?? "")))].filter(Boolean).sort();
+                if (timelineDate && uniqueDates.length > 0) {
+                  const lte = uniqueDates.filter(d => d <= targetDateStr);
+                  if (lte.length === 0) {
+                    // No data for this date or any earlier date — don't fallback to later dates
+                    if (isActive) showNotification(`No raster data for "${catName}" before ${dateStr}`, "info");
+                    break;
+                  }
+                  const bestDate = lte[lte.length - 1];
+                  const tifsForDate = allTifs.filter(f => dateOf(f.key ?? "") === bestDate);
+                  for (const tif of tifsForDate) {
+                    const timeMatch = tif.key!.match(/\/(\d{2}-\d{2})\//);
+                    const timeLabel = timeMatch ? timeMatch[1] : "00-00";
+                    const frameKey = `${dsKey}__${bestDate.replace(/\//g, "-")}__${timeLabel}`;
+                    additions[frameKey] = {
+                      name: parent ? `${parent.name} - ${catName} (${timeLabel})` : `${catName} (${timeLabel})`,
+                      proxyUrl: `/api/tif?key=${encodeURIComponent(tif.key!)}`,
+                      type: "raster",
+                      bbox: [594885, 1052655, 688485, 1117455],
+                      nodata: -9999,
+                    };
+                  }
+                  rasterFound = true;
+                  break;
+                } else {
+                  // No specific timeline date — use latest available data
+                  const bestDate = uniqueDates[uniqueDates.length - 1];
+                  const tifsForDate = allTifs.filter(f => dateOf(f.key ?? "") === bestDate);
+                  for (const tif of tifsForDate) {
+                    const timeMatch = tif.key!.match(/\/(\d{2}-\d{2})\//);
+                    const timeLabel = timeMatch ? timeMatch[1] : "00-00";
+                    const frameKey = `${dsKey}__${bestDate.replace(/\//g, "-")}__${timeLabel}`;
+                    additions[frameKey] = {
+                      name: parent ? `${parent.name} - ${catName} (${timeLabel})` : `${catName} (${timeLabel})`,
+                      proxyUrl: `/api/tif?key=${encodeURIComponent(tif.key!)}`,
+                      type: "raster",
+                      bbox: [594885, 1052655, 688485, 1117455],
+                      nodata: -9999,
+                    };
+                  }
+                  rasterFound = true;
+                  break;
                 }
-                break;
               }
             }
           } catch (e) {
@@ -231,22 +329,23 @@ export function useS3DatasetLayers(
           }
         }
         if (!isActive) break;
-
-        // For vector, if no foundKey, show error
         if (isVector && !foundKey) {
           showNotification(`No vector data found for "${catName}" on ${dateStr}`, "error");
           continue;
         }
-
+        if (!isVector && !rasterFound) {
+          if (timelineDate) {
+            showNotification(`No raster data found for "${catName}" on ${dateStr}`, "info");
+          }
+          continue;
+        }
         if (isVector) {
           try {
-            const proxyUrl = `/api/tif?key=${encodeURIComponent(foundKey!)}`;
-            const ext = "." + (foundKey!.split(".").pop() || "").toLowerCase();
             additions[dsKey] = {
               name: parent ? `${parent.name} - ${catName}` : catName,
-              proxyUrl,
+              proxyUrl: `/api/tif?key=${encodeURIComponent(foundKey!)}`,
               type: "vector",
-              ext,
+              ext: "." + (foundKey!.split(".").pop() || "").toLowerCase(),
               vdcUrl: vdcKey ? `/api/tif?key=${encodeURIComponent(vdcKey)}` : undefined,
             };
           } catch {
@@ -257,84 +356,258 @@ export function useS3DatasetLayers(
 
       if (!isActive) return;
 
-      // Cache fetched layers
-      layersCacheRef.current[dateStr] = additions;
+      // Only cache if we actually found data — avoid caching empty results
+      if (Object.keys(additions).length > 0) {
+        layersCacheRef.current[dateStr] = { ...(layersCacheRef.current[dateStr] ?? {}), ...additions };
+      }
       activeDateRef.current = dateStr;
 
-      if (!activeTimeLabel) {
-        // Normal view: only show the latest time slot per base key
-        const latest: Record<string, [string, RenderedLayer]> = {};
-        for (const [k, v] of Object.entries(additions)) {
-          const baseKey = k.replace(/__\d{2}-\d{2}$/, "");
-          if (!latest[baseKey] || k > latest[baseKey][0]) {
-            latest[baseKey] = [k, v];
+      const display = pickFrame(additions, timeSlot);
+      setRenderedLayers((prev) => {
+        const nextMap: Record<string, RenderedLayer> = {};
+        const newPrefixes = new Set(Object.keys(display).map(k => k.split("__")[0]));
+        for (const [k, v] of Object.entries(prev)) {
+          const prefix = k.split("__")[0];
+          if (!newPrefixes.has(prefix) && next.has(prefix)) {
+            nextMap[k] = v;
           }
         }
-        const display: Record<string, RenderedLayer> = {};
-        for (const [, [k, v]] of Object.entries(latest)) display[k] = v;
-        setRenderedLayers((prev) => ({ ...prev, ...display }));
-      } else {
-        // Playback: only show entry matching activeTimeLabel
-        const filtered: Record<string, RenderedLayer> = {};
-        for (const [k, v] of Object.entries(additions)) {
-          if (k.endsWith(`__${activeTimeLabel}`)) filtered[k] = v;
+        for (const [k, v] of Object.entries(display)) {
+          nextMap[k] = v;
         }
-        setRenderedLayers((prev) => ({ ...prev, ...filtered }));
-      }
-
-      const count = Object.keys(additions).length;
-      if (count > 0) {
-        const names = Object.values(additions).map((v) => v.name).join(", ");
-        showNotification(`Displaying ${count} layer(s): ${names}`, "success");
-      }
+        return nextMap;
+      });
     }
 
     void fetchNew();
-    return () => {
-      isActive = false;
-    };
-  }, [appliedDatasets, timelineDate]);
+    return () => { isActive = false; };
+  }, [appliedDatasets, timelineDate, timeSlot]);
 
-  // ── Sync renderedLayers state ↔ OpenLayers map layers ──
+  // ── Preload adjacent timeline frames in background ──
+  useEffect(() => {
+    if (!allTimelineDates || allTimelineDates.length === 0 || !appliedDatasets || appliedDatasets.length === 0) return;
+
+    const datesToPreload = [
+      ...(prefetchDate ? [prefetchDate] : []),
+      ...allTimelineDates.filter((d, i) => {
+        if (!timelineDate) return false;
+        const idx = allTimelineDates.indexOf(timelineDate);
+        if (idx === -1) return false;
+        return Math.abs(i - idx) <= 2 && i !== idx;
+      }),
+    ].filter(Boolean);
+
+    const uniqueDates = [...new Set(datesToPreload)];
+    let cancelled = false;
+
+    async function preloadDate(dateStr: string) {
+      if (layersCacheRef.current[dateStr]) return;
+
+      const [y, m, d] = dateStr.split('-').map(Number);
+      const md = String(m).padStart(2, "0");
+      const dd = String(d).padStart(2, "0");
+
+      for (const ds of appliedDatasets!) {
+        if (cancelled) return;
+
+        const dsKey = `${ds.id}-${ds.type}`;
+        if (layersCacheRef.current[dateStr]?.[dsKey]) continue;
+
+        const dsInfo = getDatasetById(ds.id);
+        const parent = getParentDataset(ds.id);
+        if (dsInfo?.gisData === false || parent?.gisData === false) continue;
+
+        let datasetId: string;
+        let categorySlug: string;
+        if (parent) {
+          datasetId = parent.id;
+          categorySlug = getDatasetSlug(ds.id) || ds.id;
+        } else if (dsInfo?.children && dsInfo.children.length > 0) {
+          datasetId = ds.id;
+          categorySlug = getDatasetSlug(dsInfo.children[0].id) || dsInfo.children[0].id;
+        } else {
+          datasetId = ds.id;
+          categorySlug = "default";
+        }
+
+        const dsSlug = getDatasetSlug(datasetId) || datasetId;
+        const basePrefix = `gis-data/${dsSlug}/${categorySlug}/`;
+        const prefixes = [
+          `${basePrefix}${y}/${md}/${dd}/`,
+          `${basePrefix}${y}/${md}/`,
+        ];
+
+        for (const prefix of prefixes) {
+          try {
+            const allFiles = await listS3Files(prefix);
+            if (cancelled) return;
+            const files = [...allFiles].sort((a, b) => (b.key ?? "").localeCompare(a.key ?? ""));
+
+            if (ds.type === "vector") {
+              const vFile = files.find(f => (f.key?.toLowerCase() ?? "").endsWith(".vct"));
+              if (vFile) {
+                const cache = layersCacheRef.current[dateStr] ?? {};
+                const ext = "." + (vFile.key!.split(".").pop() || "").toLowerCase();
+                const baseLower = vFile.key!.replace(/\.\w+$/, "").toLowerCase();
+                const vdcFile = files.find(f => f.key?.toLowerCase() === baseLower + ".vdc");
+                cache[dsKey] = {
+                  name: parent?.name || dsInfo?.name || ds.id,
+                  proxyUrl: `/api/tif?key=${encodeURIComponent(vFile.key!)}`,
+                  type: "vector",
+                  ext,
+                  vdcUrl: vdcFile ? `/api/tif?key=${encodeURIComponent(vdcFile.key!)}` : undefined,
+                };
+                layersCacheRef.current[dateStr] = cache;
+                break;
+              }
+            } else {
+              const allTifs = files.filter(f => f.key?.match(/\.tiff?$/i));
+              // Only cache tifs matching this exact date
+              const targetDate = `${y}/${md}/${dd}`;
+              const dateOf = (key: string) => {
+                const m = key.match(/\/(\d{4})\/(\d{2})\/(\d{2})\//);
+                return m ? `${m[1]}/${m[2]}/${m[3]}` : "";
+              };
+              const tifsForDate = allTifs.filter(f => dateOf(f.key ?? "") === targetDate);
+              if (tifsForDate.length > 0) {
+                const catName = parent?.name || dsInfo?.name || ds.id;
+                const cache = layersCacheRef.current[dateStr] ?? {};
+                for (const tif of tifsForDate) {
+                  const timeMatch = tif.key!.match(/\/(\d{2}-\d{2})\//);
+                  const timeLabel = timeMatch ? timeMatch[1] : "00-00";
+                  const key = `${dsKey}__${dateStr}__${timeLabel}`;
+                  cache[key] = {
+                    name: parent ? `${parent.name} - ${catName} (${timeLabel})` : `${catName} (${timeLabel})`,
+                    proxyUrl: `/api/tif?key=${encodeURIComponent(tif.key!)}`,
+                    type: "raster",
+                    bbox: [594885, 1052655, 688485, 1117455],
+                    nodata: -9999,
+                  };
+                }
+                layersCacheRef.current[dateStr] = cache;
+                break;
+              }
+            }
+          } catch {
+            // Silently ignore preload errors
+          }
+        }
+      }
+    }
+
+    let idx = 0;
+    async function preloadNext() {
+      while (idx < uniqueDates.length && !cancelled) {
+        await preloadDate(uniqueDates[idx]);
+        idx++;
+      }
+    }
+    void preloadNext();
+
+    return () => { cancelled = true; };
+  }, [timelineDate, prefetchDate, allTimelineDates, appliedDatasets]);
+
+  // ── Sync renderedLayers state ↔ OpenLayers map layers with deferred cross-fade ──
+  //
+  // Key insight: When a layer has a replacement (same dataset prefix, different time),
+  // we DON'T remove it until the new layer has loaded. Instead:
+  //   1. Keep old layer at current opacity (no fade-out yet)
+  //   2. Add new layer at opacity 0
+  //   3. When new layer's source is ready → cross-fade simultaneously
+  //   4. After cross-fade → remove old layer from map
+  //
   useEffect(() => {
     const map = mapRef.current;
     if (!map) return;
     const safeMap = map;
     const currentLayers = layerRefs.current;
+    const pendingReplace = pendingReplaceRef.current;
 
     const renderedIds = new Set(Object.keys(renderedLayers));
-    const existingIds = new Set(Object.keys(currentLayers));
 
-    // Remove stale layers (but keep in prebuiltLayersRef for reuse)
+    // ── Phase 1: Remove stale layers ──
+    // For layers with replacement (same prefix): keep visible, register as pending replacement
+    // For layers without replacement: fade out and remove
+    const existingIds = [...Object.keys(currentLayers)];
+
+    // Build prefix → newId map from renderedLayers
+    const newByPrefix: Record<string, string> = {};
+    for (const newId of renderedIds) {
+      newByPrefix[getPrefix(newId)] = newId;
+    }
+
     for (const id of existingIds) {
-      if (!renderedIds.has(id)) {
+      if (renderedIds.has(id)) continue; // Still active, skip
+
+      const prefix = getPrefix(id);
+      const replacementNewId = newByPrefix[prefix];
+
+      if (replacementNewId) {
+        // This old layer has a replacement coming — keep it visible!
+        // Register it as pending replacement so we can cross-fade later
+        pendingReplace[prefix] = { oldId: id, done: false };
+      } else {
+        // No replacement — fade out and remove
         const layer = currentLayers[id];
         if (layer) {
-          safeMap.removeLayer(layer);
-          layer.getSource()?.dispose?.();
+          const currentOpacity = layer.getOpacity();
+          animateLayer(layer, currentOpacity, 0, FADE_MS).then(() => {
+            removeLayerFromMap(safeMap, layer, currentLayers, id);
+            for (const dateLayers of Object.values(prebuiltLayersRef.current)) {
+              delete dateLayers[id];
+            }
+          });
+        } else {
+          delete currentLayers[id];
         }
-        delete currentLayers[id];
       }
     }
 
-    // Restore cached layers for the active date
+    // ── Phase 2: Restore cached layers ──
     const activeDate = activeDateRef.current;
     const cachedLayers = prebuiltLayersRef.current[activeDate];
     if (cachedLayers) {
       for (const [id, layer] of Object.entries(cachedLayers)) {
         if (renderedIds.has(id) && !currentLayers[id]) {
-          safeMap.addLayer(layer);
-          currentLayers[id] = layer;
-          layer.setZIndex(100 + Object.keys(currentLayers).length);
+          // Check if a pending-replace old layer exists for this prefix
+          const prefix = getPrefix(id);
+          const pending = pendingReplace[prefix];
+          if (pending && !pending.done && currentLayers[pending.oldId]) {
+            // New cached layer ready — cross-fade immediately!
+            const oldLayer = currentLayers[pending.oldId] as WebGLTileLayer | VectorLayer;
+            const oldOpacity = oldLayer.getOpacity();
+
+            safeMap.addLayer(layer);
+            currentLayers[id] = layer;
+            layer.setZIndex(100 + Object.keys(currentLayers).length);
+
+            // Set new layer to target opacity, fade out old layer
+            layer.setOpacity(0.7);
+            animateLayer(oldLayer, oldOpacity, 0, FADE_MS).then(() => {
+              removeLayerFromMap(safeMap, oldLayer, currentLayers, pending.oldId);
+              for (const dateLayers of Object.values(prebuiltLayersRef.current)) {
+                delete dateLayers[pending.oldId];
+              }
+              pending.done = true;
+              delete pendingReplace[prefix];
+            });
+          } else {
+            safeMap.addLayer(layer);
+            currentLayers[id] = layer;
+            layer.setZIndex(100 + Object.keys(currentLayers).length);
+          }
         }
       }
     }
 
     let isActive = true;
 
-    // Add new layers
+    // ── Phase 3: Add new layers ──
     for (const [id, info] of Object.entries(renderedLayers)) {
       if (currentLayers[id]) continue;
+
+      const prefix = getPrefix(id);
+      const pending = pendingReplace[prefix];
 
       if (info.type === "raster") {
         const absoluteUrl = info.proxyUrl.startsWith("http")
@@ -350,7 +623,7 @@ export function useS3DatasetLayers(
         });
 
         const rasterLayer = new WebGLTileLayer({
-          opacity: 0.7,
+          opacity: 0,
           source,
           style: {
             color: [
@@ -374,14 +647,36 @@ export function useS3DatasetLayers(
         safeMap.addLayer(rasterLayer);
         currentLayers[id] = rasterLayer;
 
-        // Cache layer for reuse
         const dateLayers = prebuiltLayersRef.current[activeDate] || {};
         dateLayers[id] = rasterLayer;
         prebuiltLayersRef.current[activeDate] = dateLayers;
 
-        if (Object.keys(currentLayers).length === 1) {
-          source.once("change", () => {
-            if (source.getState() === "ready") {
+        // ── Cross-fade when source loads ──
+        source.once("change", () => {
+          if (source.getState() === "ready" && isActive) {
+            const targetOpacity = 0.7;
+
+            if (pending && !pending.done && currentLayers[pending.oldId]) {
+              // Cross-fade: fade in new + fade out old simultaneously
+              const oldLayer = currentLayers[pending.oldId] as WebGLTileLayer | VectorLayer;
+              const oldOpacity = oldLayer.getOpacity();
+
+              animateLayer(rasterLayer, 0, targetOpacity, FADE_MS);
+              animateLayer(oldLayer, oldOpacity, 0, FADE_MS).then(() => {
+                removeLayerFromMap(safeMap, oldLayer, currentLayers, pending.oldId);
+                for (const dateLayers of Object.values(prebuiltLayersRef.current)) {
+                  delete dateLayers[pending.oldId];
+                }
+                pending.done = true;
+                delete pendingReplace[prefix];
+              });
+            } else {
+              // No old layer to replace — just fade in
+              animateLayer(rasterLayer, 0, targetOpacity, FADE_MS);
+            }
+
+            // Auto-zoom on first layer
+            if (Object.keys(currentLayers).filter(k => !pendingReplace[getPrefix(k)]).length <= 1) {
               source
                 .getView()
                 .then((viewOptions) => {
@@ -397,9 +692,10 @@ export function useS3DatasetLayers(
                 })
                 .catch(() => {});
             }
-          });
-          source.refresh();
-        }
+          }
+        });
+        source.refresh();
+
       } else if (info.type === "vector") {
         const absoluteUrl = info.proxyUrl.startsWith("http")
           ? info.proxyUrl
@@ -461,14 +757,18 @@ export function useS3DatasetLayers(
             } else if (isWKT) {
               features = [wktFormat.readFeature(fullText, { dataProjection: "EPSG:4326", featureProjection: "EPSG:3857" })].filter(Boolean) as Feature[];
             } else if (isIDRISI) {
-              features = []; // IDRISI vector parsing simplified for brevity
+              features = [];
             } else { features = []; }
 
             if (!isActive) return;
             if (!features?.length) { showNotification(`Cannot parse vector "${info.name}"`, "error"); return; }
 
             const vectorSource = new VectorSource({ features });
-            const vectorLayer = new VectorLayer({ source: vectorSource, style: defaultVectorStyle });
+            const vectorLayer = new VectorLayer({
+              source: vectorSource,
+              style: defaultVectorStyle,
+              opacity: 0,
+            });
             vectorLayer.setZIndex(150 + Object.keys(currentLayers).length);
 
             if (isActive && renderedIds.has(vectorLayerId) && !currentLayers[vectorLayerId]) {
@@ -478,6 +778,26 @@ export function useS3DatasetLayers(
               const dateLayers = prebuiltLayersRef.current[activeDate] || {};
               dateLayers[vectorLayerId] = vectorLayer;
               prebuiltLayersRef.current[activeDate] = dateLayers;
+
+              const targetOpacity = 0.7;
+
+              if (pending && !pending.done && currentLayers[pending.oldId]) {
+                // Cross-fade: fade in vector + fade out old simultaneously
+                const oldLayer = currentLayers[pending.oldId] as WebGLTileLayer | VectorLayer;
+                const oldOpacity = oldLayer.getOpacity();
+
+                animateLayer(vectorLayer, 0, targetOpacity, FADE_MS);
+                animateLayer(oldLayer, oldOpacity, 0, FADE_MS).then(() => {
+                  removeLayerFromMap(safeMap, oldLayer, currentLayers, pending.oldId);
+                  for (const dateLayers of Object.values(prebuiltLayersRef.current)) {
+                    delete dateLayers[pending.oldId];
+                  }
+                  pending.done = true;
+                  delete pendingReplace[prefix];
+                });
+              } else {
+                animateLayer(vectorLayer, 0, targetOpacity, FADE_MS);
+              }
 
               const extent = vectorSource.getExtent();
               if (extent && extent.length === 4 && extent[0] !== Infinity) {

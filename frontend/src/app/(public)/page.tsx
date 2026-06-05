@@ -7,6 +7,7 @@ import { AppFooter } from "../../components/layout/app-footer";
 import { SearchTabs, GeoSearchSidebar } from "../../features/map/geo-search-sidebar";
 import { ResizablePanel } from "../../components/layout/resizable-panel";
 import { MapStage } from "../../features/map/map-stage";
+import { listManualStations, type ManualStation } from "../../lib/admin-api";
 
 type TabType = "criteria" | "datasets" | "additional" | "results";
 
@@ -31,6 +32,26 @@ export default function PublicHomePage() {
   const [endDateTime, setEndDateTime] = useState(getDefaultRange().end);
   const [hasExplicitRange, setHasExplicitRange] = useState(false);
   const [appliedDatasets, setAppliedDatasets] = useState<Array<{ id: string; type: string }>>([]);
+  const [wqStations, setWqStations] = useState<ManualStation[]>([]);
+
+  useEffect(() => {
+    const hasWq = appliedDatasets.some(ds => ds.id === "wq-surface" || ds.id === "wq-ground");
+    if (hasWq) {
+      listManualStations().then(allStations => {
+        const showSurface = appliedDatasets.some(ds => ds.id === "wq-surface");
+        const showGround = appliedDatasets.some(ds => ds.id === "wq-ground");
+        const filtered = allStations.filter(st => {
+          if (showSurface && showGround) return true;
+          if (showSurface) return st.stationType === 'surface_water';
+          if (showGround) return st.stationType === 'groundwater';
+          return false;
+        });
+        setWqStations(filtered);
+      }).catch(() => setWqStations([]));
+    } else {
+      setWqStations([]);
+    }
+  }, [appliedDatasets]);
 
   const handleStartDateTimeChange = (val: string) => {
     setStartDateTime(val);
@@ -80,7 +101,7 @@ export default function PublicHomePage() {
             />
           </ResizablePanel>
           <div className="geo-panel">
-            <MapStage startDateTime={startDateTime} endDateTime={endDateTime} appliedDatasets={appliedDatasets} onRemoveDataset={handleRemoveDataset} onAddDataset={handleAddDataset} hasExplicitRange={hasExplicitRange} onStartDateTimeChange={handleStartDateTimeChange} onEndDateTimeChange={handleEndDateTimeChange} />
+            <MapStage startDateTime={startDateTime} endDateTime={endDateTime} appliedDatasets={appliedDatasets} onRemoveDataset={handleRemoveDataset} onAddDataset={handleAddDataset} hasExplicitRange={hasExplicitRange} onStartDateTimeChange={handleStartDateTimeChange} onEndDateTimeChange={handleEndDateTimeChange} waterQualityStations={wqStations} />
           </div>
         </div>
       </main>

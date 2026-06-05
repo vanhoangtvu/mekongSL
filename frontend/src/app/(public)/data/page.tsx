@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation';
 import { authService } from '../../../lib/auth';
 import { DATA_SOURCE_OPTIONS, DEFAULT_DATA_SOURCE, type DataSourceKey } from '../../../lib/constants/data-sources';
 import { collectRecordKeys, formatRecordValue, truncatePath, getParentPath, type DataRecord } from '../../../lib/utils/record-utils';
-import { loadDataDevices, loadDataRows, loadDataTimeframes, uploadS3File, listS3Files, deleteS3File, downloadS3File, renameS3File, createS3Folder, listManualStations, createManualStation, updateManualStation, deleteManualStation, importManualStations, type ManualStation } from '../../../lib/admin-api';
+import { loadDataDevices, loadDataRows, loadDataTimeframes, uploadS3File, listS3Files, deleteS3File, downloadS3File, renameS3File, createS3Folder, listManualStations, createManualStation, updateManualStation, deleteManualStation, importManualStations, previewWaterQualityExcel, importWaterQuality, listWaterQualitySamples, getWaterQualitySample, getBackendAdminUrl, deleteWaterQualitySample, type ManualStation, type WaterQualityPreviewResult, type WaterQualitySampleDto } from '../../../lib/admin-api';
 import DataExportModal from '../../../components/DataExportModal';
 import S3Explorer from '../../../components/S3Explorer';
 import Map from 'ol/Map';
@@ -1563,6 +1563,7 @@ export default function DataPage() {
   const [selectedRecentKeys, setSelectedRecentKeys] = useState<string[]>([]);
   const [visibleRecentCount, setVisibleRecentCount] = useState<number>(15);
   const [isDeletingRecent, setIsDeletingRecent] = useState<boolean>(false);
+  const [stationTab, setStationTab] = useState<'stations' | 'import'>('stations');
 
   // Manual Station CRUD States
   const [manualStations, setManualStations] = useState<ManualStation[]>([]);
@@ -1592,6 +1593,42 @@ export default function DataPage() {
   const [importResult, setImportResult] = useState<{ successCount: number; duplicateCount?: number; failCount: number; errors: string[]; message: string } | null>(null);
   const [isImportDragActive, setIsImportDragActive] = useState(false);
 
+  // Water Quality Import States
+  const [wqFile, setWqFile] = useState<File | null>(null);
+  const [wqSampleDate, setWqSampleDate] = useState('');
+  const [wqNotes, setWqNotes] = useState('');
+  const [wqPreviewing, setWqPreviewing] = useState(false);
+  const [wqImporting, setWqImporting] = useState(false);
+  const [wqPreview, setWqPreview] = useState<WaterQualityPreviewResult | null>(null);
+  const [wqPreviewError, setWqPreviewError] = useState('');
+  const [wqDuplicateAction, setWqDuplicateAction] = useState<'overwrite' | 'add' | null>(null);
+  const [wqImportSuccess, setWqImportSuccess] = useState('');
+  const [selectedStationForSamples, setSelectedStationForSamples] = useState<ManualStation | null>(null);
+  const [stationSamples, setStationSamples] = useState<WaterQualitySampleDto[]>([]);
+  const [samplesLoading, setSamplesLoading] = useState(false);
+  const [selectedSampleDetail, setSelectedSampleDetail] = useState<WaterQualitySampleDto | null>(null);
+  const [isWqDragActive, setIsWqDragActive] = useState(false);
+
+  // Standalone Water Quality Import States
+  const [wqImportStationType, setWqImportStationType] = useState<'all' | 'groundwater' | 'surface_water'>('all');
+  const [wqImportStationId, setWqImportStationId] = useState<number | null>(null);
+
+  // WQ Import History States
+  const [wqHistorySamples, setWqHistorySamples] = useState<WaterQualitySampleDto[]>([]);
+  const [wqHistorySampleDate, setWqHistorySampleDate] = useState<string>('');
+  const [wqHistorySample, setWqHistorySample] = useState<WaterQualitySampleDto | null>(null);
+  const [wqHistoryLoading, setWqHistoryLoading] = useState(false);
+  const [wqHistoryRefresh, setWqHistoryRefresh] = useState(0);
+
+  // Reset WQ import states when switching to station tab
+  useEffect(() => {
+    if (uploadGroup !== 'station') {
+      setWqFile(null); setWqPreview(null); setWqPreviewError('');
+      setWqImportSuccess(''); setWqDuplicateAction(null);
+      setWqImportStationType('all'); setWqImportStationId(null);
+    }
+  }, [uploadGroup]);
+
   const fetchManualStations = useCallback(async () => {
     setManualStationsLoading(true);
     try {
@@ -1609,6 +1646,49 @@ export default function DataPage() {
       void fetchManualStations();
     }
   }, [activeTab, uploadGroup, fetchManualStations]);
+
+  // Fetch WQ history when station changes in import tab
+  useEffect(() => {
+    if (!wqImportStationId) {
+      setWqHistorySamples([]);
+      setWqHistorySampleDate('');
+      setWqHistorySample(null);
+      return;
+    }
+    setWqHistoryLoading(true);
+    console.log("[WQ History] Fetching samples for station ID:", wqImportStationId, "URL:", getBackendAdminUrl(`/gis/water-quality/station/${wqImportStationId}`));
+    listWaterQualitySamples(wqImportStationId).then(samples => {
+      console.log("[WQ History] Samples received:", samples, "count:", samples?.length);
+      const sorted = (samples || []).sort((a, b) => b.sampleDate.localeCompare(a.sampleDate));
+      setWqHistorySamples(sorted);
+      if (sorted.length > 0) {
+        setWqHistorySampleDate(sorted[0].sampleDate);
+        getWaterQualitySample(sorted[0].id).then(detail => setWqHistorySample(detail)).catch(() => setWqHistorySample(null));
+      } else {
+        setWqHistorySampleDate('');
+        setWqHistorySample(null);
+      }
+    }).catch(() => {
+      setWqHistorySamples([]);
+      setWqHistorySampleDate('');
+      setWqHistorySample(null);
+    }).finally(() => setWqHistoryLoading(false));
+  }, [wqImportStationId, wqHistoryRefresh]);
+
+  // Fetch WQ history detail when date changes
+
+  // Fetch WQ history detail when date changes
+  useEffect(() => {
+    if (!wqImportStationId || !wqHistorySampleDate) return;
+    const sample = wqHistorySamples.find(s => s.sampleDate === wqHistorySampleDate);
+    if (sample) {
+      if (sample.parameters) {
+        setWqHistorySample(sample);
+      } else {
+        getWaterQualitySample(sample.id).then(detail => setWqHistorySample(detail)).catch(() => setWqHistorySample(null));
+      }
+    }
+  }, [wqHistorySampleDate, wqImportStationId]);
 
   const handleOpenManualStationForm = (station: ManualStation | null = null) => {
     setManualImageFiles([]);
@@ -3121,10 +3201,10 @@ function ScheduleConfig({ source }: { source: string }) {
               </div>
             </div>
 
-            {uploadGroup === 'station' ? (
-              /* --- CRUD MANUAL STATIONS --- */
+{uploadGroup === 'station' ? (
+              /* --- CRUD MANUAL STATIONS + WATER QUALITY IMPORT --- */
               <div className="glass-panel fade-in" style={{ background: 'var(--surface)', padding: '24px', borderRadius: 'var(--radius-xl)', border: '1px solid var(--border)', display: 'flex', flexDirection: 'column', gap: '20px', boxShadow: 'var(--shadow-md)', width: '100%' }}>
-                {/* Header và Bộ lọc */}
+                {/* Header */}
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid var(--border)', paddingBottom: '16px', flexWrap: 'wrap', gap: '16px' }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
                     <div style={{ width: '40px', height: '40px', background: 'rgba(25, 135, 84, 0.12)', border: '1px solid rgba(25, 135, 84, 0.2)', color: '#198754', borderRadius: '10px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
@@ -3139,321 +3219,475 @@ function ScheduleConfig({ source }: { source: string }) {
                       </p>
                     </div>
                   </div>
-
-                  <div style={{ display: 'flex', gap: '12px', alignItems: 'center', flexWrap: 'wrap' }}>
-                    {/* Bộ lọc loại trạm */}
-                    <div style={{ display: 'flex', border: '1px solid var(--border)', borderRadius: '999px', overflow: 'hidden', background: 'var(--background-soft)' }}>
-                      {[
-                        { key: 'all', label: 'Tất cả' },
-                        { key: 'groundwater', label: 'Trạm nước ngầm' },
-                        { key: 'surface_water', label: 'Trạm nước mặt' }
-                      ].map(opt => {
-                        const active = manualStationTypeFilter === opt.key;
-                        return (
-                          <button
-                            key={opt.key}
-                            type="button"
-                            onClick={() => setManualStationTypeFilter(opt.key as any)}
-                            style={{
-                              padding: '6px 16px',
-                              border: 'none',
-                              background: active ? 'var(--accent)' : 'transparent',
-                              color: active ? '#fff' : 'var(--text-muted)',
-                              fontSize: '0.8rem',
-                              fontWeight: '600',
-                              cursor: 'pointer',
-                              transition: 'all 0.2s',
-                              borderRadius: active ? '999px' : '0'
-                            }}
-                          >
-                            {opt.label}
-                          </button>
-                        );
-                      })}
-                    </div>
-
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setImportFile(null);
-                        setImportResult(null);
-                        setImportStationType('groundwater');
-                        setShowImportModal(true);
-                      }}
-                      style={{
-                        padding: '8px 16px',
-                        background: 'rgba(25, 135, 84, 0.12)',
-                        border: '1px solid rgba(25, 135, 84, 0.2)',
-                        color: '#198754',
-                        borderRadius: 'var(--radius-md)',
-                        fontSize: '0.85rem',
-                        fontWeight: '600',
-                        cursor: 'pointer',
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: '6px',
-                        transition: 'all 0.2s'
-                      }}
-                    >
-                      <FileSpreadsheet size={16} /> Nhập từ Excel
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={() => handleOpenManualStationForm(null)}
-                      style={{
-                        padding: '8px 16px',
-                        background: 'var(--accent)',
-                        color: '#fff',
-                        border: 'none',
-                        borderRadius: 'var(--radius-md)',
-                        fontSize: '0.85rem',
-                        fontWeight: '600',
-                        cursor: 'pointer',
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: '6px',
-                        transition: 'all 0.2s',
-                        boxShadow: '0 2px 8px rgba(13, 110, 253, 0.2)'
-                      }}
-                    >
-                      <Plus size={16} /> Thêm trạm mới
-                    </button>
-                  </div>
                 </div>
 
-                {/* Bảng dữ liệu */}
-                {manualStationsLoading ? (
-                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '60px 0', gap: '12px', color: 'var(--text-muted)' }}>
-                    <div className="animate-spin" style={{ width: '30px', height: '30px', border: '3px solid var(--border)', borderTopColor: 'var(--accent)', borderRadius: '50%' }} />
-                    <span style={{ fontSize: '0.9rem' }}>Đang tải danh sách trạm...</span>
-                  </div>
-                ) : (
-                  <div style={{ overflowX: 'auto', borderRadius: 'var(--radius-lg)', border: '1px solid var(--border)' }}>
-                    <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '0.88rem' }}>
-                      <thead>
-                        <tr style={{ background: 'var(--background-soft)', borderBottom: '1px solid var(--border)' }}>
-                          <th style={{ padding: '12px 16px', fontWeight: 'bold', color: 'var(--text)' }}>ID</th>
-                          <th style={{ padding: '12px 16px', fontWeight: 'bold', color: 'var(--text)' }}>Mã trạm</th>
-                          <th style={{ padding: '12px 16px', fontWeight: 'bold', color: 'var(--text)' }}>Loại trạm</th>
-                          <th style={{ padding: '12px 16px', fontWeight: 'bold', color: 'var(--text)' }}>Địa điểm</th>
-                          <th style={{ padding: '12px 16px', fontWeight: 'bold', color: 'var(--text)' }}>Đặc tính thủy vực</th>
-                          <th style={{ padding: '12px 16px', fontWeight: 'bold', color: 'var(--text)' }}>X (Kinh độ)</th>
-                          <th style={{ padding: '12px 16px', fontWeight: 'bold', color: 'var(--text)' }}>Y (Vĩ độ)</th>
-                          <th style={{ padding: '12px 16px', fontWeight: 'bold', color: 'var(--text)' }}>Hiện trường (Pics)</th>
-                          <th style={{ padding: '12px 16px', fontWeight: 'bold', color: 'var(--text)' }}>Trạng thái</th>
-                          <th style={{ padding: '12px 16px', fontWeight: 'bold', color: 'var(--text)', textAlign: 'center' }}>Thao tác</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {(() => {
-                          const filtered = manualStations.filter(st => {
-                            if (manualStationTypeFilter === 'all') return true;
-                            return st.stationType === manualStationTypeFilter;
-                          });
-                          if (filtered.length === 0) {
-                            return (
-                              <tr>
-                                <td colSpan={9} style={{ padding: '40px 16px', textAlign: 'center', color: 'var(--text-muted)' }}>
-                                  Không tìm thấy trạm nào. Click nút "Thêm trạm mới" để bắt đầu!
-                                </td>
-                              </tr>
-                            );
-                          }
-                          return filtered.map(st => (
-                            <tr key={st.id} style={{ borderBottom: '1px solid var(--border)' }} className="hover-bg-surface-strong">
-                              <td style={{ padding: '12px 16px', fontWeight: '600', color: 'var(--text-muted)' }}>{st.id}</td>
-                              <td style={{ padding: '12px 16px', fontWeight: '600', color: 'var(--text)' }}>{st.stationId || '—'}</td>
-                              <td style={{ padding: '12px 16px' }}>
-                                <span style={{
-                                  display: 'inline-block',
-                                  whiteSpace: 'nowrap',
-                                  padding: '2px 8px',
-                                  borderRadius: '6px',
-                                  fontSize: '0.72rem',
-                                  fontWeight: '700',
-                                  background: st.stationType === 'groundwater' ? 'rgba(13, 110, 253, 0.12)' : 'rgba(25, 135, 84, 0.12)',
-                                  color: st.stationType === 'groundwater' ? '#0d6efd' : '#198754',
-                                  border: st.stationType === 'groundwater' ? '1px solid rgba(13, 110, 253, 0.2)' : '1px solid rgba(25, 135, 84, 0.2)'
-                                }}>
-                                  {st.stationType === 'groundwater' ? 'Nước ngầm' : 'Nước mặt'}
-                                </span>
-                              </td>
-                              <td style={{ padding: '12px 16px', fontWeight: '500', color: 'var(--text)' }}>
-                                <button
-                                  onClick={() => setMapPreviewStation(st)}
-                                  type="button"
-                                  style={{
-                                    background: 'none',
-                                    border: 'none',
-                                    padding: 0,
-                                    margin: 0,
-                                    color: 'var(--text)',
-                                    fontWeight: '500',
-                                    cursor: 'pointer',
-                                    textAlign: 'left',
-                                    display: 'inline-flex',
-                                    alignItems: 'center',
-                                    gap: '6px',
-                                    transition: 'color 0.2s'
-                                  }}
-                                  className="hover-underline text-accent-hover"
-                                  title="Xem vị trí trên bản đồ"
-                                >
-                                  <MapPin size={12} color="var(--accent)" /> {st.location}
-                                </button>
-                              </td>
-                              <td style={{ padding: '12px 16px', color: 'var(--text-muted)' }}>{st.hydroChar || '—'}</td>
-                              <td style={{ padding: '12px 16px', fontFamily: 'monospace', color: 'var(--text-muted)' }}>
-                                {st.x != null ? (
-                                  <button
-                                    onClick={() => setMapPreviewStation(st)}
-                                    type="button"
-                                    style={{
-                                      background: 'none',
-                                      border: 'none',
-                                      padding: 0,
-                                      margin: 0,
-                                      fontFamily: 'monospace',
-                                      color: 'var(--text-muted)',
-                                      cursor: 'pointer',
-                                      transition: 'color 0.2s'
-                                    }}
-                                    className="hover-underline text-accent-hover"
-                                    title="Xem vị trí trên bản đồ"
-                                  >
-                                    {parseFloat(st.x.toFixed(6))}
-                                  </button>
-                                ) : '—'}
-                              </td>
-                              <td style={{ padding: '12px 16px', fontFamily: 'monospace', color: 'var(--text-muted)' }}>
-                                {st.y != null ? (
-                                  <button
-                                    onClick={() => setMapPreviewStation(st)}
-                                    type="button"
-                                    style={{
-                                      background: 'none',
-                                      border: 'none',
-                                      padding: 0,
-                                      margin: 0,
-                                      fontFamily: 'monospace',
-                                      color: 'var(--text-muted)',
-                                      cursor: 'pointer',
-                                      transition: 'color 0.2s'
-                                    }}
-                                    className="hover-underline text-accent-hover"
-                                    title="Xem vị trí trên bản đồ"
-                                  >
-                                    {parseFloat(st.y.toFixed(6))}
-                                  </button>
-                                ) : '—'}
-                              </td>
-                              <td style={{ padding: '12px 16px', color: 'var(--text-muted)' }}>
-                                {st.stationType === 'surface_water' ? (
-                                  st.imageCode ? (
-                                    <div style={{ display: 'flex', gap: '6px', flexWrap: 'nowrap' }}>
-                                      {st.imageCode.split(',').map((key, idx) => {
-                                        const trimmed = key.trim();
-                                        if (!trimmed) return null;
-                                        return (
-                                          <button
-                                            key={idx}
-                                            onClick={() => setPreviewFile({ key: trimmed, size: 0, lastModified: '' })}
-                                            className="hover-bg-muted"
-                                            type="button"
-                                            style={{
-                                              display: 'inline-flex',
-                                              alignItems: 'center',
-                                              whiteSpace: 'nowrap',
-                                              gap: '4px',
-                                              background: 'var(--surface-strong)',
-                                              border: '1px solid var(--border)',
-                                              padding: '4px 8px',
-                                              borderRadius: '6px',
-                                              color: 'var(--accent)',
-                                              fontWeight: '600',
-                                              fontSize: '0.74rem',
-                                              cursor: 'pointer',
-                                              transition: 'all 0.2s'
-                                            }}
-                                            title={trimmed.split('/').pop()}
-                                          >
-                                            🖼️ Ảnh {idx + 1}
-                                          </button>
-                                        );
-                                      })}
-                                    </div>
-                                  ) : (
-                                    <span style={{ fontStyle: 'italic', opacity: 0.7 }}>Chưa có</span>
-                                  )
-                                ) : (
-                                  <span style={{ color: 'var(--text-muted)', opacity: 0.5 }}>—</span>
-                                )}
-                              </td>
-                              <td style={{ padding: '12px 16px' }}>
-                                <span style={{
-                                  display: 'inline-block',
-                                  whiteSpace: 'nowrap',
-                                  padding: '2px 8px',
-                                  borderRadius: '6px',
-                                  fontSize: '0.72rem',
-                                  fontWeight: '700',
-                                  background: st.isActive !== false ? 'rgba(25, 135, 84, 0.12)' : 'rgba(220, 53, 69, 0.12)',
-                                  color: st.isActive !== false ? '#198754' : '#dc3545',
-                                  border: st.isActive !== false ? '1px solid rgba(25, 135, 84, 0.2)' : '1px solid rgba(220, 53, 69, 0.2)'
-                                }}>
-                                  {st.isActive !== false ? 'Hoạt động' : 'Tạm dừng'}
-                                </span>
-                              </td>
-                              <td style={{ padding: '8px 16px', textAlign: 'center' }}>
-                                <div style={{ display: 'flex', gap: '8px', justifyContent: 'center' }}>
-                                  <button
-                                    onClick={() => handleOpenManualStationForm(st)}
-                                    type="button"
-                                    title="Sửa thông tin"
-                                    style={{
-                                      border: '1px solid var(--border)',
-                                      background: 'var(--surface-strong)',
-                                      color: 'var(--accent)',
-                                      padding: '6px',
-                                      borderRadius: '6px',
-                                      cursor: 'pointer',
-                                      display: 'flex',
-                                      alignItems: 'center',
-                                      justifyContent: 'center',
-                                      transition: 'all 0.2s'
-                                    }}
-                                    className="hover-bg-white-10"
-                                  >
-                                    <Pencil size={14} />
-                                  </button>
-                                  <button
-                                    onClick={() => st.id && handleDeleteManualStation(st.id)}
-                                    type="button"
-                                    title="Xóa trạm"
-                                    style={{
-                                      border: '1px solid rgba(239, 68, 68, 0.2)',
-                                      background: 'rgba(239, 68, 68, 0.05)',
-                                      color: '#ef4444',
-                                      padding: '6px',
-                                      borderRadius: '6px',
-                                      cursor: 'pointer',
-                                      display: 'flex',
-                                      alignItems: 'center',
-                                      justifyContent: 'center',
-                                      transition: 'all 0.2s'
-                                    }}
-                                    className="hover-bg-red"
-                                  >
-                                    <Trash2 size={14} />
-                                  </button>
-                                </div>
-                              </td>
+                {/* Sub-tabs: Stations / Import */}
+                <div style={{ display: 'flex', gap: '8px', borderBottom: '1px solid var(--border)', paddingBottom: '12px' }}>
+                  {[
+                    { key: 'stations', label: 'Quản lý trạm', icon: <Server size={16} /> },
+                    { key: 'import', label: 'Nhập dữ liệu', icon: <FileSpreadsheet size={16} /> }
+                  ].map(tab => {
+                    const active = stationTab === tab.key;
+                    return (
+                      <button
+                        key={tab.key}
+                        type="button"
+                        onClick={() => setStationTab(tab.key as any)}
+                        style={{
+                          padding: '8px 18px',
+                          border: 'none',
+                          background: active ? 'var(--accent)' : 'transparent',
+                          color: active ? '#fff' : 'var(--text-muted)',
+                          fontSize: '0.85rem',
+                          fontWeight: '600',
+                          cursor: 'pointer',
+                          borderRadius: 'var(--radius-md)',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '6px',
+                          transition: 'all 0.2s'
+                        }}
+                      >
+                        {tab.icon} {tab.label}
+                      </button>
+                    );
+                  })}
+                </div>
+
+                {stationTab === 'stations' ? (
+                  <>
+                    {/* Filter + Action Buttons */}
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px' }}>
+                      <div style={{ display: 'flex', border: '1px solid var(--border)', borderRadius: '999px', overflow: 'hidden', background: 'var(--background-soft)' }}>
+                        {[
+                          { key: 'all', label: 'Tất cả' },
+                          { key: 'groundwater', label: 'Trạm nước ngầm' },
+                          { key: 'surface_water', label: 'Trạm nước mặt' }
+                        ].map(opt => {
+                          const active = manualStationTypeFilter === opt.key;
+                          return (
+                            <button
+                              key={opt.key}
+                              type="button"
+                              onClick={() => setManualStationTypeFilter(opt.key as any)}
+                              style={{
+                                padding: '6px 16px', border: 'none',
+                                background: active ? 'var(--accent)' : 'transparent',
+                                color: active ? '#fff' : 'var(--text-muted)',
+                                fontSize: '0.8rem', fontWeight: '600', cursor: 'pointer',
+                                transition: 'all 0.2s',
+                                borderRadius: active ? '999px' : '0'
+                              }}
+                            >{opt.label}</button>
+                          );
+                        })}
+                      </div>
+                      <div style={{ display: 'flex', gap: '10px' }}>
+                        <button type="button" onClick={() => { setImportFile(null); setImportResult(null); setImportStationType('groundwater'); setShowImportModal(true); }}
+                          style={{ padding: '8px 16px', background: 'rgba(25, 135, 84, 0.12)', border: '1px solid rgba(25, 135, 84, 0.2)', color: '#198754', borderRadius: 'var(--radius-md)', fontSize: '0.85rem', fontWeight: '600', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                          <FileSpreadsheet size={16} /> Nhập từ Excel
+                        </button>
+                        <button type="button" onClick={() => handleOpenManualStationForm(null)}
+                          style={{ padding: '8px 16px', background: 'var(--accent)', color: '#fff', border: 'none', borderRadius: 'var(--radius-md)', fontSize: '0.85rem', fontWeight: '600', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '6px', boxShadow: '0 2px 8px rgba(13, 110, 253, 0.2)' }}>
+                          <Plus size={16} /> Thêm trạm mới
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Bảng dữ liệu */}
+                    {manualStationsLoading ? (
+                      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '60px 0', gap: '12px', color: 'var(--text-muted)' }}>
+                        <div className="animate-spin" style={{ width: '30px', height: '30px', border: '3px solid var(--border)', borderTopColor: 'var(--accent)', borderRadius: '50%' }} />
+                        <span style={{ fontSize: '0.9rem' }}>Đang tải danh sách trạm...</span>
+                      </div>
+                    ) : (
+                      <div style={{ overflowX: 'auto', borderRadius: 'var(--radius-lg)', border: '1px solid var(--border)' }}>
+                        <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '0.88rem' }}>
+                          <thead>
+                            <tr style={{ background: 'var(--background-soft)', borderBottom: '1px solid var(--border)' }}>
+                              <th style={{ padding: '12px 16px', fontWeight: 'bold', color: 'var(--text)' }}>ID</th>
+                              <th style={{ padding: '12px 16px', fontWeight: 'bold', color: 'var(--text)' }}>Mã trạm</th>
+                              <th style={{ padding: '12px 16px', fontWeight: 'bold', color: 'var(--text)' }}>Loại trạm</th>
+                              <th style={{ padding: '12px 16px', fontWeight: 'bold', color: 'var(--text)' }}>Địa điểm</th>
+                              <th style={{ padding: '12px 16px', fontWeight: 'bold', color: 'var(--text)' }}>Đặc tính thủy vực</th>
+                              <th style={{ padding: '12px 16px', fontWeight: 'bold', color: 'var(--text)' }}>X (Kinh độ)</th>
+                              <th style={{ padding: '12px 16px', fontWeight: 'bold', color: 'var(--text)' }}>Y (Vĩ độ)</th>
+                              <th style={{ padding: '12px 16px', fontWeight: 'bold', color: 'var(--text)' }}>Hiện trường (Pics)</th>
+                              <th style={{ padding: '12px 16px', fontWeight: 'bold', color: 'var(--text)' }}>Trạng thái</th>
+                              <th style={{ padding: '12px 16px', fontWeight: 'bold', color: 'var(--text)', textAlign: 'center' }}>Thao tác</th>
                             </tr>
-                          ));
-                        })()}
-                      </tbody>
-                    </table>
+                          </thead>
+                          <tbody>
+                            {(() => {
+                              const filtered = manualStations.filter(st => {
+                                if (manualStationTypeFilter === 'all') return true;
+                                return st.stationType === manualStationTypeFilter;
+                              });
+                              if (filtered.length === 0) {
+                                return (
+                                  <tr>
+                                    <td colSpan={9} style={{ padding: '40px 16px', textAlign: 'center', color: 'var(--text-muted)' }}>
+                                      Không tìm thấy trạm nào. Click nút "Thêm trạm mới" để bắt đầu!
+                                    </td>
+                                  </tr>
+                                );
+                              }
+                              return filtered.map(st => (
+                                <tr key={st.id} style={{ borderBottom: '1px solid var(--border)' }} className="hover-bg-surface-strong">
+                                  <td style={{ padding: '12px 16px', fontWeight: '600', color: 'var(--text-muted)' }}>{st.id}</td>
+                                  <td style={{ padding: '12px 16px', fontWeight: '600', color: 'var(--text)' }}>{st.stationId || '—'}</td>
+                                  <td style={{ padding: '12px 16px' }}>
+                                    <span style={{
+                                      display: 'inline-block', whiteSpace: 'nowrap', padding: '2px 8px', borderRadius: '6px', fontSize: '0.72rem', fontWeight: '700',
+                                      background: st.stationType === 'groundwater' ? 'rgba(13, 110, 253, 0.12)' : 'rgba(25, 135, 84, 0.12)',
+                                      color: st.stationType === 'groundwater' ? '#0d6efd' : '#198754',
+                                      border: st.stationType === 'groundwater' ? '1px solid rgba(13, 110, 253, 0.2)' : '1px solid rgba(25, 135, 84, 0.2)'
+                                    }}>
+                                      {st.stationType === 'groundwater' ? 'Nước ngầm' : 'Nước mặt'}
+                                    </span>
+                                  </td>
+                                  <td style={{ padding: '12px 16px', fontWeight: '500', color: 'var(--text)' }}>
+                                    <button onClick={() => setMapPreviewStation(st)} type="button"
+                                      style={{ background: 'none', border: 'none', padding: 0, margin: 0, color: 'var(--text)', fontWeight: '500', cursor: 'pointer', textAlign: 'left', display: 'inline-flex', alignItems: 'center', gap: '6px' }}
+                                      className="hover-underline text-accent-hover" title="Xem vị trí trên bản đồ">
+                                      <MapPin size={12} color="var(--accent)" /> {st.location}
+                                    </button>
+                                  </td>
+                                  <td style={{ padding: '12px 16px', color: 'var(--text-muted)' }}>{st.hydroChar || '—'}</td>
+                                  <td style={{ padding: '12px 16px', fontFamily: 'monospace', color: 'var(--text-muted)' }}>
+                                    {st.x != null ? (
+                                      <button onClick={() => setMapPreviewStation(st)} type="button"
+                                        style={{ background: 'none', border: 'none', padding: 0, margin: 0, fontFamily: 'monospace', color: 'var(--text-muted)', cursor: 'pointer' }}
+                                        className="hover-underline text-accent-hover" title="Xem vị trí trên bản đồ">
+                                        {parseFloat(st.x.toFixed(6))}
+                                      </button>
+                                    ) : '—'}
+                                  </td>
+                                  <td style={{ padding: '12px 16px', fontFamily: 'monospace', color: 'var(--text-muted)' }}>
+                                    {st.y != null ? (
+                                      <button onClick={() => setMapPreviewStation(st)} type="button"
+                                        style={{ background: 'none', border: 'none', padding: 0, margin: 0, fontFamily: 'monospace', color: 'var(--text-muted)', cursor: 'pointer' }}
+                                        className="hover-underline text-accent-hover" title="Xem vị trí trên bản đồ">
+                                        {parseFloat(st.y.toFixed(6))}
+                                      </button>
+                                    ) : '—'}
+                                  </td>
+                                  <td style={{ padding: '12px 16px', color: 'var(--text-muted)' }}>
+                                    {st.stationType === 'surface_water' ? (
+                                      st.imageCode ? (
+                                        <div style={{ display: 'flex', gap: '6px', flexWrap: 'nowrap' }}>
+                                          {st.imageCode.split(',').map((key, idx) => {
+                                            const trimmed = key.trim();
+                                            if (!trimmed) return null;
+                                            return (
+                                              <button key={idx} onClick={() => setPreviewFile({ key: trimmed, size: 0, lastModified: '' })}
+                                                className="hover-bg-muted" type="button"
+                                                style={{ display: 'inline-flex', alignItems: 'center', whiteSpace: 'nowrap', gap: '4px', background: 'var(--surface-strong)', border: '1px solid var(--border)', padding: '4px 8px', borderRadius: '6px', color: 'var(--accent)', fontWeight: '600', fontSize: '0.74rem', cursor: 'pointer' }}
+                                                title={trimmed.split('/').pop()}>
+                                                🖼️ Ảnh {idx + 1}
+                                              </button>
+                                            );
+                                          })}
+                                        </div>
+                                      ) : <span style={{ fontStyle: 'italic', opacity: 0.7 }}>Chưa có</span>
+                                    ) : <span style={{ color: 'var(--text-muted)', opacity: 0.5 }}>—</span>}
+                                  </td>
+                                  <td style={{ padding: '12px 16px' }}>
+                                    <span style={{
+                                      display: 'inline-block', whiteSpace: 'nowrap', padding: '2px 8px', borderRadius: '6px', fontSize: '0.72rem', fontWeight: '700',
+                                      background: st.isActive !== false ? 'rgba(25, 135, 84, 0.12)' : 'rgba(220, 53, 69, 0.12)',
+                                      color: st.isActive !== false ? '#198754' : '#dc3545',
+                                      border: st.isActive !== false ? '1px solid rgba(25, 135, 84, 0.2)' : '1px solid rgba(220, 53, 69, 0.2)'
+                                    }}>
+                                      {st.isActive !== false ? 'Hoạt động' : 'Tạm dừng'}
+                                    </span>
+                                  </td>
+                                  <td style={{ padding: '8px 16px', textAlign: 'center' }}>
+                                    <div style={{ display: 'flex', gap: '8px', justifyContent: 'center' }}>
+                                      <button onClick={() => handleOpenManualStationForm(st)} type="button" title="Sửa thông tin"
+                                        style={{ border: '1px solid var(--border)', background: 'var(--surface-strong)', color: 'var(--accent)', padding: '6px', borderRadius: '6px', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                                        <Pencil size={14} />
+                                      </button>
+                                      <button onClick={() => st.id && handleDeleteManualStation(st.id)} type="button" title="Xóa trạm"
+                                        style={{ border: '1px solid rgba(239, 68, 68, 0.2)', background: 'rgba(239, 68, 68, 0.05)', color: '#ef4444', padding: '6px', borderRadius: '6px', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                                        <Trash2 size={14} />
+                                      </button>
+                                    </div>
+                                  </td>
+                                </tr>
+                              ));
+                            })()}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+                  </>
+                ) : (
+                  /* ─── Import Tab ─── */
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                      <div style={{ width: '36px', height: '36px', background: 'rgba(13, 110, 253, 0.12)', border: '1px solid rgba(13, 110, 253, 0.2)', color: '#0d6efd', borderRadius: '10px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                        <BarChart3 size={18} />
+                      </div>
+                      <div>
+                        <h4 style={{ margin: 0, fontSize: '1rem', fontWeight: '700', color: 'var(--text)' }}>Nhập Dữ Liệu Chất Lượng Nước</h4>
+                        <p style={{ margin: '2px 0 0 0', fontSize: '0.8rem', color: 'var(--text-muted)' }}>Chọn trạm và tải lên file Excel chất lượng nước</p>
+                      </div>
+                    </div>
+
+                    {/* Station Type + Station Selector */}
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 2fr', gap: '16px' }}>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                        <label style={{ fontSize: '0.85rem', fontWeight: '600', color: 'var(--text)', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                          <Layers size={14} color="var(--accent)" /> Loại trạm
+                        </label>
+                        <div style={{ display: 'flex', border: '1px solid var(--border)', borderRadius: '999px', overflow: 'hidden', background: 'var(--background-soft)' }}>
+                          {[
+                            { key: 'all', label: 'Tất cả' },
+                            { key: 'groundwater', label: 'Nước ngầm' },
+                            { key: 'surface_water', label: 'Nước mặt' }
+                          ].map(opt => {
+                            const active = wqImportStationType === opt.key;
+                            return (
+                              <button
+                                key={opt.key} type="button"
+                                onClick={() => { setWqImportStationType(opt.key as any); setWqImportStationId(null); }}
+                                style={{
+                                  padding: '6px 12px', border: 'none',
+                                  background: active ? 'var(--accent)' : 'transparent',
+                                  color: active ? '#fff' : 'var(--text-muted)',
+                                  fontSize: '0.78rem', fontWeight: '600', cursor: 'pointer', flex: 1,
+                                  transition: 'all 0.2s', borderRadius: active ? '999px' : '0'
+                                }}
+                              >{opt.label}</button>
+                            );
+                          })}
+                        </div>
+                      </div>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                        <label style={{ fontSize: '0.85rem', fontWeight: '600', color: 'var(--text)', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                          <MapPin size={14} color="var(--accent)" /> Chọn trạm <span style={{ color: '#dc3545' }}>*</span>
+                        </label>
+                        <select
+                          value={wqImportStationId ?? ''}
+                          onChange={(e) => {
+                            const val = e.target.value;
+                            setWqImportStationId(val ? Number(val) : null);
+                            setWqFile(null); setWqPreview(null); setWqPreviewError(''); setWqImportSuccess(''); setWqDuplicateAction(null);
+                            setWqSampleDate(new Date().toISOString().slice(0, 10));
+                          }}
+                          style={{ padding: '10px 12px', background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: '10px', color: 'var(--text)', fontSize: '0.88rem', cursor: 'pointer' }}
+                        >
+                          <option value="">-- Chọn trạm --</option>
+                          {manualStations
+                            .filter(st => wqImportStationType === 'all' || st.stationType === wqImportStationType)
+                            .map(st => (
+                              <option key={st.id} value={st.id}>
+                                {st.stationId ? `${st.stationId} — ` : ''}{st.location} ({st.stationType === 'groundwater' ? 'Nước ngầm' : 'Nước mặt'})
+                              </option>
+                            ))
+                          }
+                        </select>
+                      </div>
+                    </div>
+
+                    {/* Import Form */}
+                    {wqImportStationId && wqSampleDate !== '' && !wqPreview && !wqImportSuccess && (
+                      <div style={{ background: 'var(--background-soft)', border: '1px solid var(--border)', borderRadius: '12px', padding: '20px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                        <h5 style={{ margin: 0, fontSize: '0.9rem', fontWeight: '700', color: 'var(--text)' }}>📤 Import dữ liệu từ file Excel</h5>
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                            <label style={{ fontSize: '0.82rem', fontWeight: '600', color: 'var(--text-muted)' }}>📅 Ngày lấy mẫu <span style={{ color: '#dc3545' }}>*</span></label>
+                            <input type="date" value={wqSampleDate} onChange={e => setWqSampleDate(e.target.value)}
+                              style={{ padding: '8px 12px', background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: '8px', color: 'var(--text)', fontSize: '0.85rem' }} />
+                          </div>
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                            <label style={{ fontSize: '0.82rem', fontWeight: '600', color: 'var(--text-muted)' }}>📝 Ghi chú (tuỳ chọn)</label>
+                            <input type="text" value={wqNotes} onChange={e => setWqNotes(e.target.value)}
+                              placeholder="Ví dụ: Đợt lấy mẫu tháng 6..."
+                              style={{ padding: '8px 12px', background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: '8px', color: 'var(--text)', fontSize: '0.85rem' }} />
+                          </div>
+                        </div>
+                        <div
+                          onDrop={e => { e.preventDefault(); setIsWqDragActive(false); const f = e.dataTransfer.files[0]; if(f) setWqFile(f); }}
+                          onDragOver={e => { e.preventDefault(); setIsWqDragActive(true); }}
+                          onDragLeave={() => setIsWqDragActive(false)}
+                          onClick={() => { const inp = document.createElement('input'); inp.type='file'; inp.accept='.xlsx,.xls'; inp.onchange=e => { const f = (e.target as HTMLInputElement).files?.[0]; if(f) setWqFile(f); }; inp.click(); }}
+                          style={{
+                            border: `2px dashed ${isWqDragActive ? 'var(--accent)' : 'var(--border)'}`,
+                            borderRadius: '10px', padding: '20px', textAlign: 'center', cursor: 'pointer',
+                            background: isWqDragActive ? 'rgba(var(--accent-rgb), 0.05)' : 'transparent', transition: 'all 0.2s'
+                          }}
+                        >
+                          {wqFile ? (
+                            <p style={{ margin: 0, fontWeight: '600', color: 'var(--accent)', fontSize: '0.85rem' }}>✅ {wqFile.name}</p>
+                          ) : (
+                            <p style={{ margin: 0, color: 'var(--text-muted)', fontSize: '0.85rem' }}>
+                              <FileSpreadsheet size={20} style={{ marginBottom: '4px', display: 'block', margin: '0 auto 6px' }} />
+                              Kéo thả file Excel vào đây hoặc <strong style={{ color: 'var(--accent)' }}>bấm để chọn file</strong>
+                            </p>
+                          )}
+                        </div>
+                        {wqPreviewError && (
+                          <div style={{ padding: '10px 14px', background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.2)', borderRadius: '8px', color: '#ef4444', fontSize: '0.83rem' }}>
+                            ⚠️ {wqPreviewError}
+                          </div>
+                        )}
+                        <div style={{ display: 'flex', gap: '10px' }}>
+                          <button type="button" disabled={!wqFile || !wqSampleDate || wqPreviewing}
+                            onClick={async () => {
+                              if (!wqFile || !wqSampleDate) return;
+                              setWqPreviewing(true); setWqPreviewError(''); setWqPreview(null);
+                              try {
+                                const result = await previewWaterQualityExcel(wqFile, wqSampleDate);
+                                if (!result.stationFound) { setWqPreviewError(result.errorMessage || 'Không tìm thấy trạm.'); }
+                                else {
+                                  const selected = manualStations.find(st => st.id === wqImportStationId);
+                                  if (selected?.stationId && result.recognizedStationId
+                                    && selected.stationId.toUpperCase() !== result.recognizedStationId.toUpperCase()) {
+                                    setWqPreviewError(`Mã trạm trong file Excel ("${result.recognizedStationId}") không khớp với trạm đã chọn ("${selected.stationId}"). Vui lòng chọn đúng trạm hoặc kiểm tra lại file Excel.`);
+                                  } else {
+                                    setWqPreview(result);
+                                  }
+                                }
+                              } catch { setWqPreviewError('Lỗi kết nối máy chủ. Vui lòng thử lại.'); }
+                              finally { setWqPreviewing(false); }
+                            }}
+                            style={{ flex: 1, padding: '9px 18px', background: 'var(--accent)', color: '#fff', border: 'none', borderRadius: '8px', fontWeight: '700', fontSize: '0.85rem', cursor: (!wqFile || !wqSampleDate || wqPreviewing) ? 'not-allowed' : 'pointer', opacity: (!wqFile || !wqSampleDate || wqPreviewing) ? 0.5 : 1 }}>
+                            {wqPreviewing ? '⏳ Đang phân tích...' : '🔍 Xem trước dữ liệu'}
+                          </button>
+                          <button type="button" onClick={() => { setWqSampleDate(''); setWqFile(null); }} style={{ padding: '9px 14px', background: 'var(--surface-strong)', border: '1px solid var(--border)', color: 'var(--text-muted)', borderRadius: '8px', cursor: 'pointer' }}>Hủy</button>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Preview Panel */}
+                    {wqPreview && !wqImportSuccess && (
+                      <div style={{ background: 'var(--background-soft)', border: '1px solid var(--border)', borderRadius: '12px', padding: '20px', display: 'flex', flexDirection: 'column', gap: '16px', animation: 'modalPanelIn 0.3s ease' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '8px' }}>
+                          <div>
+                            <h5 style={{ margin: 0, fontSize: '0.9rem', fontWeight: '700', color: 'var(--text)' }}>📋 Xem trước dữ liệu nhập</h5>
+                            <p style={{ margin: '4px 0 0 0', fontSize: '0.8rem', color: 'var(--text-muted)' }}>
+                              Trạm nhận diện: <strong style={{ color: 'var(--accent)' }}>{wqPreview.recognizedStationId}</strong>
+                              {wqPreview.stationLocation && ` — ${wqPreview.stationLocation}`}
+                              {wqPreview.zoneDescription && ` · Zone: ${wqPreview.zoneDescription}`}
+                              {wqPreview.qcvnStandard && ` · ${wqPreview.qcvnStandard}`}
+                            </p>
+                          </div>
+                          {wqPreview.duplicateExists && !wqDuplicateAction && (
+                            <div style={{ padding: '8px 14px', background: 'rgba(255,165,0,0.12)', border: '1px solid rgba(255,165,0,0.3)', borderRadius: '8px', fontSize: '0.8rem', color: '#c67c00' }}>
+                              ⚠️ Đã có dữ liệu cho ngày <strong>{wqSampleDate}</strong>. Chọn:
+                              <div style={{ display: 'flex', gap: '8px', marginTop: '6px' }}>
+                                <button onClick={() => setWqDuplicateAction('overwrite')} style={{ padding: '4px 10px', background: '#ef4444', color: '#fff', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: '600', fontSize: '0.78rem' }}>Ghi đè</button>
+                                <button onClick={() => setWqDuplicateAction('add')} style={{ padding: '4px 10px', background: 'var(--accent)', color: '#fff', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: '600', fontSize: '0.78rem' }}>Thêm mới</button>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                        <div style={{ overflowX: 'auto', borderRadius: '8px', border: '1px solid var(--border)' }}>
+                          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.82rem' }}>
+                            <thead>
+                              <tr style={{ background: 'var(--surface-strong)' }}>
+                                {['Thông số', 'Đơn vị', 'Giá trị', 'Tiêu chuẩn'].map(h => (
+                                  <th key={h} style={{ padding: '8px 12px', textAlign: 'left', color: 'var(--text-muted)', fontWeight: '600', borderBottom: '1px solid var(--border)' }}>{h}</th>
+                                ))}
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {(wqPreview.parameters || []).map((p, idx) => (
+                                <tr key={idx} style={{ borderBottom: '1px solid var(--border)' }}>
+                                  <td style={{ padding: '7px 12px', fontWeight: '600', color: 'var(--text)' }}>{p.parameterName}</td>
+                                  <td style={{ padding: '7px 12px', color: 'var(--text-muted)' }}>{p.unit || '—'}</td>
+                                  <td style={{ padding: '7px 12px', fontFamily: 'monospace', color: 'var(--text)' }}>{p.valueRaw || '—'}</td>
+                                  <td style={{ padding: '7px 12px', color: 'var(--text-muted)', fontSize: '0.78rem' }}>{p.referenceStandard || '—'}</td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                        <div style={{ display: 'flex', gap: '10px' }}>
+                          <button type="button" disabled={wqImporting || (wqPreview.duplicateExists && !wqDuplicateAction)}
+                            onClick={async () => {
+                              if (!wqFile || !wqSampleDate || !wqPreview) return;
+                              setWqImporting(true);
+                              try {
+                                const overwrite = wqDuplicateAction === 'overwrite';
+                                await importWaterQuality(wqFile, wqSampleDate, overwrite, wqNotes || undefined, undefined, wqImportStationId ?? undefined);
+                                setWqImportSuccess(`✅ Đã import thành công ${wqPreview.parameters?.length || 0} thông số cho trạm ${wqPreview.recognizedStationId}.`);
+                                setWqPreview(null);
+                                setWqHistoryRefresh(prev => prev + 1);
+                              } catch { setWqPreviewError('Lỗi khi import. Vui lòng thử lại.'); }
+                              finally { setWqImporting(false); }
+                            }}
+                            style={{ flex: 1, padding: '9px 18px', background: '#198754', color: '#fff', border: 'none', borderRadius: '8px', fontWeight: '700', fontSize: '0.85rem', cursor: (wqImporting || (wqPreview.duplicateExists && !wqDuplicateAction)) ? 'not-allowed' : 'pointer', opacity: (wqImporting || (wqPreview.duplicateExists && !wqDuplicateAction)) ? 0.5 : 1 }}>
+                            {wqImporting ? '⏳ Đang lưu...' : '✅ Xác nhận Import'}
+                          </button>
+                          <button type="button" onClick={() => { setWqPreview(null); setWqDuplicateAction(null); }} style={{ padding: '9px 14px', background: 'var(--surface-strong)', border: '1px solid var(--border)', color: 'var(--text-muted)', borderRadius: '8px', cursor: 'pointer' }}>Quay lại</button>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Success Message */}
+                    {wqImportSuccess && (
+                      <div style={{ padding: '12px 16px', background: 'rgba(25,135,84,0.1)', border: '1px solid rgba(25,135,84,0.25)', borderRadius: '8px', color: '#198754', fontWeight: '600', fontSize: '0.85rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        {wqImportSuccess}
+                        <button onClick={() => { setWqImportSuccess(''); setWqSampleDate(new Date().toISOString().slice(0, 10)); setWqFile(null); setWqNotes(''); }} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#198754', fontWeight: '700' }}>Nhập thêm</button>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* ─── Lịch sử dữ liệu đã import ─── */}
+                {wqImportStationId && (
+                  <div style={{ borderTop: '2px solid var(--border)', paddingTop: '20px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <BarChart3 size={16} color="var(--accent)" />
+                      <strong style={{ fontSize: '0.9rem', color: 'var(--text)' }}>📊 Lịch sử dữ liệu đã import</strong>
+                      {wqHistoryLoading && <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>Đang tải...</span>}
+                    </div>
+
+                    {!wqHistoryLoading && wqHistorySamples.length === 0 && (
+                      <p style={{ fontSize: '0.82rem', color: 'var(--text-muted)', fontStyle: 'italic', margin: '0' }}>Chưa có dữ liệu import cho trạm này.</p>
+                    )}
+
+                    {wqHistorySamples.length > 0 && (
+                      <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
+                        <label style={{ fontSize: '0.82rem', fontWeight: '600', color: 'var(--text-muted)' }}>Ngày lấy mẫu:</label>
+                        <select
+                          value={wqHistorySampleDate} onChange={e => setWqHistorySampleDate(e.target.value)}
+                          style={{ padding: '6px 10px', background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: '8px', color: 'var(--text)', fontSize: '0.85rem', cursor: 'pointer' }}
+                        >
+                          {wqHistorySamples.map(s => (
+                            <option key={s.id} value={s.sampleDate}>{s.sampleDate} {s.notes ? `— ${s.notes}` : ''}</option>
+                          ))}
+                        </select>
+                        <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>({wqHistorySamples.length} lần)</span>
+                      </div>
+                    )}
+
+                    {wqHistorySample && wqHistorySample.parameters && wqHistorySample.parameters.length > 0 && (
+                      <div style={{ overflowX: 'auto', borderRadius: '8px', border: '1px solid var(--border)' }}>
+                        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.82rem' }}>
+                          <thead>
+                            <tr style={{ background: 'var(--surface-strong)' }}>
+                              {['Thông số', 'Đơn vị', 'Giá trị', 'Tiêu chuẩn'].map(h => (
+                                <th key={h} style={{ padding: '8px 12px', textAlign: 'left', color: 'var(--text-muted)', fontWeight: '600', borderBottom: '1px solid var(--border)' }}>{h}</th>
+                              ))}
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {wqHistorySample.parameters.map((p, idx) => (
+                              <tr key={idx} style={{ borderBottom: '1px solid var(--border)' }}>
+                                <td style={{ padding: '7px 12px', fontWeight: '600', color: 'var(--text)' }}>{p.parameterName}</td>
+                                <td style={{ padding: '7px 12px', color: 'var(--text-muted)' }}>{p.unit || '—'}</td>
+                                <td style={{ padding: '7px 12px', fontFamily: 'monospace', color: 'var(--text)' }}>{p.valueRaw || '—'}</td>
+                                <td style={{ padding: '7px 12px', color: 'var(--text-muted)', fontSize: '0.78rem' }}>{p.referenceStandard || '—'}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
                   </div>
                 )}
               </div>

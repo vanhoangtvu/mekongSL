@@ -3,6 +3,7 @@ import { DEFAULT_DATA_SOURCE, type DataSourceKey } from './constants/data-source
 import type { DataRecord } from './utils/record-utils';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://14.227.143.142:8084/api';
+export { API_URL };
 
 export type AdminRole = 'USER' | 'DATA_MANAGER' | 'ADMIN';
 
@@ -55,7 +56,7 @@ async function requestJson<T>(input: RequestInfo | URL, init: RequestInit = {}):
   return response.json();
 }
 
-function getBackendAdminUrl(path: string) {
+export function getBackendAdminUrl(path: string) {
   return `${API_URL}${path}`;
 }
 
@@ -489,3 +490,98 @@ export async function importManualStations(file: File, stationType: string) {
     }
   );
 }
+
+// ─── Water Quality Types ─────────────────────────────────────────────────────
+
+export interface WaterQualityParameterDto {
+  parameterName: string;
+  unit: string | null;
+  valueRaw: string | null;
+  valueNumeric: number | null;
+  referenceStandard: string | null;
+  isExceeded: boolean | null;
+  sortOrder: number;
+}
+
+export interface WaterQualityPreviewResult {
+  stationFound: boolean;
+  recognizedStationId: string | null;
+  stationDbId: number | null;
+  stationLocation: string | null;
+  stationType: string | null;
+  zoneDescription: string | null;
+  qcvnStandard: string | null;
+  rawHeader: string | null;
+  duplicateExists: boolean;
+  parameters: WaterQualityParameterDto[];
+  errorMessage: string | null;
+}
+
+export interface WaterQualitySampleDto {
+  id: number;
+  stationDbId: number;
+  stationId: string | null;
+  stationLocation: string | null;
+  stationType: string;
+  sampleDate: string;
+  zoneDescription: string | null;
+  qcvnStandard: string | null;
+  notes: string | null;
+  importedAt: string;
+  importedBy: string | null;
+  parameterCount: number;
+  parameters: WaterQualityParameterDto[] | null;
+}
+
+// ─── Water Quality API Functions ─────────────────────────────────────────────
+
+export async function previewWaterQualityExcel(file: File, sampleDate: string): Promise<WaterQualityPreviewResult> {
+  const formData = new FormData();
+  formData.append('file', file);
+  formData.append('sampleDate', sampleDate);
+  return requestJson<WaterQualityPreviewResult>(
+    getBackendAdminUrl('/gis/water-quality/preview'),
+    { method: 'POST', body: formData }
+  );
+}
+
+export async function importWaterQuality(
+  file: File,
+  sampleDate: string,
+  overwrite: boolean,
+  notes?: string,
+  importedBy?: string,
+  stationDbId?: number
+): Promise<WaterQualitySampleDto> {
+  const formData = new FormData();
+  formData.append('file', file);
+  formData.append('sampleDate', sampleDate);
+  formData.append('overwrite', String(overwrite));
+  if (notes) formData.append('notes', notes);
+  if (importedBy) formData.append('importedBy', importedBy);
+  if (stationDbId != null) formData.append('stationDbId', String(stationDbId));
+  return requestJson<WaterQualitySampleDto>(
+    getBackendAdminUrl('/gis/water-quality/import'),
+    { method: 'POST', body: formData }
+  );
+}
+
+export async function listWaterQualitySamples(stationDbId: number): Promise<WaterQualitySampleDto[]> {
+  return requestJson<WaterQualitySampleDto[]>(
+    getBackendAdminUrl(`/gis/water-quality/station/${stationDbId}`)
+  );
+}
+
+export async function getWaterQualitySample(sampleId: number): Promise<WaterQualitySampleDto> {
+  return requestJson<WaterQualitySampleDto>(
+    getBackendAdminUrl(`/gis/water-quality/sample/${sampleId}`)
+  );
+}
+
+export async function deleteWaterQualitySample(sampleId: number): Promise<void> {
+  await fetch(getBackendAdminUrl(`/gis/water-quality/sample/${sampleId}`), {
+    method: 'DELETE',
+    headers: getHeaders(),
+  });
+}
+
