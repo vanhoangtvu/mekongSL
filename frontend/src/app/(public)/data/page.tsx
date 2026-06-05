@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation';
 import { authService } from '../../../lib/auth';
 import { DATA_SOURCE_OPTIONS, DEFAULT_DATA_SOURCE, type DataSourceKey } from '../../../lib/constants/data-sources';
 import { collectRecordKeys, formatRecordValue, truncatePath, getParentPath, type DataRecord } from '../../../lib/utils/record-utils';
-import { loadDataDevices, loadDataRows, loadDataTimeframes, uploadS3File, listS3Files, deleteS3File, downloadS3File, renameS3File, createS3Folder } from '../../../lib/admin-api';
+import { loadDataDevices, loadDataRows, loadDataTimeframes, uploadS3File, listS3Files, deleteS3File, downloadS3File, renameS3File, createS3Folder, listManualStations, createManualStation, updateManualStation, deleteManualStation, importManualStations, type ManualStation } from '../../../lib/admin-api';
 import DataExportModal from '../../../components/DataExportModal';
 import S3Explorer from '../../../components/S3Explorer';
 import Map from 'ol/Map';
@@ -33,7 +33,7 @@ import {
   Search, MapPin, User, Lock, Key, Activity, AlertCircle, Download, Calendar, FileSpreadsheet, BarChart3,
   UploadCloud, FileCode, Trash2, CheckCircle2, XCircle,
   Layers, Tag, Clock, Folder, Copy,
-  ChevronRight, Plus, Move, Check, FolderPlus, ArrowLeft, CheckSquare, Square, Filter
+  ChevronRight, Plus, Move, Check, FolderPlus, ArrowLeft, CheckSquare, Square, Filter, Pencil, X
 } from 'lucide-react';
 
 interface MekongData {
@@ -1207,6 +1207,216 @@ export default function DataPage() {
   const [selectedRecentKeys, setSelectedRecentKeys] = useState<string[]>([]);
   const [visibleRecentCount, setVisibleRecentCount] = useState<number>(15);
   const [isDeletingRecent, setIsDeletingRecent] = useState<boolean>(false);
+
+  // Manual Station CRUD States
+  const [manualStations, setManualStations] = useState<ManualStation[]>([]);
+  const [manualStationsLoading, setManualStationsLoading] = useState(false);
+  const [manualStationTypeFilter, setManualStationTypeFilter] = useState<'all' | 'groundwater' | 'surface_water'>('all');
+  const [showManualStationForm, setShowManualStationForm] = useState(false);
+  const [editingManualStation, setEditingManualStation] = useState<ManualStation | null>(null);
+
+  // Form states for manual station
+  const [manualStationType, setManualStationType] = useState<'groundwater' | 'surface_water'>('groundwater');
+  const [manualLocation, setManualLocation] = useState('');
+  const [manualStationId, setManualStationId] = useState('');
+  const [manualHydroChar, setManualHydroChar] = useState('');
+  const [manualX, setManualX] = useState('');
+  const [manualY, setManualY] = useState('');
+  const [manualImageCode, setManualImageCode] = useState('');
+  const [manualIsActive, setManualIsActive] = useState(true);
+  const [manualImageFiles, setManualImageFiles] = useState<File[]>([]);
+  const [currentImages, setCurrentImages] = useState<Array<{ key: string, blobUrl: string }>>([]);
+
+  // Excel Import States
+  const [showImportModal, setShowImportModal] = useState(false);
+  const [importFile, setImportFile] = useState<File | null>(null);
+  const [importStationType, setImportStationType] = useState<'groundwater' | 'surface_water'>('groundwater');
+  const [importLoading, setImportLoading] = useState(false);
+  const [importResult, setImportResult] = useState<{ successCount: number; duplicateCount?: number; failCount: number; errors: string[]; message: string } | null>(null);
+  const [isImportDragActive, setIsImportDragActive] = useState(false);
+
+  const fetchManualStations = useCallback(async () => {
+    setManualStationsLoading(true);
+    try {
+      const data = await listManualStations();
+      setManualStations(data || []);
+    } catch (err) {
+      console.error("Failed to load manual stations:", err);
+    } finally {
+      setManualStationsLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (activeTab === 'upload' && uploadGroup === 'station') {
+      void fetchManualStations();
+    }
+  }, [activeTab, uploadGroup, fetchManualStations]);
+
+  const handleOpenManualStationForm = (station: ManualStation | null = null) => {
+    setManualImageFiles([]);
+    setCurrentImages([]);
+    if (station) {
+      setEditingManualStation(station);
+      setManualStationType(station.stationType);
+      setManualLocation(station.location);
+      setManualStationId(station.stationId || '');
+      setManualHydroChar(station.hydroChar || '');
+      setManualX(station.x != null ? String(station.x) : '');
+      setManualY(station.y != null ? String(station.y) : '');
+      setManualImageCode(station.imageCode || '');
+      setManualIsActive(station.isActive !== false);
+
+      if (station.imageCode && station.stationType === 'surface_water') {
+        const keys = station.imageCode.split(',').map(k => k.trim()).filter(Boolean);
+        const token = authService.getToken();
+        
+        keys.forEach((key) => {
+          fetch(getBackendUrl(`/s3/download?key=${encodeURIComponent(key)}`), {
+            headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+          })
+            .then((res) => {
+              if (res.ok) return res.blob();
+              throw new Error();
+            })
+            .then((blob) => {
+              const url = URL.createObjectURL(blob);
+              setCurrentImages((prev) => [...prev, { key, blobUrl: url }]);
+            })
+            .catch(() => {
+              console.error("Failed to load station image preview blob for: " + key);
+            });
+        });
+      }
+    } else {
+      setEditingManualStation(null);
+      setManualStationType('groundwater');
+      setManualLocation('');
+      setManualStationId('');
+      setManualHydroChar('');
+      setManualX('');
+      setManualY('');
+      setManualImageCode('');
+      setManualIsActive(true);
+    }
+    setShowManualStationForm(true);
+  };
+
+  useEffect(() => {
+    if (!showManualStationForm) {
+      currentImages.forEach((img) => {
+        if (img.blobUrl && img.blobUrl.startsWith('blob:')) {
+          URL.revokeObjectURL(img.blobUrl);
+        }
+      });
+      setCurrentImages([]);
+      setManualImageFiles([]);
+    }
+  }, [showManualStationForm]);
+
+  const handleSaveManualStation = async (e: FormEvent) => {
+    e.preventDefault();
+    if (!manualLocation.trim()) {
+      alert("Vui lòng nhập Địa điểm!");
+      return;
+    }
+    const xVal = parseFloat(manualX);
+    const yVal = parseFloat(manualY);
+    if (isNaN(xVal) || isNaN(yVal)) {
+      alert("Vui lòng nhập toạ độ X và Y hợp lệ!");
+      return;
+    }
+
+    let uploadedKeys: string[] = [];
+
+    // Upload selected image files to S3 concurrently
+    if (manualStationType === 'surface_water' && manualImageFiles.length > 0) {
+      try {
+        const uploadPromises = manualImageFiles.map(async (file, idx) => {
+          const ext = file.name.substring(file.name.lastIndexOf('.'));
+          const s3Key = `station-data/manual-stations/station_${Date.now()}_${idx}${ext}`;
+          const uploadRes = await uploadS3File(file, s3Key);
+          return uploadRes.key;
+        });
+        uploadedKeys = await Promise.all(uploadPromises);
+      } catch (err: any) {
+        alert("Lỗi khi tải ảnh hiện trường lên máy chủ S3: " + (err.message || err));
+        return;
+      }
+    }
+
+    // Combine kept existing S3 keys and newly uploaded keys
+    const keptKeys = currentImages.map(img => img.key);
+    const allKeys = [...keptKeys, ...uploadedKeys].map(k => k.trim()).filter(Boolean);
+    const finalImageCode = allKeys.join(',');
+
+    const payload: ManualStation = {
+      stationId: manualStationId.trim() || undefined,
+      stationType: manualStationType,
+      location: manualLocation.trim(),
+      hydroChar: manualHydroChar.trim() || undefined,
+      x: xVal,
+      y: yVal,
+      imageCode: manualStationType === 'surface_water' ? finalImageCode || undefined : undefined,
+      isActive: manualIsActive
+    };
+
+    try {
+      if (editingManualStation && editingManualStation.id) {
+        await updateManualStation(editingManualStation.id, payload);
+        alert("Cập nhật trạm thành công!");
+      } else {
+        await createManualStation(payload);
+        alert("Thêm trạm thành công!");
+      }
+      setShowManualStationForm(false);
+      void fetchManualStations();
+    } catch (err: any) {
+      alert("Lỗi khi lưu trạm: " + (err.message || err));
+    }
+  };
+
+  const handleDeleteManualStation = async (id: number) => {
+    if (!window.confirm("Bạn có chắc chắn muốn xóa trạm này?")) return;
+    try {
+      await deleteManualStation(id);
+      alert("Xóa trạm thành công!");
+      void fetchManualStations();
+    } catch (err: any) {
+      alert("Lỗi khi xóa trạm: " + (err.message || err));
+    }
+  };
+
+  const handleExcelFileChange = (file: File) => {
+    const ext = file.name.split('.').pop()?.toLowerCase();
+    if (ext !== 'xlsx' && ext !== 'xls') {
+      alert("Vui lòng chọn tệp Excel (.xlsx hoặc .xls)!");
+      return;
+    }
+    setImportFile(file);
+    setImportResult(null);
+  };
+
+  const handleImportExcel = async (e: FormEvent) => {
+    e.preventDefault();
+    if (!importFile) {
+      alert("Vui lòng chọn tệp Excel!");
+      return;
+    }
+    setImportLoading(true);
+    setImportResult(null);
+    try {
+      const res = await importManualStations(importFile, importStationType);
+      setImportResult(res);
+      if (res.successCount > 0) {
+        void fetchManualStations();
+      }
+    } catch (err: any) {
+      alert("Lỗi khi nhập trạm từ Excel: " + (err.message || err));
+    } finally {
+      setImportLoading(false);
+    }
+  };
 
   // Persist active tab across page reloads
   useEffect(() => {
@@ -2516,921 +2726,1090 @@ function ScheduleConfig({ source }: { source: string }) {
 
         {canManageData && activeTab === 'upload' && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '24px', marginTop: '10px' }}>
-            <div className="upload-tab-container fade-in" style={{ display: 'flex', gap: '24px', flexWrap: 'wrap' }}>
-            {/* Cột trái: Form nhập liệu */}
-            <div className="glass-panel" style={{ flex: '1 1 550px', background: 'var(--surface)', padding: '24px', borderRadius: 'var(--radius-xl)', border: '1px solid var(--border)', display: 'flex', flexDirection: 'column', gap: '20px', boxShadow: 'var(--shadow-md)' }}>
-              <h3 style={{ margin: '0 0 10px 0', fontSize: '1.25rem', fontWeight: 'bold', color: 'var(--text)', display: 'flex', alignItems: 'center', gap: '10px', borderBottom: '1px solid var(--border)', paddingBottom: '14px' }}>
-                <UploadCloud size={22} color="var(--accent)" /> Nhập Dữ Liệu Lên Hệ Thống
+            
+            {/* 1. Data Group Selection (Always visible at the top of the upload tab) */}
+            <div className="glass-panel" style={{ background: 'var(--surface)', padding: '20px', borderRadius: 'var(--radius-xl)', border: '1px solid var(--border)', display: 'flex', flexDirection: 'column', gap: '12px', boxShadow: 'var(--shadow-md)', width: '100%' }}>
+              <h3 style={{ margin: 0, fontSize: '1.1rem', fontWeight: 'bold', color: 'var(--text)', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <Server size={18} color="var(--accent)" /> Chọn Nhóm Dữ Liệu
               </h3>
-              
-              {/* 1. Data Group Selection */}
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                <label style={{ fontSize: '0.85rem', fontWeight: '600', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.5px', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                  <Server size={14} /> Nhóm dữ liệu
-                </label>
-                <div style={{ display: 'flex', gap: '12px' }}>
-                  {[
-                    { key: 'gis', label: 'GIS Data' },
-                    { key: 'station', label: 'Station Data' },
-                    { key: 'monitoring', label: 'Monitoring Data' }
-                  ].map((group) => {
-                    const active = uploadGroup === group.key;
-                    return (
-                      <button
-                        key={group.key}
-                        type="button"
-                        onClick={() => {
-                          setUploadGroup(group.key as 'gis' | 'station' | 'monitoring');
-                          setUploadFile(null);
-                          setUploadStatus('idle');
-                        }}
-                        className={`group-btn ${active ? 'active' : ''}`}
-                      >
-                        <Server size={16} /> {group.label}
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-
-              {/* 2. Dynamic Form Fields */}
-              <div className="dynamic-form-fields" style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
-                {uploadGroup === 'gis' && (
-                  <div className="slide-down" style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
-                    
-                    {/* Section 1: Phân loại dữ liệu GIS */}
-                    <div className="form-section">
-                      <div className="form-section-title">
-                        <Layers size={16} color="var(--accent)" /> Cấu hình phân loại GIS
-                      </div>
-                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: '16px' }}>
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                          <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.85rem', fontWeight: '600', color: 'var(--text)' }}>
-                            <Layers size={14} color={hasValue(gisDataset) ? "var(--accent)" : "var(--text-muted)"} /> Dataset <span style={{ color: '#dc3545' }}>*</span>
-                          </label>
-                          <select
-                            value={gisDataset}
-                            onChange={(e) => setGisDataset(e.target.value)}
-                            className={`form-input ${hasValue(gisDataset) ? 'has-value' : ''}`}
-                          >
-                            <option value="">-- Chọn Dataset --</option>
-                            {Object.entries(GIS_DATASETS).map(([key, val]) => (
-                              <option key={key} value={key}>{val.label}</option>
-                            ))}
-                          </select>
-                        </div>
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                          <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.85rem', fontWeight: '600', color: 'var(--text)' }}>
-                            <Tag size={14} color={hasValue(gisCategory) ? "var(--accent)" : "var(--text-muted)"} /> Category <span style={{ color: '#dc3545' }}>*</span>
-                          </label>
-                          <select
-                            value={gisCategory}
-                            onChange={(e) => setGisCategory(e.target.value)}
-                            className={`form-input ${hasValue(gisCategory) ? 'has-value' : ''}`}
-                          >
-                            <option value="">-- Chọn Category --</option>
-                            {(GIS_DATASETS[gisDataset as keyof typeof GIS_DATASETS]?.categories || []).map((cat) => (
-                              <option key={cat.key} value={cat.key}>{cat.label}</option>
-                            ))}
-                          </select>
-                        </div>
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                          <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.85rem', fontWeight: '600', color: 'var(--text)' }}>
-                            <Activity size={14} color={hasValue(gisDataType) ? "var(--accent)" : "var(--text-muted)"} /> Kiểu dữ liệu <span style={{ color: '#dc3545' }}>*</span>
-                          </label>
-                          <select
-                            value={gisDataType}
-                            onChange={(e) => {
-                              setGisDataType(e.target.value as 'raster' | 'vector');
-                              setUploadFile(null);
-                            }}
-                            className={`form-input ${hasValue(gisDataType) ? 'has-value' : ''}`}
-                          >
-                            <option value="">-- Chọn Kiểu dữ liệu --</option>
-                            <option value="raster">Raster (Ảnh vệ tinh, Grid...)</option>
-                            <option value="vector">Vector (Hình học, Shape...)</option>
-                          </select>
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* Section 2: Thời gian thu thập */}
-                    <div className="form-section">
-                      <div className="form-section-title">
-                        <Calendar size={16} color="var(--accent)" /> Thời gian thu thập dữ liệu
-                      </div>
-                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(100px, 1fr))', gap: '12px' }}>
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                          <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.85rem', fontWeight: '600', color: 'var(--text)' }}>
-                            Năm <span style={{ color: '#dc3545' }}>*</span>
-                          </label>
-                          <select
-                            value={gisYear}
-                            onChange={(e) => setGisYear(e.target.value)}
-                            className={`form-input ${hasValue(gisYear) ? 'has-value' : ''}`}
-                          >
-                            <option value="">-- Chọn Năm --</option>
-                            {Array.from({ length: 15 }, (_, i) => String(2020 + i)).map((yr) => (
-                              <option key={yr} value={yr}>{yr}</option>
-                            ))}
-                          </select>
-                        </div>
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                          <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.85rem', fontWeight: '600', color: 'var(--text)' }}>
-                            Tháng (Tùy chọn)
-                          </label>
-                          <select
-                            value={gisMonth}
-                            onChange={(e) => setGisMonth(e.target.value)}
-                            className={`form-input ${hasValue(gisMonth) ? 'has-value' : ''}`}
-                          >
-                            <option value="">--</option>
-                            {Array.from({ length: 12 }, (_, i) => String(i + 1)).map((m) => (
-                              <option key={m} value={m}>Tháng {m}</option>
-                            ))}
-                          </select>
-                        </div>
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                          <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.85rem', fontWeight: '600', color: 'var(--text)' }}>
-                            Ngày (Tùy chọn)
-                          </label>
-                          <select
-                            value={gisDay}
-                            onChange={(e) => setGisDay(e.target.value)}
-                            className={`form-input ${hasValue(gisDay) ? 'has-value' : ''}`}
-                          >
-                            <option value="">--</option>
-                            {Array.from({ length: 31 }, (_, i) => String(i + 1)).map((d) => (
-                              <option key={d} value={d}>Ngày {d}</option>
-                            ))}
-                          </select>
-                        </div>
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                          <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.85rem', fontWeight: '600', color: 'var(--text)' }}>
-                            <Clock size={14} color={hasValue(gisTime) ? "var(--accent)" : "var(--text-muted)"} /> Giờ (Tùy chọn)
-                          </label>
-                          <select
-                            value={gisTime}
-                            onChange={(e) => setGisTime(e.target.value)}
-                            className={`form-input ${hasValue(gisTime) ? 'has-value' : ''}`}
-                          >
-                            <option value="">--</option>
-                            {TIME_SLOTS.map(slot => (
-                              <option key={slot} value={slot}>{slot}</option>
-                            ))}
-                          </select>
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* Section 3: Thông tin mô tả */}
-                    <div className="form-section">
-                      <div className="form-section-title">
-                        <FileSpreadsheet size={16} color="var(--accent)" /> Mô tả thông tin
-                      </div>
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                        <textarea
-                          rows={2}
-                          value={gisDescription}
-                          onChange={(e) => setGisDescription(e.target.value)}
-                          placeholder="Nhập mô tả thêm cho tệp tin GIS..."
-                          className={`form-input ${hasValue(gisDescription) ? 'has-value' : ''}`}
-                          style={{ resize: 'vertical' }}
-                        />
-                      </div>
-                    </div>
-
-                  </div>
-                )}
-
-                {uploadGroup === 'station' && (
-                  <div className="slide-down" style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
-                    
-                    {/* Section 1: Cấu hình trạm và Tham số */}
-                    <div className="form-section">
-                      <div className="form-section-title">
-                        <Layers size={16} color="var(--accent)" /> Cấu hình trạm và Tham số
-                      </div>
-                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: '16px' }}>
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                          <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.85rem', fontWeight: '600', color: 'var(--text)' }}>
-                            <MapPin size={14} color={hasValue(selectedStation) ? "var(--accent)" : "var(--text-muted)"} /> Trạm đo lường <span style={{ color: '#dc3545' }}>*</span>
-                          </label>
-                          <input
-                            type="text"
-                            value={selectedStation}
-                            onChange={(e) => setSelectedStation(e.target.value)}
-                            placeholder="Nhập mã trạm tự do..."
-                            className={`form-input ${hasValue(selectedStation) ? 'has-value' : ''}`}
-                          />
-                        </div>
-                        
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                          <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.85rem', fontWeight: '600', color: 'var(--text)' }}>
-                            <Layers size={14} color={hasValue(stationDataType) ? "var(--accent)" : "var(--text-muted)"} /> Dạng dữ liệu trạm <span style={{ color: '#dc3545' }}>*</span>
-                          </label>
-                          <select
-                            value={stationDataType}
-                            onChange={(e) => setStationDataType(e.target.value)}
-                            className={`form-input ${hasValue(stationDataType) ? 'has-value' : ''}`}
-                          >
-                            <option value="">-- Chọn Dạng dữ liệu --</option>
-                            {STATION_DATA_TYPES.map((type) => (
-                              <option key={type.key} value={type.key}>{type.label}</option>
-                            ))}
-                          </select>
-                        </div>
-
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                          <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.85rem', fontWeight: '600', color: 'var(--text)' }}>
-                            <Activity size={14} color={hasValue(selectedParam) ? "var(--accent)" : "var(--text-muted)"} /> Tham số quan trắc <span style={{ color: '#dc3545' }}>*</span>
-                          </label>
-                          <select
-                            value={selectedParam}
-                            onChange={(e) => setSelectedParam(e.target.value)}
-                            className={`form-input ${hasValue(selectedParam) ? 'has-value' : ''}`}
-                          >
-                            <option value="">-- Chọn tham số --</option>
-                            {STATION_PARAMETERS.map((param) => (
-                              <option key={param.key} value={param.key}>{param.label}</option>
-                            ))}
-                          </select>
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* Section 2: Thời gian ghi nhận */}
-                    <div className="form-section">
-                      <div className="form-section-title">
-                        <Calendar size={16} color="var(--accent)" /> Thời gian ghi nhận dữ liệu
-                      </div>
-                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '16px' }}>
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                          <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.85rem', fontWeight: '600', color: 'var(--text)' }}>
-                            <Calendar size={14} color={hasValue(selectedDate) ? "var(--accent)" : "var(--text-muted)"} /> Ngày ghi nhận <span style={{ color: '#dc3545' }}>*</span>
-                          </label>
-                          <input
-                            type="date"
-                            value={selectedDate}
-                            onChange={(e) => setSelectedDate(e.target.value)}
-                            className={`form-input ${hasValue(selectedDate) ? 'has-value' : ''}`}
-                          />
-                        </div>
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                          <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.85rem', fontWeight: '600', color: 'var(--text)' }}>
-                            <Clock size={14} color={hasValue(selectedTime) ? "var(--accent)" : "var(--text-muted)"} /> Giờ ghi nhận <span style={{ color: '#dc3545' }}>*</span>
-                          </label>
-                          <select
-                            value={selectedTime}
-                            onChange={(e) => setSelectedTime(e.target.value)}
-                            className={`form-input ${hasValue(selectedTime) ? 'has-value' : ''}`}
-                          >
-                            {TIME_SLOTS.map(slot => (
-                              <option key={slot} value={slot}>{slot}</option>
-                            ))}
-                          </select>
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* Section 3: Mô tả thông tin */}
-                    <div className="form-section">
-                      <div className="form-section-title">
-                        <FileSpreadsheet size={16} color="var(--accent)" /> Mô tả thông tin
-                      </div>
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                        <textarea
-                          rows={2}
-                          value={uploadDescription}
-                          onChange={(e) => setUploadDescription(e.target.value)}
-                          placeholder="Nhập mô tả thêm cho tệp tin trạm..."
-                          className={`form-input ${hasValue(uploadDescription) ? 'has-value' : ''}`}
-                          style={{ resize: 'vertical' }}
-                        />
-                      </div>
-                    </div>
-
-                  </div>
-                )}
-
-                {uploadGroup === 'monitoring' && (
-                  <div className="slide-down" style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
-                    
-                    {/* Section 1: Cấu hình trạm và Tham số */}
-                    <div className="form-section">
-                      <div className="form-section-title">
-                        <Layers size={16} color="var(--accent)" /> Cấu hình trạm và Tham số
-                      </div>
-                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '16px' }}>
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                          <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.85rem', fontWeight: '600', color: 'var(--text)' }}>
-                            <MapPin size={14} color={hasValue(selectedStation) ? "var(--accent)" : "var(--text-muted)"} /> Trạm quan trắc <span style={{ color: '#dc3545' }}>*</span>
-                          </label>
-                          <input
-                            type="text"
-                            value={selectedStation}
-                            onChange={(e) => setSelectedStation(e.target.value)}
-                            placeholder="Nhập mã trạm tự do..."
-                            className={`form-input ${hasValue(selectedStation) ? 'has-value' : ''}`}
-                          />
-                        </div>
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                          <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.85rem', fontWeight: '600', color: 'var(--text)' }}>
-                            <Activity size={14} color={hasValue(selectedParam) ? "var(--accent)" : "var(--text-muted)"} /> Tham số quan trắc <span style={{ color: '#dc3545' }}>*</span>
-                          </label>
-                          <select
-                            value={selectedParam}
-                            onChange={(e) => setSelectedParam(e.target.value)}
-                            className={`form-input ${hasValue(selectedParam) ? 'has-value' : ''}`}
-                          >
-                            <option value="">-- Chọn tham số --</option>
-                            {MONITORING_PARAMETERS.map((param) => (
-                              <option key={param.key} value={param.key}>{param.label}</option>
-                            ))}
-                          </select>
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* Section 2: Thời gian ghi nhận */}
-                    <div className="form-section">
-                      <div className="form-section-title">
-                        <Calendar size={16} color="var(--accent)" /> Thời gian ghi nhận dữ liệu
-                      </div>
-                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '16px' }}>
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                          <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.85rem', fontWeight: '600', color: 'var(--text)' }}>
-                            <Calendar size={14} color={hasValue(selectedDate) ? "var(--accent)" : "var(--text-muted)"} /> Ngày ghi nhận <span style={{ color: '#dc3545' }}>*</span>
-                          </label>
-                          <input
-                            type="date"
-                            value={selectedDate}
-                            onChange={(e) => setSelectedDate(e.target.value)}
-                            className={`form-input ${hasValue(selectedDate) ? 'has-value' : ''}`}
-                          />
-                        </div>
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                          <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.85rem', fontWeight: '600', color: 'var(--text)' }}>
-                            <Clock size={14} color={hasValue(selectedTime) ? "var(--accent)" : "var(--text-muted)"} /> Giờ ghi nhận <span style={{ color: '#dc3545' }}>*</span>
-                          </label>
-                          <select
-                            value={selectedTime}
-                            onChange={(e) => setSelectedTime(e.target.value)}
-                            className={`form-input ${hasValue(selectedTime) ? 'has-value' : ''}`}
-                          >
-                            {TIME_SLOTS.map(slot => (
-                              <option key={slot} value={slot}>{slot}</option>
-                            ))}
-                          </select>
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* Section 3: Mô tả thông tin */}
-                    <div className="form-section">
-                      <div className="form-section-title">
-                        <FileSpreadsheet size={16} color="var(--accent)" /> Mô tả thông tin
-                      </div>
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                        <textarea
-                          rows={2}
-                          value={uploadDescription}
-                          onChange={(e) => setUploadDescription(e.target.value)}
-                          placeholder="Nhập mô tả thêm cho tệp tin quan trắc..."
-                          className={`form-input ${hasValue(uploadDescription) ? 'has-value' : ''}`}
-                          style={{ resize: 'vertical' }}
-                        />
-                      </div>
-                    </div>
-
-                  </div>
-                )}
-              </div>
-
-              {/* 3. Drag & Drop File Upload Component */}
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                <label style={{ fontSize: '0.85rem', fontWeight: '600', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.5px', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                  <FileCode size={14} /> Tệp dữ liệu tải lên <span style={{ color: '#dc3545' }}>*</span>
-                </label>
-                
-                <div
-                  onDragOver={(e) => { e.preventDefault(); setIsDragActive(true); }}
-                  onDragLeave={() => setIsDragActive(false)}
-                  onDrop={(e) => {
-                    e.preventDefault();
-                    setIsDragActive(false);
-                    if (e.dataTransfer.files && e.dataTransfer.files[0]) {
-                      const file = e.dataTransfer.files[0];
-                      const val = validateFile(file);
-                      if (val.valid) {
-                        autoDetectType(file.name);
-                        setUploadFile(file);
-                        setUploadStatus('idle');
-                      } else {
-                        alert(val.message);
-                      }
-                    }
-                  }}
-                  onClick={() => document.getElementById('manual-file-input')?.click()}
-                  className={`drag-drop-zone ${isDragActive ? 'active' : ''}`}
-                >
-                  <input
-                    id="manual-file-input"
-                    type="file"
-                    style={{ display: 'none' }}
-                    accept={
-                      uploadGroup === 'gis'
-                        ? gisDataType === 'raster'
-                          ? '.tif,.tiff,.cog,.png,.jpg,.jpeg,.rst'
-                          : gisDataType === 'vector'
-                            ? '.geojson,.shp,.kml,.gpkg,.zip,.vtc,.vct,.vdc'
-                            : '.tif,.tiff,.cog,.png,.jpg,.jpeg,.rst,.geojson,.shp,.kml,.gpkg,.zip,.vtc,.vct'
-                        : '.csv'
-                    }
-                    onChange={(e) => {
-                      if (e.target.files && e.target.files[0]) {
-                        const file = e.target.files[0];
-                        const val = validateFile(file);
-                        if (val.valid) {
-                          autoDetectType(file.name);
-                          setUploadFile(file);
-                          setUploadStatus('idle');
-                        } else {
-                          alert(val.message);
-                        }
-                      }
-                    }}
-                  />
-                  
-                  <UploadCloud 
-                    size={44} 
-                    color={isDragActive ? 'var(--accent)' : 'var(--text-muted)'} 
-                    className="drag-drop-zone-icon"
-                    style={{ transition: 'all 0.25s', transform: isDragActive ? 'scale(1.15)' : 'none' }} 
-                  />
-                  <div>
-                    <p style={{ margin: '0 0 4px 0', fontWeight: '600', color: 'var(--text)', fontSize: '0.95rem' }}>
-                      Kéo thả file vào đây hoặc click để duyệt
-                    </p>
-                    <p style={{ margin: '0', fontSize: '0.8rem', color: 'var(--text-muted)' }}>
-                      {uploadGroup === 'gis'
-                        ? gisDataType === 'raster'
-                          ? 'Raster: .tif, .tiff, .cog, .png, .jpg, .jpeg, .rst (Tối đa 100MB)'
-                          : gisDataType === 'vector'
-                            ? 'Vector: .geojson, .shp, .kml, .gpkg, .zip, .vtc, .vct, .vdc (Tối đa 100MB)'
-                            : 'Hỗ trợ: Raster (.tif, .rst...) và Vector (.geojson, .vtc, .vct, .vdc...) (Tối đa 100MB)'
-                        : 'Bảng dữ liệu: .csv (Tối đa 100MB)'}
-                    </p>
-                  </div>
-                </div>
-
-                {/* Selected File Details & Progress */}
-                {uploadFile && (
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', background: 'var(--background)', border: '1px solid var(--border)', borderRadius: 'var(--radius-md)', padding: '14px 18px', marginTop: '4px' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px' }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '10px', overflow: 'hidden', flex: 1 }}>
-                        <FileCode size={22} color="var(--accent)" />
-                        <div style={{ overflow: 'hidden' }}>
-                          <p style={{ margin: '0', fontWeight: '500', fontSize: '0.9rem', color: 'var(--text)', textOverflow: 'ellipsis', overflow: 'hidden', whiteSpace: 'nowrap' }}>
-                            {uploadFile.name}
-                          </p>
-                          <p style={{ margin: '0', fontSize: '0.75rem', color: 'var(--text-muted)' }}>
-                            {(uploadFile.size / (1024 * 1024)).toFixed(2)} MB
-                          </p>
-                        </div>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setUploadFile(null);
-                          setUploadStatus('idle');
-                        }}
-                        disabled={uploadStatus === 'uploading'}
-                        style={{
-                          border: 'none', background: 'none', padding: '6px', cursor: 'pointer',
-                          color: 'var(--text-muted)', borderRadius: '50%', display: 'flex', alignItems: 'center',
-                          transition: 'all 0.2s'
-                        }}
-                        className="hover-bg-red"
-                      >
-                        <Trash2 size={16} className="hover-red" />
-                      </button>
-                    </div>
-
-                    {uploadStatus === 'uploading' && (
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                        <div style={{ height: '6px', background: 'var(--border)', borderRadius: '999px', overflow: 'hidden' }}>
-                          <div style={{ width: `${uploadProgress}%`, height: '100%', background: 'linear-gradient(90deg, #0d6efd, #0dcaf0)', borderRadius: '999px', transition: 'width 0.2s ease-out' }} />
-                        </div>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.75rem', color: 'var(--text-muted)' }}>
-                          <span>Đang tải lên S3...</span>
-                          <span>{uploadProgress}%</span>
-                        </div>
-                      </div>
-                    )}
-
-                    {uploadStatus === 'completed' && (
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--success)', fontSize: '0.85rem', fontWeight: '500' }}>
-                        <CheckCircle2 size={16} /> Tải lên thành công!
-                      </div>
-                    )}
-
-                    {uploadStatus === 'failed' && (
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--danger)', fontSize: '0.85rem', fontWeight: '500' }}>
-                          <XCircle size={16} /> Tải lên thất bại!
-                        </div>
-                        <p style={{ margin: '0', fontSize: '0.75rem', color: 'var(--danger)' }}>{uploadErrorMessage}</p>
-                      </div>
-                    )}
-                  </div>
-                )}
-              </div>
-
-              {/* 4. Action Buttons */}
-              <div style={{ display: 'flex', gap: '12px', marginTop: '12px' }}>
-                <button
-                  type="button"
-                  onClick={handleUploadData}
-                  disabled={!uploadFile || uploadStatus === 'uploading'}
-                  className="primary-upload-btn"
-                >
-                  <UploadCloud size={18} />
-                  {uploadStatus === 'uploading' ? `Đang tải lên... ${uploadProgress}%` : 'Tải Lên Hệ Thống'}
-                </button>
-                
-                {uploadStatus === 'uploading' && (
-                  <button
-                    type="button"
-                    onClick={() => setUploadStatus('cancelled')}
-                    style={{
-                      flex: 1,
-                      padding: '12px 16px',
-                      borderRadius: 'var(--radius-md)',
-                      border: '1px solid var(--border)',
-                      background: 'var(--surface-strong)',
-                      color: 'var(--text)',
-                      fontSize: '0.95rem',
-                      fontWeight: '500',
-                      cursor: 'pointer',
-                      transition: 'all 0.25s'
-                    }}
-                    className="hover-bg-white-10"
-                  >
-                    Hủy
-                  </button>
-                )}
-              </div>
-            </div>
-
-            {/* Cột phải: Panel Xem trước */}
-            <div style={{ flex: '1 1 350px', display: 'flex', flexDirection: 'column', gap: '20px' }}>
-              {/* Storage Path Panel */}
-              <div className="glass-panel" style={{ background: 'var(--surface)', padding: '20px', borderRadius: 'var(--radius-xl)', border: '1px solid var(--border)', boxShadow: 'var(--shadow-md)' }}>
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '16px' }}>
-                  <h4 style={{ margin: 0, fontSize: '0.95rem', fontWeight: 'bold', color: 'var(--text)', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    <Key size={16} color="var(--accent)" /> Đường dẫn lưu trữ
-                  </h4>
-                  {uploadFile && (
+              <div style={{ display: 'flex', gap: '12px' }}>
+                {[
+                  { key: 'gis', label: 'GIS Data' },
+                  { key: 'station', label: 'Station Data' },
+                  { key: 'monitoring', label: 'Monitoring Data' }
+                ].map((group) => {
+                  const active = uploadGroup === group.key;
+                  return (
                     <button
+                      key={group.key}
+                      type="button"
                       onClick={() => {
-                        navigator.clipboard.writeText(getExpectedStoragePath(uploadFile.name));
+                        setUploadGroup(group.key as any);
+                        setUploadFile(null);
+                        setUploadStatus('idle');
                       }}
-                      title="Sao chép đường dẫn"
-                      style={{ border: 'none', background: 'var(--surface-strong)', cursor: 'pointer', color: 'var(--text-muted)', padding: '4px 10px', borderRadius: 'var(--radius-md)', fontSize: '0.75rem', display: 'flex', alignItems: 'center', gap: '4px' }}
+                      className={`group-btn ${active ? 'active' : ''}`}
+                      style={{
+                        padding: '10px 20px',
+                        fontSize: '0.9rem',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '8px'
+                      }}
                     >
-                      <FileCode size={12} /> Sao chép
+                      <Server size={16} /> {group.label}
                     </button>
-                  )}
-                </div>
+                  );
+                })}
+              </div>
+            </div>
 
-                {uploadFile ? (
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
-                    {/* Breadcrumb-style path */}
-                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', alignItems: 'center', fontSize: '0.82rem' }}>
-                      {(() => {
-                        const path = getExpectedStoragePath(uploadFile.name);
-                        const parts = path.split('/');
-                        const colors = ['#0d6efd', '#0dcaf0', '#198754', '#ffc107', '#dc3545', '#6f42c1', '#fd7e14', '#20c997', '#d63384', '#0d6efd'];
-                        return parts.map((part, i) => (
-                          <span key={i} style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-                            {i > 0 && <span style={{ color: 'var(--text-muted)', margin: '0 1px' }}>/</span>}
-                            <span style={{
-                              background: i < 3 ? `${colors[i]}18` : 'var(--surface-strong)',
-                              color: i < 3 ? colors[i] : 'var(--text)',
-                              padding: '4px 10px',
-                              borderRadius: '6px',
-                              fontWeight: i < 3 ? '700' : '400',
-                              fontSize: '0.78rem',
-                              border: `1px solid ${i < 3 ? colors[i] : 'var(--border)'}`,
-                              maxWidth: '160px',
-                              overflow: 'hidden',
-                              textOverflow: 'ellipsis',
-                              whiteSpace: 'nowrap'
-                            }}>
-                              {part}
-                            </span>
-                          </span>
-                        ));
-                      })()}
+            {uploadGroup === 'station' ? (
+              /* --- CRUD MANUAL STATIONS --- */
+              <div className="glass-panel fade-in" style={{ background: 'var(--surface)', padding: '24px', borderRadius: 'var(--radius-xl)', border: '1px solid var(--border)', display: 'flex', flexDirection: 'column', gap: '20px', boxShadow: 'var(--shadow-md)', width: '100%' }}>
+                {/* Header và Bộ lọc */}
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid var(--border)', paddingBottom: '16px', flexWrap: 'wrap', gap: '16px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                    <div style={{ width: '40px', height: '40px', background: 'rgba(25, 135, 84, 0.12)', border: '1px solid rgba(25, 135, 84, 0.2)', color: '#198754', borderRadius: '10px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                      <Server size={20} />
                     </div>
-
-                    {/* File info row */}
-                    <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap', padding: '10px 14px', background: 'var(--background)', borderRadius: 'var(--radius-md)', border: '1px solid var(--border)' }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.82rem', color: 'var(--text)' }}>
-                        <FileCode size={14} color="var(--accent)" />
-                        <span style={{ fontWeight: '600' }}>{uploadFile.name}</span>
-                        <span style={{ color: 'var(--text-muted)' }}>({(uploadFile.size / 1024 / 1024).toFixed(2)} MB)</span>
-                      </div>
-                      {(() => {
-                        const ext = uploadFile.name.substring(uploadFile.name.lastIndexOf('.')).toLowerCase();
-                        const isRaster = ['.tif', '.tiff', '.png', '.jpg', '.jpeg'].includes(ext);
-                        const isVector = ['.geojson', '.kml', '.shp', '.gpkg', '.zip'].includes(ext);
-                        const isCSV = ext === '.csv';
-                        let label = ext.toUpperCase();
-                        let bg = 'var(--surface-strong)';
-                        let color = 'var(--text-muted)';
-                        if (isRaster) { label = 'Raster'; bg = '#0d6efd18'; color = '#0d6efd'; }
-                        else if (isVector) { label = 'Vector'; bg = '#19875418'; color = '#198754'; }
-                        else if (isCSV) { label = 'CSV'; bg = '#6f42c118'; color = '#6f42c1'; }
-                        return <span style={{ padding: '2px 10px', borderRadius: '999px', background: bg, color, fontSize: '0.75rem', fontWeight: '700' }}>{label}</span>;
-                      })()}
+                    <div>
+                      <h3 style={{ margin: 0, fontSize: '1.2rem', fontWeight: 'bold', color: 'var(--text)' }}>
+                        Quản Lý Trạm Dữ Liệu Thủ Công (Manual Stations)
+                      </h3>
+                      <p style={{ margin: '2px 0 0 0', fontSize: '0.82rem', color: 'var(--text-muted)' }}>
+                        Thêm, sửa, xóa các điểm trạm thu thập thủ công (nước ngầm & nước mặt)
+                      </p>
                     </div>
                   </div>
+
+                  <div style={{ display: 'flex', gap: '12px', alignItems: 'center', flexWrap: 'wrap' }}>
+                    {/* Bộ lọc loại trạm */}
+                    <div style={{ display: 'flex', border: '1px solid var(--border)', borderRadius: '999px', overflow: 'hidden', background: 'var(--background-soft)' }}>
+                      {[
+                        { key: 'all', label: 'Tất cả' },
+                        { key: 'groundwater', label: 'Trạm nước ngầm' },
+                        { key: 'surface_water', label: 'Trạm nước mặt' }
+                      ].map(opt => {
+                        const active = manualStationTypeFilter === opt.key;
+                        return (
+                          <button
+                            key={opt.key}
+                            type="button"
+                            onClick={() => setManualStationTypeFilter(opt.key as any)}
+                            style={{
+                              padding: '6px 16px',
+                              border: 'none',
+                              background: active ? 'var(--accent)' : 'transparent',
+                              color: active ? '#fff' : 'var(--text-muted)',
+                              fontSize: '0.8rem',
+                              fontWeight: '600',
+                              cursor: 'pointer',
+                              transition: 'all 0.2s',
+                              borderRadius: active ? '999px' : '0'
+                            }}
+                          >
+                            {opt.label}
+                          </button>
+                        );
+                      })}
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setImportFile(null);
+                        setImportResult(null);
+                        setImportStationType('groundwater');
+                        setShowImportModal(true);
+                      }}
+                      style={{
+                        padding: '8px 16px',
+                        background: 'rgba(25, 135, 84, 0.12)',
+                        border: '1px solid rgba(25, 135, 84, 0.2)',
+                        color: '#198754',
+                        borderRadius: 'var(--radius-md)',
+                        fontSize: '0.85rem',
+                        fontWeight: '600',
+                        cursor: 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '6px',
+                        transition: 'all 0.2s'
+                      }}
+                    >
+                      <FileSpreadsheet size={16} /> Nhập từ Excel
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => handleOpenManualStationForm(null)}
+                      style={{
+                        padding: '8px 16px',
+                        background: 'var(--accent)',
+                        color: '#fff',
+                        border: 'none',
+                        borderRadius: 'var(--radius-md)',
+                        fontSize: '0.85rem',
+                        fontWeight: '600',
+                        cursor: 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '6px',
+                        transition: 'all 0.2s',
+                        boxShadow: '0 2px 8px rgba(13, 110, 253, 0.2)'
+                      }}
+                    >
+                      <Plus size={16} /> Thêm trạm mới
+                    </button>
+                  </div>
+                </div>
+
+                {/* Bảng dữ liệu */}
+                {manualStationsLoading ? (
+                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '60px 0', gap: '12px', color: 'var(--text-muted)' }}>
+                    <div className="animate-spin" style={{ width: '30px', height: '30px', border: '3px solid var(--border)', borderTopColor: 'var(--accent)', borderRadius: '50%' }} />
+                    <span style={{ fontSize: '0.9rem' }}>Đang tải danh sách trạm...</span>
+                  </div>
                 ) : (
-                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '10px', padding: '24px 0', color: 'var(--text-muted)' }}>
-                    <UploadCloud size={32} color="var(--border)" />
-                    <p style={{ margin: 0, fontSize: '0.88rem' }}>Chọn tệp tin và điền thông tin để xem đường dẫn lưu trữ</p>
+                  <div style={{ overflowX: 'auto', borderRadius: 'var(--radius-lg)', border: '1px solid var(--border)' }}>
+                    <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '0.88rem' }}>
+                      <thead>
+                        <tr style={{ background: 'var(--background-soft)', borderBottom: '1px solid var(--border)' }}>
+                          <th style={{ padding: '12px 16px', fontWeight: 'bold', color: 'var(--text)' }}>ID</th>
+                          <th style={{ padding: '12px 16px', fontWeight: 'bold', color: 'var(--text)' }}>Mã trạm</th>
+                          <th style={{ padding: '12px 16px', fontWeight: 'bold', color: 'var(--text)' }}>Loại trạm</th>
+                          <th style={{ padding: '12px 16px', fontWeight: 'bold', color: 'var(--text)' }}>Địa điểm</th>
+                          <th style={{ padding: '12px 16px', fontWeight: 'bold', color: 'var(--text)' }}>Đặc tính thủy vực</th>
+                          <th style={{ padding: '12px 16px', fontWeight: 'bold', color: 'var(--text)' }}>X (Kinh độ)</th>
+                          <th style={{ padding: '12px 16px', fontWeight: 'bold', color: 'var(--text)' }}>Y (Vĩ độ)</th>
+                          <th style={{ padding: '12px 16px', fontWeight: 'bold', color: 'var(--text)' }}>Hiện trường (Pics)</th>
+                          <th style={{ padding: '12px 16px', fontWeight: 'bold', color: 'var(--text)' }}>Trạng thái</th>
+                          <th style={{ padding: '12px 16px', fontWeight: 'bold', color: 'var(--text)', textAlign: 'center' }}>Thao tác</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {(() => {
+                          const filtered = manualStations.filter(st => {
+                            if (manualStationTypeFilter === 'all') return true;
+                            return st.stationType === manualStationTypeFilter;
+                          });
+                          if (filtered.length === 0) {
+                            return (
+                              <tr>
+                                <td colSpan={9} style={{ padding: '40px 16px', textAlign: 'center', color: 'var(--text-muted)' }}>
+                                  Không tìm thấy trạm nào. Click nút "Thêm trạm mới" để bắt đầu!
+                                </td>
+                              </tr>
+                            );
+                          }
+                          return filtered.map(st => (
+                            <tr key={st.id} style={{ borderBottom: '1px solid var(--border)' }} className="hover-bg-surface-strong">
+                              <td style={{ padding: '12px 16px', fontWeight: '600', color: 'var(--text-muted)' }}>{st.id}</td>
+                              <td style={{ padding: '12px 16px', fontWeight: '600', color: 'var(--text)' }}>{st.stationId || '—'}</td>
+                              <td style={{ padding: '12px 16px' }}>
+                                <span style={{
+                                  display: 'inline-block',
+                                  whiteSpace: 'nowrap',
+                                  padding: '2px 8px',
+                                  borderRadius: '6px',
+                                  fontSize: '0.72rem',
+                                  fontWeight: '700',
+                                  background: st.stationType === 'groundwater' ? 'rgba(13, 110, 253, 0.12)' : 'rgba(25, 135, 84, 0.12)',
+                                  color: st.stationType === 'groundwater' ? '#0d6efd' : '#198754',
+                                  border: st.stationType === 'groundwater' ? '1px solid rgba(13, 110, 253, 0.2)' : '1px solid rgba(25, 135, 84, 0.2)'
+                                }}>
+                                  {st.stationType === 'groundwater' ? 'Nước ngầm' : 'Nước mặt'}
+                                </span>
+                              </td>
+                              <td style={{ padding: '12px 16px', fontWeight: '500', color: 'var(--text)' }}>{st.location}</td>
+                              <td style={{ padding: '12px 16px', color: 'var(--text-muted)' }}>{st.hydroChar || '—'}</td>
+                              <td style={{ padding: '12px 16px', fontFamily: 'monospace', color: 'var(--text-muted)' }}>{st.x != null ? parseFloat(st.x.toFixed(6)) : '—'}</td>
+                              <td style={{ padding: '12px 16px', fontFamily: 'monospace', color: 'var(--text-muted)' }}>{st.y != null ? parseFloat(st.y.toFixed(6)) : '—'}</td>
+                              <td style={{ padding: '12px 16px', color: 'var(--text-muted)' }}>
+                                {st.stationType === 'surface_water' ? (
+                                  st.imageCode ? (
+                                    <div style={{ display: 'flex', gap: '6px', flexWrap: 'nowrap' }}>
+                                      {st.imageCode.split(',').map((key, idx) => {
+                                        const trimmed = key.trim();
+                                        if (!trimmed) return null;
+                                        return (
+                                          <button
+                                            key={idx}
+                                            onClick={() => setPreviewFile({ key: trimmed, size: 0, lastModified: '' })}
+                                            className="hover-bg-muted"
+                                            type="button"
+                                            style={{
+                                              display: 'inline-flex',
+                                              alignItems: 'center',
+                                              whiteSpace: 'nowrap',
+                                              gap: '4px',
+                                              background: 'var(--surface-strong)',
+                                              border: '1px solid var(--border)',
+                                              padding: '4px 8px',
+                                              borderRadius: '6px',
+                                              color: 'var(--accent)',
+                                              fontWeight: '600',
+                                              fontSize: '0.74rem',
+                                              cursor: 'pointer',
+                                              transition: 'all 0.2s'
+                                            }}
+                                            title={trimmed.split('/').pop()}
+                                          >
+                                            🖼️ Ảnh {idx + 1}
+                                          </button>
+                                        );
+                                      })}
+                                    </div>
+                                  ) : (
+                                    <span style={{ fontStyle: 'italic', opacity: 0.7 }}>Chưa có</span>
+                                  )
+                                ) : (
+                                  <span style={{ color: 'var(--text-muted)', opacity: 0.5 }}>—</span>
+                                )}
+                              </td>
+                              <td style={{ padding: '12px 16px' }}>
+                                <span style={{
+                                  display: 'inline-block',
+                                  whiteSpace: 'nowrap',
+                                  padding: '2px 8px',
+                                  borderRadius: '6px',
+                                  fontSize: '0.72rem',
+                                  fontWeight: '700',
+                                  background: st.isActive !== false ? 'rgba(25, 135, 84, 0.12)' : 'rgba(220, 53, 69, 0.12)',
+                                  color: st.isActive !== false ? '#198754' : '#dc3545',
+                                  border: st.isActive !== false ? '1px solid rgba(25, 135, 84, 0.2)' : '1px solid rgba(220, 53, 69, 0.2)'
+                                }}>
+                                  {st.isActive !== false ? 'Hoạt động' : 'Tạm dừng'}
+                                </span>
+                              </td>
+                              <td style={{ padding: '8px 16px', textAlign: 'center' }}>
+                                <div style={{ display: 'flex', gap: '8px', justifyContent: 'center' }}>
+                                  <button
+                                    onClick={() => handleOpenManualStationForm(st)}
+                                    type="button"
+                                    title="Sửa thông tin"
+                                    style={{
+                                      border: '1px solid var(--border)',
+                                      background: 'var(--surface-strong)',
+                                      color: 'var(--accent)',
+                                      padding: '6px',
+                                      borderRadius: '6px',
+                                      cursor: 'pointer',
+                                      display: 'flex',
+                                      alignItems: 'center',
+                                      justifyContent: 'center',
+                                      transition: 'all 0.2s'
+                                    }}
+                                    className="hover-bg-white-10"
+                                  >
+                                    <Pencil size={14} />
+                                  </button>
+                                  <button
+                                    onClick={() => st.id && handleDeleteManualStation(st.id)}
+                                    type="button"
+                                    title="Xóa trạm"
+                                    style={{
+                                      border: '1px solid rgba(239, 68, 68, 0.2)',
+                                      background: 'rgba(239, 68, 68, 0.05)',
+                                      color: '#ef4444',
+                                      padding: '6px',
+                                      borderRadius: '6px',
+                                      cursor: 'pointer',
+                                      display: 'flex',
+                                      alignItems: 'center',
+                                      justifyContent: 'center',
+                                      transition: 'all 0.2s'
+                                    }}
+                                    className="hover-bg-red"
+                                  >
+                                    <Trash2 size={14} />
+                                  </button>
+                                </div>
+                              </td>
+                            </tr>
+                          ));
+                        })()}
+                      </tbody>
+                    </table>
                   </div>
                 )}
               </div>
+            ) : (
+              /* --- STANDARD S3 UPLOAD FLOW FOR GIS & MONITORING --- */
+              <div className="upload-tab-container fade-in" style={{ display: 'flex', gap: '24px', flexWrap: 'wrap' }}>
+                {/* Cột trái: Form nhập liệu */}
+                <div className="glass-panel" style={{ flex: '1 1 550px', background: 'var(--surface)', padding: '24px', borderRadius: 'var(--radius-xl)', border: '1px solid var(--border)', display: 'flex', flexDirection: 'column', gap: '20px', boxShadow: 'var(--shadow-md)' }}>
+                  <h3 style={{ margin: '0 0 10px 0', fontSize: '1.25rem', fontWeight: 'bold', color: 'var(--text)', display: 'flex', alignItems: 'center', gap: '10px', borderBottom: '1px solid var(--border)', paddingBottom: '14px' }}>
+                    <UploadCloud size={22} color="var(--accent)" /> Nhập Dữ Liệu Lên Hệ Thống
+                  </h3>
+                  
+                  {/* The Group Selector has been moved to the top of the upload tab */}
 
-              {/* Metadata Summary Panel */}
-              <div className="glass-panel" style={{ background: 'var(--surface)', padding: '20px', borderRadius: 'var(--radius-xl)', border: '1px solid var(--border)', boxShadow: 'var(--shadow-md)', display: 'flex', flexDirection: 'column' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '16px', paddingBottom: '12px', borderBottom: '1px solid var(--border)' }}>
-                  <FileSpreadsheet size={16} color="var(--accent)" />
-                  <h4 style={{ margin: 0, fontSize: '0.95rem', fontWeight: 'bold', color: 'var(--text)' }}>Thông tin tệp tin</h4>
-                </div>
-
-                {uploadFile ? (
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-                    {/* Data group badge */}
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.82rem' }}>
-                      <Server size={14} color="var(--text-muted)" />
-                      <span style={{ color: 'var(--text-muted)', minWidth: '100px' }}>Nhóm dữ liệu</span>
-                      <span style={{
-                        padding: '2px 12px', borderRadius: '999px',
-                        background: uploadGroup === 'gis' ? '#0d6efd18' : uploadGroup === 'station' ? '#19875418' : '#6f42c118',
-                        color: uploadGroup === 'gis' ? '#0d6efd' : uploadGroup === 'station' ? '#198754' : '#6f42c1',
-                        fontWeight: '700', fontSize: '0.78rem'
-                      }}>
-                        {uploadGroup === 'gis' ? 'GIS Data' : uploadGroup === 'station' ? 'Station Data' : 'Monitoring Data'}
-                      </span>
-                    </div>
-
-                    {/* Dynamic metadata rows */}
-                    {uploadGroup === 'gis' ? (
-                      <>
-                        {[
-                          { icon: <Layers size={14} />, label: 'Dataset', value: gisDataset || '—' },
-                          { icon: <Tag size={14} />, label: 'Category', value: gisCategory || '—' },
-                          { icon: <Activity size={14} />, label: 'Kiểu dữ liệu', value: gisDataType ? (gisDataType === 'raster' ? 'Raster' : 'Vector') : '—' },
-                          { icon: <Calendar size={14} />, label: 'Năm', value: gisYear || '—' },
-                          gisMonth ? { icon: <Calendar size={14} />, label: 'Tháng', value: gisMonth } : null,
-                          gisDay ? { icon: <Calendar size={14} />, label: 'Ngày', value: gisDay } : null,
-                          gisTime ? { icon: <Clock size={14} />, label: 'Giờ', value: gisTime } : null,
-                          gisDescription ? { icon: <FileCode size={14} />, label: 'Mô tả', value: gisDescription } : null,
-                        ].filter((row): row is NonNullable<typeof row> => row !== null).map((row, i) => (
-                          <div key={i} style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.82rem', padding: '6px 8px', background: i % 2 === 0 ? 'var(--background)' : 'transparent', borderRadius: '6px' }}>
-                            <span style={{ color: 'var(--text-muted)', display: 'flex' }}>{row.icon}</span>
-                            <span style={{ color: 'var(--text-muted)', minWidth: '90px' }}>{row.label}</span>
-                            <span style={{ color: 'var(--text)', fontWeight: '500', wordBreak: 'break-all' }}>{row.value}</span>
+                  {/* 2. Dynamic Form Fields */}
+                  <div className="dynamic-form-fields" style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+                    {uploadGroup === 'gis' && (
+                      <div className="slide-down" style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+                        
+                        {/* Section 1: Phân loại dữ liệu GIS */}
+                        <div className="form-section">
+                          <div className="form-section-title">
+                            <Layers size={16} color="var(--accent)" /> Cấu hình phân loại GIS
                           </div>
-                        ))}
-                      </>
-                    ) : (
-                      <>
-                        {[
-                          { icon: <MapPin size={14} />, label: 'Trạm', value: selectedStation || '—' },
-                          uploadGroup === 'station' ? { icon: <Layers size={14} />, label: 'Dạng dữ liệu', value: stationDataType ? STATION_DATA_TYPES.find(t => t.key === stationDataType)?.label || stationDataType : '—' } : null,
-                          { icon: <Activity size={14} />, label: 'Tham số', value: selectedParam ? (uploadGroup === 'station' ? STATION_PARAMETERS.find(p => p.key === selectedParam)?.label : MONITORING_PARAMETERS.find(p => p.key === selectedParam)?.label) || selectedParam : '—' },
-                          selectedDate ? { icon: <Calendar size={14} />, label: 'Ngày', value: selectedDate } : null,
-                          selectedTime ? { icon: <Clock size={14} />, label: 'Giờ', value: selectedTime } : null,
-                          uploadDescription ? { icon: <FileCode size={14} />, label: 'Mô tả', value: uploadDescription } : null,
-                        ].filter((row): row is NonNullable<typeof row> => row !== null).map((row, i) => (
-                          <div key={i} style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.82rem', padding: '6px 8px', background: i % 2 === 0 ? 'var(--background)' : 'transparent', borderRadius: '6px' }}>
-                            <span style={{ color: 'var(--text-muted)', display: 'flex' }}>{row.icon}</span>
-                            <span style={{ color: 'var(--text-muted)', minWidth: '90px' }}>{row.label}</span>
-                            <span style={{ color: 'var(--text)', fontWeight: '500', wordBreak: 'break-all' }}>{row.value}</span>
-                          </div>
-                        ))}
-                      </>
-                    )}
-
-                    {!uploadGroup && (
-                      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '8px', padding: '20px 0', color: 'var(--text-muted)' }}>
-                        <p style={{ margin: 0, fontSize: '0.85rem' }}>Chưa có thông tin</p>
-                      </div>
-                    )}
-                  </div>
-                ) : (
-                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '10px', padding: '20px 0', color: 'var(--text-muted)' }}>
-                    <FileSpreadsheet size={28} color="var(--border)" />
-                    <p style={{ margin: 0, fontSize: '0.85rem' }}>Chọn tệp tin để xem thông tin chi tiết</p>
-                  </div>
-                )}
-              </div>
-
-              {/* Recent uploads when no selection */}
-              {recentUploads.length > 0 && !uploadFile && ((uploadGroup === 'gis' && !gisDataset) || (uploadGroup !== 'gis' && !selectedStation)) && (
-                <div className="glass-panel fade-in" style={{ background: 'var(--surface)', padding: '20px', borderRadius: 'var(--radius-xl)', border: '1px solid var(--border)', boxShadow: 'var(--shadow-md)', overflow: 'hidden' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '16px', borderBottom: '1px solid var(--border)', paddingBottom: '14px', flexWrap: 'wrap', gap: '8px' }}>
-                    <h4 style={{ margin: 0, fontSize: '0.95rem', fontWeight: 'bold', color: 'var(--text)', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                      <Clock size={16} color="var(--accent)" /> Tệp tải lên gần nhất
-                    </h4>
-                    {canManageData && selectedRecentKeys.length > 0 ? (
-                      <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-                        <button
-                          onClick={handleDeleteSelectedRecent}
-                          disabled={isDeletingRecent}
-                          style={{
-                            border: 'none',
-                            background: '#dc3545',
-                            color: '#fff',
-                            cursor: 'pointer',
-                            padding: '4px 10px',
-                            borderRadius: '999px',
-                            fontSize: '0.75rem',
-                            fontWeight: '600',
-                            display: 'flex',
-                            alignItems: 'center',
-                            gap: '4px',
-                            transition: 'all 0.2s'
-                          }}
-                        >
-                          <Trash2 size={12} /> {isDeletingRecent ? 'Đang xóa...' : `Xóa (${selectedRecentKeys.length})`}
-                        </button>
-                        <button
-                          onClick={() => setSelectedRecentKeys([])}
-                          style={{
-                            border: '1px solid var(--border)',
-                            background: 'var(--surface-strong)',
-                            color: 'var(--text)',
-                            cursor: 'pointer',
-                            padding: '3px 10px',
-                            borderRadius: '999px',
-                            fontSize: '0.75rem',
-                            fontWeight: '600',
-                            transition: 'all 0.2s'
-                          }}
-                        >
-                          Hủy chọn
-                        </button>
-                      </div>
-                    ) : (
-                      <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)', background: 'var(--surface-strong)', padding: '4px 12px', borderRadius: '999px', fontWeight: '600' }}>
-                        {recentUploads.length} tệp
-                      </span>
-                    )}
-                  </div>
-                  <div 
-                    onScroll={handleRecentScroll}
-                    style={{ 
-                      display: 'flex', 
-                      flexDirection: 'column', 
-                      gap: '8px', 
-                      maxHeight: '380px', 
-                      overflowY: 'auto', 
-                      paddingRight: '6px' 
-                    }}
-                  >
-                    {recentUploads.slice(0, visibleRecentCount).map((file) => {
-                      const fileName = file.key.split('/').pop() || file.key;
-                      const filePath = getParentPath(file.key) || '/';
-                      const fileExt = fileName.substring(fileName.lastIndexOf('.')).toLowerCase();
-                      const isRaster = ['.tif', '.tiff', '.cog', '.png', '.jpg', '.jpeg', '.rst'].includes(fileExt);
-                      const isVector = ['.geojson', '.shp', '.kml', '.gpkg', '.zip', '.vtc', '.vct', '.vdc'].includes(fileExt);
-                      
-                      return (
-                        <div 
-                          key={file.key}
-                          onClick={() => setPreviewFile(file)}
-                          style={{ 
-                            display: 'flex', 
-                            alignItems: 'center', 
-                            justifyContent: 'space-between',
-                            padding: '12px 16px', 
-                            background: 'var(--background)', 
-                            border: '1px solid var(--border)', 
-                            borderRadius: 'var(--radius-md)',
-                            cursor: 'pointer',
-                            transition: 'all 0.2s'
-                          }}
-                          className="hover-bg-surface-strong"
-                        >
-                          <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flex: 1, minWidth: 0 }}>
-                            {canManageData && (
-                              <input
-                                type="checkbox"
-                                checked={selectedRecentKeys.includes(file.key)}
-                                onClick={(e) => e.stopPropagation()}
-                                onChange={(e) => {
-                                  if (e.target.checked) {
-                                    setSelectedRecentKeys(prev => [...prev, file.key]);
-                                  } else {
-                                    setSelectedRecentKeys(prev => prev.filter(k => k !== file.key));
-                                  }
-                                }}
-                                style={{
-                                  cursor: 'pointer',
-                                  width: '16px',
-                                  height: '16px',
-                                  borderRadius: '4px',
-                                  border: '1px solid var(--border)',
-                                  accentColor: 'var(--accent)',
-                                  marginRight: '4px'
-                                }}
-                              />
-                            )}
-                            <div style={{ 
-                              width: '36px', 
-                              height: '36px', 
-                              borderRadius: 'var(--radius-md)', 
-                              background: isRaster ? 'rgba(13, 110, 253, 0.1)' : isVector ? 'rgba(25, 135, 84, 0.1)' : 'rgba(111, 66, 193, 0.1)',
-                              display: 'flex', 
-                              alignItems: 'center', 
-                              justifyContent: 'center',
-                              flexShrink: 0
-                            }}>
-                              <FileCode size={18} color={isRaster ? '#0d6efd' : isVector ? '#198754' : '#6f42c1'} />
-                            </div>
-                            <div style={{ flex: 1, minWidth: 0 }}>
-                              <p style={{ margin: '0 0 4px 0', fontSize: '0.9rem', fontWeight: '600', color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={fileName}>
-                                {fileName}
-                              </p>
-                              <p style={{ margin: 0, fontSize: '0.75rem', color: 'var(--text-muted)', fontFamily: 'monospace', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={filePath}>
-                                {truncatePath(filePath, 60)}
-                              </p>
-                            </div>
-                          </div>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexShrink: 0 }}>
-                            <div style={{ textAlign: 'right' }}>
-                              <p style={{ margin: '0 0 2px 0', fontSize: '0.75rem', color: 'var(--text-muted)' }}>
-                                {(file.size / 1024 / 1024).toFixed(2)} MB
-                              </p>
-                              <p style={{ margin: 0, fontSize: '0.7rem', color: 'var(--text-muted)' }}>
-                                {new Date(file.lastModified).toLocaleString('vi-VN')}
-                              </p>
-                            </div>
-                            <span style={{ 
-                              padding: '4px 10px', 
-                              borderRadius: '999px', 
-                              background: isRaster ? 'rgba(13, 110, 253, 0.1)' : isVector ? 'rgba(25, 135, 84, 0.1)' : 'rgba(111, 66, 193, 0.1)',
-                              color: isRaster ? '#0d6efd' : isVector ? '#198754' : '#6f42c1',
-                              fontSize: '0.7rem', 
-                              fontWeight: '700',
-                              textTransform: 'uppercase'
-                            }}>
-                              {isRaster ? 'Raster' : isVector ? 'Vector' : 'CSV'}
-                            </span>
-                            {canManageData && (
-                              <button
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  const confirmDelete = window.confirm(`Bạn có chắc chắn muốn xóa tệp này?\n${fileName}`);
-                                  if (confirmDelete) {
-                                    handleDeleteSingleRecent(file.key);
-                                  }
-                                }}
-                                style={{
-                                  border: 'none',
-                                  background: 'none',
-                                  cursor: 'pointer',
-                                  color: 'var(--text-muted)',
-                                  padding: '6px',
-                                  borderRadius: '50%',
-                                  display: 'flex',
-                                  alignItems: 'center',
-                                  justifyContent: 'center',
-                                  transition: 'all 0.2s',
-                                  marginLeft: '4px'
-                                }}
-                                className="hover-bg-red hover-red"
-                                title="Xóa tệp"
+                          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: '16px' }}>
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                              <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.85rem', fontWeight: '600', color: 'var(--text)' }}>
+                                <Layers size={14} color={hasValue(gisDataset) ? "var(--accent)" : "var(--text-muted)"} /> Dataset <span style={{ color: '#dc3545' }}>*</span>
+                              </label>
+                              <select
+                                value={gisDataset}
+                                onChange={(e) => setGisDataset(e.target.value)}
+                                className={`form-input ${hasValue(gisDataset) ? 'has-value' : ''}`}
                               >
-                                <Trash2 size={13} />
-                              </button>
-                            )}
+                                <option value="">-- Chọn Dataset --</option>
+                                {Object.entries(GIS_DATASETS).map(([key, val]) => (
+                                  <option key={key} value={key}>{val.label}</option>
+                                ))}
+                              </select>
+                            </div>
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                              <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.85rem', fontWeight: '600', color: 'var(--text)' }}>
+                                <Tag size={14} color={hasValue(gisCategory) ? "var(--accent)" : "var(--text-muted)"} /> Category <span style={{ color: '#dc3545' }}>*</span>
+                              </label>
+                              <select
+                                value={gisCategory}
+                                onChange={(e) => setGisCategory(e.target.value)}
+                                className={`form-input ${hasValue(gisCategory) ? 'has-value' : ''}`}
+                              >
+                                <option value="">-- Chọn Category --</option>
+                                {(GIS_DATASETS[gisDataset as keyof typeof GIS_DATASETS]?.categories || []).map((cat) => (
+                                  <option key={cat.key} value={cat.key}>{cat.label}</option>
+                                ))}
+                              </select>
+                            </div>
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                              <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.85rem', fontWeight: '600', color: 'var(--text)' }}>
+                                <Activity size={14} color={hasValue(gisDataType) ? "var(--accent)" : "var(--text-muted)"} /> Kiểu dữ liệu GIS <span style={{ color: '#dc3545' }}>*</span>
+                              </label>
+                              <select
+                                value={gisDataType}
+                                onChange={(e) => setGisDataType(e.target.value)}
+                                className={`form-input ${hasValue(gisDataType) ? 'has-value' : ''}`}
+                              >
+                                <option value="">-- Chọn Kiểu --</option>
+                                <option value="raster">Raster (Ảnh vệ tinh, TIF...)</option>
+                                <option value="vector">Vector (Bản đồ, GeoJSON...)</option>
+                              </select>
+                            </div>
                           </div>
                         </div>
-                      );
-                    })}
+
+                        {/* Section 2: Thời gian thu thập */}
+                        <div className="form-section">
+                          <div className="form-section-title">
+                            <Calendar size={16} color="var(--accent)" /> Thời gian thu thập dữ liệu
+                          </div>
+                          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(100px, 1fr))', gap: '12px' }}>
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                              <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.85rem', fontWeight: '600', color: 'var(--text)' }}>
+                                Năm <span style={{ color: '#dc3545' }}>*</span>
+                              </label>
+                              <select
+                                value={gisYear}
+                                onChange={(e) => setGisYear(e.target.value)}
+                                className={`form-input ${hasValue(gisYear) ? 'has-value' : ''}`}
+                              >
+                                <option value="">-- Chọn Năm --</option>
+                                {Array.from({ length: 15 }, (_, i) => String(2020 + i)).map((yr) => (
+                                  <option key={yr} value={yr}>{yr}</option>
+                                ))}
+                              </select>
+                            </div>
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                              <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.85rem', fontWeight: '600', color: 'var(--text)' }}>
+                                Tháng (Tùy chọn)
+                              </label>
+                              <select
+                                value={gisMonth}
+                                onChange={(e) => setGisMonth(e.target.value)}
+                                className={`form-input ${hasValue(gisMonth) ? 'has-value' : ''}`}
+                              >
+                                <option value="">--</option>
+                                {Array.from({ length: 12 }, (_, i) => String(i + 1)).map((m) => (
+                                  <option key={m} value={m}>Tháng {m}</option>
+                                ))}
+                              </select>
+                            </div>
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                              <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.85rem', fontWeight: '600', color: 'var(--text)' }}>
+                                Ngày (Tùy chọn)
+                              </label>
+                              <select
+                                value={gisDay}
+                                onChange={(e) => setGisDay(e.target.value)}
+                                className={`form-input ${hasValue(gisDay) ? 'has-value' : ''}`}
+                              >
+                                <option value="">--</option>
+                                {Array.from({ length: 31 }, (_, i) => String(i + 1)).map((d) => (
+                                  <option key={d} value={d}>Ngày {d}</option>
+                                ))}
+                              </select>
+                            </div>
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                              <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.85rem', fontWeight: '600', color: 'var(--text)' }}>
+                                <Clock size={14} color={hasValue(gisTime) ? "var(--accent)" : "var(--text-muted)"} /> Giờ (Tùy chọn)
+                              </label>
+                              <select
+                                value={gisTime}
+                                onChange={(e) => setGisTime(e.target.value)}
+                                className={`form-input ${hasValue(gisTime) ? 'has-value' : ''}`}
+                              >
+                                <option value="">--</option>
+                                {TIME_SLOTS.map(slot => (
+                                  <option key={slot} value={slot}>{slot}</option>
+                                ))}
+                              </select>
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Section 3: Thông tin mô tả */}
+                        <div className="form-section">
+                          <div className="form-section-title">
+                            <FileSpreadsheet size={16} color="var(--accent)" /> Mô tả thông tin
+                          </div>
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                            <textarea
+                              rows={2}
+                              value={gisDescription}
+                              onChange={(e) => setGisDescription(e.target.value)}
+                              placeholder="Nhập mô tả thêm cho tệp tin GIS..."
+                              className={`form-input ${hasValue(gisDescription) ? 'has-value' : ''}`}
+                              style={{ resize: 'vertical' }}
+                            />
+                          </div>
+                        </div>
+
+                      </div>
+                    )}
+
+                    {uploadGroup === 'monitoring' && (
+                      <div className="slide-down" style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+                        
+                        {/* Section 1: Cấu hình trạm và Tham số */}
+                        <div className="form-section">
+                          <div className="form-section-title">
+                            <Layers size={16} color="var(--accent)" /> Cấu hình trạm và Tham số
+                          </div>
+                          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '16px' }}>
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                              <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.85rem', fontWeight: '600', color: 'var(--text)' }}>
+                                <MapPin size={14} color={hasValue(selectedStation) ? "var(--accent)" : "var(--text-muted)"} /> Trạm quan trắc <span style={{ color: '#dc3545' }}>*</span>
+                              </label>
+                              <input
+                                type="text"
+                                value={selectedStation}
+                                onChange={(e) => setSelectedStation(e.target.value)}
+                                placeholder="Nhập mã trạm tự do..."
+                                className={`form-input ${hasValue(selectedStation) ? 'has-value' : ''}`}
+                              />
+                            </div>
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                              <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.85rem', fontWeight: '600', color: 'var(--text)' }}>
+                                <Activity size={14} color={hasValue(selectedParam) ? "var(--accent)" : "var(--text-muted)"} /> Tham số quan trắc <span style={{ color: '#dc3545' }}>*</span>
+                              </label>
+                              <select
+                                value={selectedParam}
+                                onChange={(e) => setSelectedParam(e.target.value)}
+                                className={`form-input ${hasValue(selectedParam) ? 'has-value' : ''}`}
+                              >
+                                <option value="">-- Chọn tham số --</option>
+                                {MONITORING_PARAMETERS.map((param) => (
+                                  <option key={param.key} value={param.key}>{param.label}</option>
+                                ))}
+                              </select>
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Section 2: Thời gian ghi nhận */}
+                        <div className="form-section">
+                          <div className="form-section-title">
+                            <Calendar size={16} color="var(--accent)" /> Thời gian ghi nhận dữ liệu
+                          </div>
+                          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '16px' }}>
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                              <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.85rem', fontWeight: '600', color: 'var(--text)' }}>
+                                <Calendar size={14} color={hasValue(selectedDate) ? "var(--accent)" : "var(--text-muted)"} /> Ngày ghi nhận <span style={{ color: '#dc3545' }}>*</span>
+                              </label>
+                              <input
+                                type="date"
+                                value={selectedDate}
+                                onChange={(e) => setSelectedDate(e.target.value)}
+                                className={`form-input ${hasValue(selectedDate) ? 'has-value' : ''}`}
+                              />
+                            </div>
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                              <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.85rem', fontWeight: '600', color: 'var(--text)' }}>
+                                <Clock size={14} color={hasValue(selectedTime) ? "var(--accent)" : "var(--text-muted)"} /> Giờ ghi nhận <span style={{ color: '#dc3545' }}>*</span>
+                              </label>
+                              <select
+                                value={selectedTime}
+                                onChange={(e) => setSelectedTime(e.target.value)}
+                                className={`form-input ${hasValue(selectedTime) ? 'has-value' : ''}`}
+                              >
+                                {TIME_SLOTS.map(slot => (
+                                  <option key={slot} value={slot}>{slot}</option>
+                                ))}
+                              </select>
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Section 3: Mô tả thông tin */}
+                        <div className="form-section">
+                          <div className="form-section-title">
+                            <FileSpreadsheet size={16} color="var(--accent)" /> Mô tả thông tin
+                          </div>
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                            <textarea
+                              rows={2}
+                              value={uploadDescription}
+                              onChange={(e) => setUploadDescription(e.target.value)}
+                              placeholder="Nhập mô tả thêm cho tệp tin quan trắc..."
+                              className={`form-input ${hasValue(uploadDescription) ? 'has-value' : ''}`}
+                              style={{ resize: 'vertical' }}
+                            />
+                          </div>
+                        </div>
+
+                      </div>
+                    )}
+                  </div>
+
+                  {/* 3. Drag & Drop File Upload Component */}
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                    <label style={{ fontSize: '0.85rem', fontWeight: '600', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.5px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      <FileCode size={14} /> Tệp dữ liệu tải lên <span style={{ color: '#dc3545' }}>*</span>
+                    </label>
+                    
+                    <div
+                      onDragOver={(e) => { e.preventDefault(); setIsDragActive(true); }}
+                      onDragLeave={() => setIsDragActive(false)}
+                      onDrop={(e) => {
+                        e.preventDefault();
+                        setIsDragActive(false);
+                        if (e.dataTransfer.files && e.dataTransfer.files[0]) {
+                          const file = e.dataTransfer.files[0];
+                          const val = validateFile(file);
+                          if (val.valid) {
+                            autoDetectType(file.name);
+                            setUploadFile(file);
+                            setUploadStatus('idle');
+                          } else {
+                            alert(val.message);
+                          }
+                        }
+                      }}
+                      onClick={() => document.getElementById('manual-file-input')?.click()}
+                      className={`drag-drop-zone ${isDragActive ? 'active' : ''}`}
+                    >
+                      <input
+                        id="manual-file-input"
+                        type="file"
+                        style={{ display: 'none' }}
+                        accept={
+                          uploadGroup === 'gis'
+                            ? gisDataType === 'raster'
+                              ? '.tif,.tiff,.cog,.png,.jpg,.jpeg,.rst'
+                              : gisDataType === 'vector'
+                                ? '.geojson,.shp,.kml,.gpkg,.zip,.vtc,.vct,.vdc'
+                                : '.tif,.tiff,.cog,.png,.jpg,.jpeg,.rst,.geojson,.shp,.kml,.gpkg,.zip,.vtc,.vct'
+                            : '.csv'
+                        }
+                        onChange={(e) => {
+                          if (e.target.files && e.target.files[0]) {
+                            const file = e.target.files[0];
+                            const val = validateFile(file);
+                            if (val.valid) {
+                              autoDetectType(file.name);
+                              setUploadFile(file);
+                              setUploadStatus('idle');
+                            } else {
+                              alert(val.message);
+                            }
+                          }
+                        }}
+                      />
+                      
+                      <UploadCloud 
+                        size={44} 
+                        color={isDragActive ? 'var(--accent)' : 'var(--text-muted)'} 
+                        className="drag-drop-zone-icon"
+                        style={{ transition: 'all 0.25s', transform: isDragActive ? 'scale(1.15)' : 'none' }} 
+                      />
+                      <div>
+                        <p style={{ margin: '0 0 4px 0', fontWeight: '600', color: 'var(--text)', fontSize: '0.95rem' }}>
+                          Kéo thả file vào đây hoặc click để duyệt
+                        </p>
+                        <p style={{ margin: '0', fontSize: '0.8rem', color: 'var(--text-muted)' }}>
+                          {uploadGroup === 'gis'
+                            ? gisDataType === 'raster'
+                              ? 'Raster: .tif, .tiff, .cog, .png, .jpg, .jpeg, .rst (Tối đa 100MB)'
+                              : gisDataType === 'vector'
+                                ? 'Vector: .geojson, .shp, .kml, .gpkg, .zip, .vtc, .vct, .vdc (Tối đa 100MB)'
+                                : 'Hỗ trợ: Raster (.tif, .rst...) và Vector (.geojson, .vtc, .vct, .vdc...) (Tối đa 100MB)'
+                            : 'Bảng dữ liệu: .csv (Tối đa 100MB)'}
+                        </p>
+                      </div>
+                    </div>
+
+                    {/* Selected File Details & Progress */}
+                    {uploadFile && (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', background: 'var(--background)', border: '1px solid var(--border)', borderRadius: 'var(--radius-md)', padding: '14px 18px', marginTop: '4px' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '10px', overflow: 'hidden', flex: 1 }}>
+                            <FileCode size={22} color="var(--accent)" />
+                            <div style={{ overflow: 'hidden' }}>
+                              <p style={{ margin: '0', fontWeight: '500', fontSize: '0.9rem', color: 'var(--text)', textOverflow: 'ellipsis', overflow: 'hidden', whiteSpace: 'nowrap' }}>
+                                {uploadFile.name}
+                              </p>
+                              <p style={{ margin: '0', fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                                {(uploadFile.size / (1024 * 1024)).toFixed(2)} MB
+                              </p>
+                            </div>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setUploadFile(null);
+                              setUploadStatus('idle');
+                            }}
+                            disabled={uploadStatus === 'uploading'}
+                            style={{
+                              border: 'none', background: 'none', padding: '6px', cursor: 'pointer',
+                              color: 'var(--text-muted)', borderRadius: '50%', display: 'flex', alignItems: 'center',
+                              transition: 'all 0.2s'
+                            }}
+                            className="hover-bg-red"
+                          >
+                            <Trash2 size={16} className="hover-red" />
+                          </button>
+                        </div>
+
+                        {uploadStatus === 'uploading' && (
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                            <div style={{ height: '6px', background: 'var(--border)', borderRadius: '999px', overflow: 'hidden' }}>
+                              <div style={{ width: `${uploadProgress}%`, height: '100%', background: 'linear-gradient(90deg, #0d6efd, #0dcaf0)', borderRadius: '999px', transition: 'width 0.2s ease-out' }} />
+                            </div>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                              <span>Đang tải lên S3...</span>
+                              <span>{uploadProgress}%</span>
+                            </div>
+                          </div>
+                        )}
+
+                        {uploadStatus === 'completed' && (
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--success)', fontSize: '0.85rem', fontWeight: '500' }}>
+                            <CheckCircle2 size={16} /> Tải lên thành công!
+                          </div>
+                        )}
+
+                        {uploadStatus === 'failed' && (
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--danger)', fontSize: '0.85rem', fontWeight: '500' }}>
+                              <XCircle size={16} /> Tải lên thất bại!
+                            </div>
+                            <p style={{ margin: '0', fontSize: '0.75rem', color: 'var(--danger)' }}>{uploadErrorMessage}</p>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* 4. Action Buttons */}
+                  <div style={{ display: 'flex', gap: '12px', marginTop: '12px' }}>
+                    <button
+                      type="button"
+                      onClick={handleUploadData}
+                      disabled={!uploadFile || uploadStatus === 'uploading'}
+                      className="primary-upload-btn"
+                    >
+                      <UploadCloud size={18} />
+                      {uploadStatus === 'uploading' ? `Đang tải lên... ${uploadProgress}%` : 'Tải Lên Hệ Thống'}
+                    </button>
+                    
+                    {uploadStatus === 'uploading' && (
+                      <button
+                        type="button"
+                        onClick={() => setUploadStatus('cancelled')}
+                        style={{
+                          flex: 1,
+                          padding: '12px 16px',
+                          borderRadius: 'var(--radius-md)',
+                          border: '1px solid var(--border)',
+                          background: 'var(--surface-strong)',
+                          color: 'var(--text)',
+                          fontSize: '0.95rem',
+                          fontWeight: '500',
+                          cursor: 'pointer',
+                          transition: 'all 0.25s'
+                        }}
+                        className="hover-bg-white-10"
+                      >
+                        Hủy
+                      </button>
+                    )}
                   </div>
                 </div>
-              )}
-            </div>
-          </div>
+
+                {/* Cột phải: Panel Xem trước */}
+                <div style={{ flex: '1 1 350px', display: 'flex', flexDirection: 'column', gap: '20px' }}>
+                  {/* Storage Path Panel */}
+                  <div className="glass-panel" style={{ background: 'var(--surface)', padding: '20px', borderRadius: 'var(--radius-xl)', border: '1px solid var(--border)', boxShadow: 'var(--shadow-md)' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '16px' }}>
+                      <h4 style={{ margin: 0, fontSize: '0.95rem', fontWeight: 'bold', color: 'var(--text)', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <Key size={16} color="var(--accent)" /> Đường dẫn lưu trữ
+                      </h4>
+                      {uploadFile && (
+                        <button
+                          onClick={() => {
+                            navigator.clipboard.writeText(getExpectedStoragePath(uploadFile.name));
+                          }}
+                          title="Sao chép đường dẫn"
+                          style={{ border: 'none', background: 'var(--surface-strong)', cursor: 'pointer', color: 'var(--text-muted)', padding: '4px 10px', borderRadius: 'var(--radius-md)', fontSize: '0.75rem', display: 'flex', alignItems: 'center', gap: '4px' }}
+                        >
+                          <FileCode size={12} /> Sao chép
+                        </button>
+                      )}
+                    </div>
+
+                    {uploadFile ? (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+                        {/* Breadcrumb-style path */}
+                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', alignItems: 'center', fontSize: '0.82rem' }}>
+                          {(() => {
+                            const path = getExpectedStoragePath(uploadFile.name);
+                            const parts = path.split('/');
+                            const colors = ['#0d6efd', '#0dcaf0', '#198754', '#ffc107', '#dc3545', '#6f42c1', '#fd7e14', '#20c997', '#d63384', '#0d6efd'];
+                            return parts.map((part, i) => (
+                              <span key={i} style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                                {i > 0 && <span style={{ color: 'var(--text-muted)', margin: '0 1px' }}>/</span>}
+                                <span style={{
+                                  background: i < 3 ? `${colors[i]}18` : 'var(--surface-strong)',
+                                  color: i < 3 ? colors[i] : 'var(--text)',
+                                  padding: '4px 10px',
+                                  borderRadius: '6px',
+                                  fontWeight: i < 3 ? '700' : '400',
+                                  fontSize: '0.78rem',
+                                  border: `1px solid ${i < 3 ? colors[i] : 'var(--border)'}`,
+                                  maxWidth: '160px',
+                                  overflow: 'hidden',
+                                  textOverflow: 'ellipsis',
+                                  whiteSpace: 'nowrap'
+                                }}>
+                                  {part}
+                                </span>
+                              </span>
+                            ));
+                          })()}
+                        </div>
+
+                        {/* File info row */}
+                        <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap', padding: '10px 14px', background: 'var(--background)', borderRadius: 'var(--radius-md)', border: '1px solid var(--border)' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.82rem', color: 'var(--text)' }}>
+                            <FileCode size={14} color="var(--accent)" />
+                            <span style={{ fontWeight: '600' }}>{uploadFile.name}</span>
+                            <span style={{ color: 'var(--text-muted)' }}>({(uploadFile.size / 1024 / 1024).toFixed(2)} MB)</span>
+                          </div>
+                          {(() => {
+                            const ext = uploadFile.name.substring(uploadFile.name.lastIndexOf('.')).toLowerCase();
+                            const isRaster = ['.tif', '.tiff', '.png', '.jpg', '.jpeg'].includes(ext);
+                            const isVector = ['.geojson', '.kml', '.shp', '.gpkg', '.zip'].includes(ext);
+                            const isCSV = ext === '.csv';
+                            let label = ext.toUpperCase();
+                            let bg = 'var(--surface-strong)';
+                            let color = 'var(--text-muted)';
+                            if (isRaster) { label = 'Raster'; bg = '#0d6efd18'; color = '#0d6efd'; }
+                            else if (isVector) { label = 'Vector'; bg = '#19875418'; color = '#198754'; }
+                            else if (isCSV) { label = 'CSV'; bg = '#6f42c118'; color = '#6f42c1'; }
+                            return <span style={{ padding: '2px 10px', borderRadius: '999px', background: bg, color, fontSize: '0.75rem', fontWeight: '700' }}>{label}</span>;
+                          })()}
+                        </div>
+                      </div>
+                    ) : (
+                      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '10px', padding: '24px 0', color: 'var(--text-muted)' }}>
+                        <UploadCloud size={32} color="var(--border)" />
+                        <p style={{ margin: 0, fontSize: '0.88rem' }}>Chọn tệp tin và điền thông tin để xem đường dẫn lưu trữ</p>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Metadata Summary Panel */}
+                  <div className="glass-panel" style={{ background: 'var(--surface)', padding: '20px', borderRadius: 'var(--radius-xl)', border: '1px solid var(--border)', boxShadow: 'var(--shadow-md)', display: 'flex', flexDirection: 'column' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '16px', paddingBottom: '12px', borderBottom: '1px solid var(--border)' }}>
+                      <FileSpreadsheet size={16} color="var(--accent)" />
+                      <h4 style={{ margin: 0, fontSize: '0.95rem', fontWeight: 'bold', color: 'var(--text)' }}>Thông tin tệp tin</h4>
+                    </div>
+
+                    {uploadFile ? (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                        {/* Data group badge */}
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.82rem' }}>
+                          <Server size={14} color="var(--text-muted)" />
+                          <span style={{ color: 'var(--text-muted)', minWidth: '100px' }}>Nhóm dữ liệu</span>
+                          <span style={{
+                            padding: '2px 12px', borderRadius: '999px',
+                            background: uploadGroup === 'gis' ? '#0d6efd18' : (uploadGroup as string) === 'station' ? '#19875418' : '#6f42c118',
+                            color: uploadGroup === 'gis' ? '#0d6efd' : (uploadGroup as string) === 'station' ? '#198754' : '#6f42c1',
+                            fontWeight: '700', fontSize: '0.78rem'
+                          }}>
+                            {uploadGroup === 'gis' ? 'GIS Data' : (uploadGroup as string) === 'station' ? 'Station Data' : 'Monitoring Data'}
+                          </span>
+                        </div>
+
+                        {/* Dynamic metadata rows */}
+                        {uploadGroup === 'gis' ? (
+                          <>
+                            {[
+                              { icon: <Layers size={14} />, label: 'Dataset', value: gisDataset || '—' },
+                              { icon: <Tag size={14} />, label: 'Category', value: gisCategory || '—' },
+                              { icon: <Activity size={14} />, label: 'Kiểu dữ liệu', value: gisDataType ? (gisDataType === 'raster' ? 'Raster' : 'Vector') : '—' },
+                              { icon: <Calendar size={14} />, label: 'Năm', value: gisYear || '—' },
+                              gisMonth ? { icon: <Calendar size={14} />, label: 'Tháng', value: gisMonth } : null,
+                              gisDay ? { icon: <Calendar size={14} />, label: 'Ngày', value: gisDay } : null,
+                              gisTime ? { icon: <Clock size={14} />, label: 'Giờ', value: gisTime } : null,
+                              gisDescription ? { icon: <FileCode size={14} />, label: 'Mô tả', value: gisDescription } : null,
+                            ].filter((row): row is NonNullable<typeof row> => row !== null).map((row, i) => (
+                              <div key={i} style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.82rem', padding: '6px 8px', background: i % 2 === 0 ? 'var(--background)' : 'transparent', borderRadius: '6px' }}>
+                                <span style={{ color: 'var(--text-muted)', display: 'flex' }}>{row.icon}</span>
+                                <span style={{ color: 'var(--text-muted)', minWidth: '90px' }}>{row.label}</span>
+                                <span style={{ color: 'var(--text)', fontWeight: '500', wordBreak: 'break-all' }}>{row.value}</span>
+                              </div>
+                            ))}
+                          </>
+                        ) : (
+                          <>
+                            {[
+                              { icon: <MapPin size={14} />, label: 'Trạm', value: selectedStation || '—' },
+                              (uploadGroup as string) === 'station' ? { icon: <Layers size={14} />, label: 'Dạng dữ liệu', value: stationDataType ? STATION_DATA_TYPES.find(t => t.key === stationDataType)?.label || stationDataType : '—' } : null,
+                              { icon: <Activity size={14} />, label: 'Tham số', value: selectedParam ? ((uploadGroup as string) === 'station' ? STATION_PARAMETERS.find(p => p.key === selectedParam)?.label : MONITORING_PARAMETERS.find(p => p.key === selectedParam)?.label) || selectedParam : '—' },
+                              selectedDate ? { icon: <Calendar size={14} />, label: 'Ngày', value: selectedDate } : null,
+                              selectedTime ? { icon: <Clock size={14} />, label: 'Giờ', value: selectedTime } : null,
+                              uploadDescription ? { icon: <FileCode size={14} />, label: 'Mô tả', value: uploadDescription } : null,
+                            ].filter((row): row is NonNullable<typeof row> => row !== null).map((row, i) => (
+                              <div key={i} style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.82rem', padding: '6px 8px', background: i % 2 === 0 ? 'var(--background)' : 'transparent', borderRadius: '6px' }}>
+                                <span style={{ color: 'var(--text-muted)', display: 'flex' }}>{row.icon}</span>
+                                <span style={{ color: 'var(--text-muted)', minWidth: '90px' }}>{row.label}</span>
+                                <span style={{ color: 'var(--text)', fontWeight: '500', wordBreak: 'break-all' }}>{row.value}</span>
+                              </div>
+                            ))}
+                          </>
+                        )}
+
+                        {!uploadGroup && (
+                          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '8px', padding: '20px 0', color: 'var(--text-muted)' }}>
+                            <p style={{ margin: 0, fontSize: '0.85rem' }}>Chưa có thông tin</p>
+                          </div>
+                        )}
+                      </div>
+                    ) : (
+                      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '10px', padding: '20px 0', color: 'var(--text-muted)' }}>
+                        <FileSpreadsheet size={28} color="var(--border)" />
+                        <p style={{ margin: 0, fontSize: '0.85rem' }}>Chọn tệp tin để xem thông tin chi tiết</p>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Recent uploads when no selection */}
+                  {recentUploads.length > 0 && !uploadFile && ((uploadGroup === 'gis' && !gisDataset) || (uploadGroup !== 'gis' && !selectedStation)) && (
+                    <div className="glass-panel fade-in" style={{ background: 'var(--surface)', padding: '20px', borderRadius: 'var(--radius-xl)', border: '1px solid var(--border)', boxShadow: 'var(--shadow-md)', overflow: 'hidden' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', marginBottom: '16px', borderBottom: '1px solid var(--border)', paddingBottom: '14px', flexWrap: 'wrap', gap: '8px', justifyContent: 'space-between' }}>
+                        <h4 style={{ margin: 0, fontSize: '0.95rem', fontWeight: 'bold', color: 'var(--text)', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                          <Clock size={16} color="var(--accent)" /> Tệp tải lên gần nhất
+                        </h4>
+                        {canManageData && selectedRecentKeys.length > 0 ? (
+                          <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                            <button
+                              onClick={handleDeleteSelectedRecent}
+                              disabled={isDeletingRecent}
+                              style={{
+                                border: 'none',
+                                background: '#dc3545',
+                                color: '#fff',
+                                cursor: 'pointer',
+                                padding: '4px 10px',
+                                borderRadius: '999px',
+                                fontSize: '0.75rem',
+                                fontWeight: '600',
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: '4px',
+                                transition: 'all 0.2s'
+                              }}
+                            >
+                              <Trash2 size={12} /> {isDeletingRecent ? 'Đang xóa...' : `Xóa (${selectedRecentKeys.length})`}
+                            </button>
+                            <button
+                              onClick={() => setSelectedRecentKeys([])}
+                              style={{
+                                border: '1px solid var(--border)',
+                                background: 'var(--surface-strong)',
+                                color: 'var(--text)',
+                                cursor: 'pointer',
+                                padding: '3px 10px',
+                                borderRadius: '999px',
+                                fontSize: '0.75rem',
+                                fontWeight: '600',
+                                transition: 'all 0.2s'
+                              }}
+                            >
+                              Hủy chọn
+                            </button>
+                          </div>
+                        ) : (
+                          <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)', background: 'var(--surface-strong)', padding: '4px 12px', borderRadius: '999px', fontWeight: '600' }}>
+                            {recentUploads.length} tệp
+                          </span>
+                        )}
+                      </div>
+                      <div 
+                        onScroll={handleRecentScroll}
+                        style={{ 
+                          display: 'flex', 
+                          flexDirection: 'column', 
+                          gap: '8px', 
+                          maxHeight: '380px', 
+                          overflowY: 'auto', 
+                          paddingRight: '6px' 
+                        }}
+                      >
+                        {recentUploads.slice(0, visibleRecentCount).map((file) => {
+                          const fileName = file.key.split('/').pop() || file.key;
+                          const filePath = getParentPath(file.key) || '/';
+                          const fileExt = fileName.substring(fileName.lastIndexOf('.')).toLowerCase();
+                          const isRaster = ['.tif', '.tiff', '.cog', '.png', '.jpg', '.jpeg', '.rst'].includes(fileExt);
+                          const isVector = ['.geojson', '.shp', '.kml', '.gpkg', '.zip', '.vtc', '.vct', '.vdc'].includes(fileExt);
+                          
+                          return (
+                            <div 
+                              key={file.key}
+                              onClick={() => setPreviewFile(file)}
+                              style={{ 
+                                display: 'flex', 
+                                alignItems: 'center', 
+                                justifyContent: 'space-between',
+                                padding: '12px 16px', 
+                                background: 'var(--background)', 
+                                border: '1px solid var(--border)', 
+                                borderRadius: 'var(--radius-md)',
+                                cursor: 'pointer',
+                                transition: 'all 0.2s'
+                              }}
+                              className="hover-bg-surface-strong"
+                            >
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flex: 1, minWidth: 0 }}>
+                                {canManageData && (
+                                  <input
+                                    type="checkbox"
+                                    checked={selectedRecentKeys.includes(file.key)}
+                                    onClick={(e) => e.stopPropagation()}
+                                    onChange={(e) => {
+                                      if (e.target.checked) {
+                                        setSelectedRecentKeys(prev => [...prev, file.key]);
+                                      } else {
+                                        setSelectedRecentKeys(prev => prev.filter(k => k !== file.key));
+                                      }
+                                    }}
+                                    style={{
+                                      cursor: 'pointer',
+                                      width: '16px',
+                                      height: '16px',
+                                      borderRadius: '4px',
+                                      border: '1px solid var(--border)',
+                                      accentColor: 'var(--accent)',
+                                      marginRight: '4px'
+                                    }}
+                                  />
+                                )}
+                                <div style={{ 
+                                  width: '36px', 
+                                  height: '36px', 
+                                  borderRadius: 'var(--radius-md)', 
+                                  background: isRaster ? 'rgba(13, 110, 253, 0.1)' : isVector ? 'rgba(25, 135, 84, 0.1)' : 'rgba(111, 66, 193, 0.1)',
+                                  display: 'flex', 
+                                  alignItems: 'center', 
+                                  justifyContent: 'center',
+                                  flexShrink: 0
+                                }}>
+                                  <FileCode size={18} color={isRaster ? '#0d6efd' : isVector ? '#198754' : '#6f42c1'} />
+                                </div>
+                                <div style={{ flex: 1, minWidth: 0 }}>
+                                  <p style={{ margin: '0 0 4px 0', fontSize: '0.9rem', fontWeight: '600', color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={fileName}>
+                                    {fileName}
+                                  </p>
+                                  <p style={{ margin: 0, fontSize: '0.75rem', color: 'var(--text-muted)', fontFamily: 'monospace', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={filePath}>
+                                    {truncatePath(filePath, 60)}
+                                  </p>
+                                </div>
+                              </div>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexShrink: 0 }}>
+                                <div style={{ textAlign: 'right' }}>
+                                  <p style={{ margin: '0 0 2px 0', fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                                    {(file.size / 1024 / 1024).toFixed(2)} MB
+                                  </p>
+                                  <p style={{ margin: 0, fontSize: '0.7rem', color: 'var(--text-muted)' }}>
+                                    {new Date(file.lastModified).toLocaleString('vi-VN')}
+                                  </p>
+                                </div>
+                                <span style={{ 
+                                  padding: '4px 10px', 
+                                  borderRadius: '999px', 
+                                  background: isRaster ? 'rgba(13, 110, 253, 0.1)' : isVector ? 'rgba(25, 135, 84, 0.1)' : 'rgba(111, 66, 193, 0.1)',
+                                  color: isRaster ? '#0d6efd' : isVector ? '#198754' : '#6f42c1',
+                                  fontSize: '0.7rem', 
+                                  fontWeight: '700',
+                                  textTransform: 'uppercase'
+                                }}>
+                                  {isRaster ? 'Raster' : isVector ? 'Vector' : 'CSV'}
+                                </span>
+                                {canManageData && (
+                                  <button
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      const confirmDelete = window.confirm(`Bạn có chắc chắn muốn xóa tệp này?\n${fileName}`);
+                                      if (confirmDelete) {
+                                        handleDeleteSingleRecent(file.key);
+                                      }
+                                    }}
+                                    style={{
+                                      border: 'none',
+                                      background: 'none',
+                                      cursor: 'pointer',
+                                      color: 'var(--text-muted)',
+                                      padding: '6px',
+                                      borderRadius: '50%',
+                                      display: 'flex',
+                                      alignItems: 'center',
+                                      justifyContent: 'center',
+                                      transition: 'all 0.2s',
+                                      marginLeft: '4px'
+                                    }}
+                                    className="hover-bg-red hover-red"
+                                    title="Xóa tệp"
+                                  >
+                                    <Trash2 size={13} />
+                                  </button>
+                                )}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+              </div>
 
           {/* Danh sách tệp đã tải lên */}
           <div className="glass-panel fade-in" style={{ background: 'var(--surface)', padding: '24px', borderRadius: 'var(--radius-xl)', border: '1px solid var(--border)', boxShadow: 'var(--shadow-md)', overflow: 'hidden' }}>
@@ -3447,6 +3826,8 @@ function ScheduleConfig({ source }: { source: string }) {
 
 
         </div>
+      )}
+      </div>
       )}
       </div>
 
@@ -3657,6 +4038,9 @@ function ScheduleConfig({ source }: { source: string }) {
         .hover-bg-white-10:hover {
           background: rgba(255, 255, 255, 0.1) !important;
         }
+        .hover-bg-muted:hover {
+          background: var(--surface-strong) !important;
+        }
         
         .hover-bg-red:hover {
           background: rgba(239, 68, 68, 0.15) !important;
@@ -3696,6 +4080,759 @@ function ScheduleConfig({ source }: { source: string }) {
           fileKey={previewFile.key}
           onClose={() => setPreviewFile(null)}
         />
+      )}
+
+      {showManualStationForm && (
+        <div
+          onClick={(e) => { if (e.target === e.currentTarget) setShowManualStationForm(false); }}
+          style={{
+            position: 'fixed',
+            top: 0, left: 0, right: 0, bottom: 0,
+            zIndex: 9999,
+            background: 'rgba(6, 8, 16, 0.4)',
+            backdropFilter: 'blur(12px) saturate(1.2)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            padding: '20px',
+            animation: 'modalOverlayIn 0.25s ease'
+          }}
+        >
+          <div style={{
+            background: 'var(--surface)',
+            border: '1px solid var(--border)',
+            borderRadius: '20px',
+            boxShadow: 'var(--shadow-xl)',
+            width: '100%',
+            maxWidth: '560px',
+            maxHeight: '92vh',
+            display: 'flex', flexDirection: 'column',
+            overflow: 'hidden',
+            animation: 'modalPanelIn 0.35s cubic-bezier(0.22, 1, 0.36, 1)'
+          }}>
+            {/* Header */}
+            <div style={{
+              padding: '20px 24px',
+              borderBottom: '1px solid var(--border)',
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center'
+            }}>
+              <div>
+                <h3 style={{ margin: 0, fontSize: '1.2rem', fontWeight: '700', color: 'var(--text)' }}>
+                  {editingManualStation ? 'Cập Nhật Trạm Quan Trắc' : 'Thêm Trạm Quan Trắc Mới'}
+                </h3>
+                <p style={{ margin: '4px 0 0 0', fontSize: '0.8rem', color: 'var(--text-muted)' }}>
+                  {editingManualStation ? `Đang chỉnh sửa trạm ID: ${editingManualStation.id}` : 'Nhập thông tin trạm tự đo/thu thập thủ công'}
+                </p>
+              </div>
+              <button
+                onClick={() => setShowManualStationForm(false)}
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  color: 'var(--text-muted)',
+                  cursor: 'pointer',
+                  padding: '6px',
+                  borderRadius: '50%',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  transition: 'background 0.2s'
+                }}
+                className="hover-bg-muted"
+              >
+                <X size={20} />
+              </button>
+            </div>
+
+            {/* Form Body */}
+            <form onSubmit={handleSaveManualStation} style={{ display: 'flex', flexDirection: 'column', flex: 1, overflowY: 'auto' }}>
+              <div style={{ padding: '24px', display: 'flex', flexDirection: 'column', gap: '20px' }}>
+                
+                {/* Station Type Selection */}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.85rem', fontWeight: '600', color: 'var(--text)' }}>
+                    <Layers size={14} color="var(--accent)" /> Loại trạm <span style={{ color: '#dc3545' }}>*</span>
+                  </label>
+                  <div style={{ display: 'flex', gap: '10px' }}>
+                    <button
+                      type="button"
+                      onClick={() => setManualStationType('groundwater')}
+                      className={`group-btn ${manualStationType === 'groundwater' ? 'active' : ''}`}
+                      style={{ padding: '10px 16px', fontSize: '0.88rem' }}
+                    >
+                      Nước Ngầm
+                    </button>
+                    
+                    <button
+                      type="button"
+                      onClick={() => setManualStationType('surface_water')}
+                      className={`group-btn ${manualStationType === 'surface_water' ? 'active' : ''}`}
+                      style={{ padding: '10px 16px', fontSize: '0.88rem' }}
+                    >
+                      Nước Mặt
+                    </button>
+                  </div>
+                </div>
+
+                {/* Station ID Input */}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.85rem', fontWeight: '600', color: 'var(--text)' }}>
+                    <FileCode size={14} color={hasValue(manualStationId) ? "var(--accent)" : "var(--text-muted)"} /> Mã trạm (ID trạm)
+                  </label>
+                  <input
+                    type="text"
+                    value={manualStationId}
+                    onChange={(e) => setManualStationId(e.target.value)}
+                    placeholder="Để trống hệ thống sẽ tự động tạo (VD: GW001, SW001)"
+                    className={`form-input ${hasValue(manualStationId) ? 'has-value' : ''}`}
+                  />
+                </div>
+
+                {/* Location Input */}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.85rem', fontWeight: '600', color: 'var(--text)' }}>
+                    <MapPin size={14} color={hasValue(manualLocation) ? "var(--accent)" : "var(--text-muted)"} /> Địa điểm <span style={{ color: '#dc3545' }}>*</span>
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={manualLocation}
+                    onChange={(e) => setManualLocation(e.target.value)}
+                    placeholder="VD: Trạm Vĩnh Hải, Sóc Trăng"
+                    className={`form-input ${hasValue(manualLocation) ? 'has-value' : ''}`}
+                  />
+                </div>
+
+                {/* Hydro Characteristics */}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.85rem', fontWeight: '600', color: 'var(--text)' }}>
+                    <Activity size={14} color={hasValue(manualHydroChar) ? "var(--accent)" : "var(--text-muted)"} /> Đặc tính thủy vực
+                  </label>
+                  <input
+                    type="text"
+                    value={manualHydroChar}
+                    onChange={(e) => setManualHydroChar(e.target.value)}
+                    placeholder="VD: Kênh/Sông tự nhiên, tầng chứa nước q13"
+                    className={`form-input ${hasValue(manualHydroChar) ? 'has-value' : ''}`}
+                  />
+                </div>
+
+                {/* X & Y coordinates (row) */}
+                <div style={{ display: 'flex', gap: '16px' }}>
+                  <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.85rem', fontWeight: '600', color: 'var(--text)' }}>
+                      <MapPin size={14} color={hasValue(manualX) ? "var(--accent)" : "var(--text-muted)"} /> Tọa độ X (Kinh độ) <span style={{ color: '#dc3545' }}>*</span>
+                    </label>
+                    <input
+                      type="number"
+                      step="any"
+                      required
+                      value={manualX}
+                      onChange={(e) => setManualX(e.target.value)}
+                      placeholder="VD: 106.12345"
+                      className={`form-input ${hasValue(manualX) ? 'has-value' : ''}`}
+                    />
+                  </div>
+                  
+                  <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.85rem', fontWeight: '600', color: 'var(--text)' }}>
+                      <MapPin size={14} color={hasValue(manualY) ? "var(--accent)" : "var(--text-muted)"} /> Tọa độ Y (Vĩ độ) <span style={{ color: '#dc3545' }}>*</span>
+                    </label>
+                    <input
+                      type="number"
+                      step="any"
+                      required
+                      value={manualY}
+                      onChange={(e) => setManualY(e.target.value)}
+                      placeholder="VD: 9.87654"
+                      className={`form-input ${hasValue(manualY) ? 'has-value' : ''}`}
+                    />
+                  </div>
+                </div>
+
+                {/* Station Active Status */}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.85rem', fontWeight: '600', color: 'var(--text)' }}>
+                    <Activity size={14} color="var(--accent)" /> Trạng thái hoạt động <span style={{ color: '#dc3545' }}>*</span>
+                  </label>
+                  <div style={{ display: 'flex', gap: '10px' }}>
+                    <button
+                      type="button"
+                      onClick={() => setManualIsActive(true)}
+                      className={`group-btn ${manualIsActive ? 'active' : ''}`}
+                      style={{ padding: '10px 16px', fontSize: '0.88rem' }}
+                    >
+                      Hoạt Động
+                    </button>
+                    
+                    <button
+                      type="button"
+                      onClick={() => setManualIsActive(false)}
+                      className={`group-btn ${!manualIsActive ? 'active' : ''}`}
+                      style={{ padding: '10px 16px', fontSize: '0.88rem' }}
+                    >
+                      Tạm Dừng
+                    </button>
+                  </div>
+                </div>
+
+                {/* Image Code (Pics hiện trường) - Only for Surface Water */}
+                {manualStationType === 'surface_water' && (
+                  <div className="fade-in" style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.85rem', fontWeight: '600', color: 'var(--text)' }}>
+                      <FileCode size={14} color={(manualImageFiles.length > 0 || currentImages.length > 0) ? "var(--accent)" : "var(--text-muted)"} /> Ảnh hiện trường (Pics)
+                    </label>
+                    
+                    {/* Preview Area */}
+                    {(manualImageFiles.length > 0 || currentImages.length > 0) && (
+                      <div style={{
+                        display: 'grid',
+                        gridTemplateColumns: 'repeat(auto-fill, minmax(100px, 1fr))',
+                        gap: '12px',
+                        border: '1px solid var(--border)',
+                        background: 'var(--background-soft)',
+                        padding: '12px',
+                        borderRadius: '8px',
+                        maxHeight: '260px',
+                        overflowY: 'auto',
+                        marginBottom: '4px'
+                      }}>
+                        {/* Render existing images */}
+                        {currentImages.map((img, idx) => (
+                          <div
+                            key={`existing-${idx}`}
+                            style={{
+                              position: 'relative',
+                              width: '100%',
+                              aspectRatio: '1',
+                              borderRadius: '6px',
+                              border: '1px solid var(--border)',
+                              background: 'var(--surface)',
+                              overflow: 'hidden',
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'center'
+                            }}
+                          >
+                            <img
+                              src={img.blobUrl}
+                              alt={`Existing ${idx + 1}`}
+                              style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                            />
+                            <button
+                              type="button"
+                              onClick={() => {
+                                if (img.blobUrl && img.blobUrl.startsWith('blob:')) {
+                                  URL.revokeObjectURL(img.blobUrl);
+                                }
+                                setCurrentImages((prev) => prev.filter(item => item.key !== img.key));
+                              }}
+                              style={{
+                                position: 'absolute',
+                                top: '4px',
+                                right: '4px',
+                                background: 'rgba(239, 68, 68, 0.95)',
+                                color: '#fff',
+                                border: 'none',
+                                borderRadius: '50%',
+                                width: '20px',
+                                height: '20px',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                cursor: 'pointer',
+                                boxShadow: '0 1px 3px rgba(0,0,0,0.3)',
+                                padding: 0
+                              }}
+                              title="Xóa ảnh này"
+                            >
+                              <X size={12} />
+                            </button>
+                          </div>
+                        ))}
+
+                        {/* Render newly selected files */}
+                        {manualImageFiles.map((file, idx) => (
+                          <div
+                            key={`new-${idx}`}
+                            style={{
+                              position: 'relative',
+                              width: '100%',
+                              aspectRatio: '1',
+                              borderRadius: '6px',
+                              border: '1px solid var(--border)',
+                              background: 'var(--surface)',
+                              overflow: 'hidden',
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'center'
+                            }}
+                          >
+                            <img
+                              src={URL.createObjectURL(file)}
+                              alt={`New ${idx + 1}`}
+                              style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                            />
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setManualImageFiles((prev) => prev.filter((_, i) => i !== idx));
+                              }}
+                              style={{
+                                position: 'absolute',
+                                top: '4px',
+                                right: '4px',
+                                background: 'rgba(239, 68, 68, 0.95)',
+                                color: '#fff',
+                                border: 'none',
+                                borderRadius: '50%',
+                                width: '20px',
+                                height: '20px',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                cursor: 'pointer',
+                                boxShadow: '0 1px 3px rgba(0,0,0,0.3)',
+                                padding: 0
+                              }}
+                              title="Xóa ảnh mới chọn"
+                            >
+                              <X size={12} />
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
+                    {/* Upload Controls */}
+                    <div style={{ display: 'flex', gap: '10px' }}>
+                      <input
+                        type="file"
+                        id="manual-station-image-upload"
+                        accept="image/*"
+                        multiple
+                        onChange={(e) => {
+                          const files = Array.from(e.target.files || []);
+                          setManualImageFiles((prev) => [...prev, ...files]);
+                        }}
+                        style={{ display: 'none' }}
+                      />
+                      <label
+                        htmlFor="manual-station-image-upload"
+                        className="group-btn"
+                        style={{
+                          padding: '10px 16px',
+                          fontSize: '0.88rem',
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '6px',
+                          width: '100%',
+                          textAlign: 'center',
+                          justifyContent: 'center',
+                          cursor: 'pointer',
+                          border: '1px solid var(--border)'
+                        }}
+                      >
+                        <UploadCloud size={16} /> Chọn ảnh hiện trường (Có thể chọn nhiều)...
+                      </label>
+                    </div>
+                  </div>
+                )}
+
+              </div>
+
+              {/* Form Footer */}
+              <div style={{
+                padding: '16px 24px',
+                borderTop: '1px solid var(--border)',
+                display: 'flex',
+                justifyContent: 'flex-end',
+                gap: '12px',
+                background: 'var(--background)'
+              }}>
+                <button
+                  type="button"
+                  onClick={() => setShowManualStationForm(false)}
+                  style={{
+                    padding: '10px 18px',
+                    borderRadius: '8px',
+                    border: '1px solid var(--border)',
+                    background: 'transparent',
+                    color: 'var(--text)',
+                    fontSize: '0.88rem',
+                    fontWeight: '600',
+                    cursor: 'pointer',
+                    transition: 'all 0.2s'
+                  }}
+                  className="hover-bg-muted"
+                >
+                  Hủy
+                </button>
+                <button
+                  type="submit"
+                  style={{
+                    padding: '10px 20px',
+                    borderRadius: '8px',
+                    border: 'none',
+                    background: 'linear-gradient(135deg, var(--accent) 0%, #1d4ed8 100%)',
+                    color: '#fff',
+                    fontSize: '0.88rem',
+                    fontWeight: '600',
+                    cursor: 'pointer',
+                    boxShadow: '0 4px 12px rgba(37, 99, 168, 0.3)',
+                    transition: 'all 0.2s',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '6px'
+                  }}
+                  className="hover-opacity-90"
+                >
+                  <Check size={16} />
+                  Lưu trạm
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {showImportModal && (
+        <div
+          onClick={(e) => { if (e.target === e.currentTarget && !importLoading) setShowImportModal(false); }}
+          style={{
+            position: 'fixed',
+            top: 0, left: 0, right: 0, bottom: 0,
+            zIndex: 9999,
+            background: 'rgba(6, 8, 16, 0.4)',
+            backdropFilter: 'blur(12px) saturate(1.2)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            padding: '20px',
+            animation: 'modalOverlayIn 0.25s ease'
+          }}
+        >
+          <div style={{
+            background: 'var(--surface)',
+            border: '1px solid var(--border)',
+            borderRadius: '20px',
+            boxShadow: 'var(--shadow-xl)',
+            width: '100%',
+            maxWidth: '560px',
+            maxHeight: '92vh',
+            display: 'flex', flexDirection: 'column',
+            overflow: 'hidden',
+            animation: 'modalPanelIn 0.35s cubic-bezier(0.22, 1, 0.36, 1)'
+          }}>
+            {/* Header */}
+            <div style={{
+              padding: '20px 24px',
+              borderBottom: '1px solid var(--border)',
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center'
+            }}>
+              <div>
+                <h3 style={{ margin: 0, fontSize: '1.2rem', fontWeight: '700', color: 'var(--text)' }}>
+                  Nhập danh sách trạm từ Excel
+                </h3>
+                <p style={{ margin: '4px 0 0 0', fontSize: '0.8rem', color: 'var(--text-muted)' }}>
+                  Nhập hàng loạt trạm đo nước ngầm hoặc nước mặt
+                </p>
+              </div>
+              <button
+                type="button"
+                disabled={importLoading}
+                onClick={() => setShowImportModal(false)}
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  color: 'var(--text-muted)',
+                  cursor: 'pointer',
+                  padding: '6px',
+                  borderRadius: '50%',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  transition: 'background 0.2s'
+                }}
+                className="hover-bg-muted"
+              >
+                <X size={20} />
+              </button>
+            </div>
+
+            {/* Body */}
+            <form onSubmit={handleImportExcel} style={{ display: 'flex', flexDirection: 'column', flex: 1, overflowY: 'auto' }}>
+              <div style={{ padding: '24px', display: 'flex', flexDirection: 'column', gap: '20px' }}>
+                
+                {/* Station Type Selector */}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.85rem', fontWeight: '600', color: 'var(--text)' }}>
+                    <Layers size={14} color="var(--accent)" /> Chọn loại trạm để nhập <span style={{ color: '#dc3545' }}>*</span>
+                  </label>
+                  <div style={{ display: 'flex', gap: '10px' }}>
+                    <button
+                      type="button"
+                      disabled={importLoading}
+                      onClick={() => setImportStationType('groundwater')}
+                      className={`group-btn ${importStationType === 'groundwater' ? 'active' : ''}`}
+                      style={{ padding: '10px 16px', fontSize: '0.88rem', flex: 1 }}
+                    >
+                      Nước Ngầm
+                    </button>
+                    
+                    <button
+                      type="button"
+                      disabled={importLoading}
+                      onClick={() => setImportStationType('surface_water')}
+                      className={`group-btn ${importStationType === 'surface_water' ? 'active' : ''}`}
+                      style={{ padding: '10px 16px', fontSize: '0.88rem', flex: 1 }}
+                    >
+                      Nước Mặt
+                    </button>
+                  </div>
+                </div>
+
+                {/* File Dropzone */}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                  <label style={{ fontSize: '0.85rem', fontWeight: '600', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.5px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <FileSpreadsheet size={14} /> File Excel dữ liệu <span style={{ color: '#dc3545' }}>*</span>
+                  </label>
+
+                  <div
+                    onDragOver={(e) => { e.preventDefault(); if (!importLoading) setIsImportDragActive(true); }}
+                    onDragLeave={() => setIsImportDragActive(false)}
+                    onDrop={(e) => {
+                      e.preventDefault();
+                      setIsImportDragActive(false);
+                      if (importLoading) return;
+                      if (e.dataTransfer.files && e.dataTransfer.files[0]) {
+                        handleExcelFileChange(e.dataTransfer.files[0]);
+                      }
+                    }}
+                    onClick={() => { if (!importLoading) document.getElementById('excel-file-input')?.click(); }}
+                    className={`drag-drop-zone ${isImportDragActive ? 'active' : ''}`}
+                    style={{
+                      border: '2px dashed var(--border)',
+                      borderRadius: 'var(--radius-lg)',
+                      padding: '30px 20px',
+                      textAlign: 'center',
+                      cursor: importLoading ? 'not-allowed' : 'pointer',
+                      background: isImportDragActive ? 'rgba(37, 99, 168, 0.05)' : 'var(--background-soft)',
+                      transition: 'all 0.2s',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      gap: '12px'
+                    }}
+                  >
+                    <input
+                      id="excel-file-input"
+                      type="file"
+                      style={{ display: 'none' }}
+                      accept=".xlsx,.xls"
+                      disabled={importLoading}
+                      onChange={(e) => {
+                        if (e.target.files && e.target.files[0]) {
+                          handleExcelFileChange(e.target.files[0]);
+                        }
+                      }}
+                    />
+
+                    <UploadCloud 
+                      size={40} 
+                      color={isImportDragActive ? 'var(--accent)' : 'var(--text-muted)'} 
+                      style={{ transition: 'all 0.25s', transform: isImportDragActive ? 'scale(1.1)' : 'none' }} 
+                    />
+                    <div>
+                      <p style={{ margin: '0 0 4px 0', fontWeight: '600', color: 'var(--text)', fontSize: '0.9rem' }}>
+                        Kéo thả file Excel vào đây hoặc click để duyệt
+                      </p>
+                      <p style={{ margin: '0', fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                        Hỗ trợ định dạng: .xlsx, .xls
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Selected File Details */}
+                {importFile && (
+                  <div style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    gap: '12px',
+                    background: 'var(--background-soft)',
+                    border: '1px solid var(--border)',
+                    borderRadius: 'var(--radius-md)',
+                    padding: '12px 16px'
+                  }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px', overflow: 'hidden' }}>
+                      <FileSpreadsheet size={20} color="#198754" style={{ flexShrink: 0 }} />
+                      <div style={{ display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+                        <span style={{ fontSize: '0.85rem', fontWeight: '600', color: 'var(--text)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                          {importFile.name}
+                        </span>
+                        <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                          {(importFile.size / 1024).toFixed(1)} KB
+                        </span>
+                      </div>
+                    </div>
+                    {!importLoading && (
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setImportFile(null);
+                          setImportResult(null);
+                        }}
+                        style={{
+                          background: 'none',
+                          border: 'none',
+                          color: 'var(--text-muted)',
+                          cursor: 'pointer',
+                          padding: '4px',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          borderRadius: '50%'
+                        }}
+                        className="hover-bg-muted"
+                      >
+                        <X size={16} />
+                      </button>
+                    )}
+                  </div>
+                )}
+
+                {/* Loading State */}
+                {importLoading && (
+                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '8px', padding: '10px 0' }}>
+                    <div className="animate-spin" style={{ width: '24px', height: '24px', border: '3px solid var(--border)', borderTopColor: 'var(--accent)', borderRadius: '50%' }} />
+                    <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Đang tải và xử lý file Excel, vui lòng đợi...</span>
+                  </div>
+                )}
+
+                {/* Import Result Feedback */}
+                {importResult && (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                    <div style={{
+                      display: 'flex',
+                      gap: '12px',
+                      background: importResult.failCount > 0 ? 'rgba(220, 53, 69, 0.05)' : 'rgba(25, 135, 84, 0.05)',
+                      border: `1px solid ${importResult.failCount > 0 ? 'rgba(220, 53, 69, 0.2)' : 'rgba(25, 135, 84, 0.2)'}`,
+                      borderRadius: 'var(--radius-md)',
+                      padding: '16px'
+                    }}>
+                      <div style={{
+                        width: '36px', height: '36px',
+                        background: importResult.failCount > 0 ? 'rgba(220, 53, 69, 0.1)' : 'rgba(25, 135, 84, 0.1)',
+                        color: importResult.failCount > 0 ? 'var(--danger)' : 'var(--success)',
+                        borderRadius: '50%',
+                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        flexShrink: 0
+                      }}>
+                        {importResult.failCount > 0 ? <AlertCircle size={20} /> : <CheckCircle2 size={20} />}
+                      </div>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                        <span style={{ fontSize: '0.9rem', fontWeight: 'bold', color: 'var(--text)' }}>
+                          {importResult.message}
+                        </span>
+                        <div style={{ display: 'flex', gap: '16px', fontSize: '0.8rem' }}>
+                          <span style={{ color: 'var(--success)', fontWeight: '600' }}>Thành công: {importResult.successCount} trạm</span>
+                          {importResult.duplicateCount != null && importResult.duplicateCount > 0 && (
+                            <span style={{ color: 'var(--text-muted)', fontWeight: '600' }}>Bỏ qua trùng: {importResult.duplicateCount} trạm</span>
+                          )}
+                          {importResult.failCount > 0 && <span style={{ color: 'var(--danger)', fontWeight: '600' }}>Thất bại: {importResult.failCount} trạm</span>}
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Itemized error logs */}
+                    {importResult.errors && importResult.errors.length > 0 && (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                        <span style={{ fontSize: '0.8rem', fontWeight: '600', color: 'var(--text)' }}>Chi tiết lỗi dòng:</span>
+                        <div style={{
+                          maxHeight: '150px',
+                          overflowY: 'auto',
+                          background: 'var(--background)',
+                          border: '1px solid var(--border)',
+                          borderRadius: 'var(--radius-md)',
+                          padding: '10px 12px',
+                          display: 'flex',
+                          flexDirection: 'column',
+                          gap: '6px'
+                        }} className="custom-scrollbar">
+                          {importResult.errors.map((err, idx) => (
+                            <span key={idx} style={{ fontSize: '0.75rem', color: 'var(--danger)', fontFamily: 'monospace', lineHeight: '1.4' }}>
+                              • {err}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+              </div>
+
+              {/* Form Footer */}
+              <div style={{
+                padding: '16px 24px',
+                borderTop: '1px solid var(--border)',
+                display: 'flex',
+                justifyContent: 'flex-end',
+                gap: '12px',
+                background: 'var(--background)'
+              }}>
+                <button
+                  type="button"
+                  disabled={importLoading}
+                  onClick={() => setShowImportModal(false)}
+                  style={{
+                    padding: '10px 18px',
+                    borderRadius: '8px',
+                    border: '1px solid var(--border)',
+                    background: 'transparent',
+                    color: 'var(--text)',
+                    fontSize: '0.88rem',
+                    fontWeight: '600',
+                    cursor: importLoading ? 'not-allowed' : 'pointer',
+                    transition: 'all 0.2s'
+                  }}
+                  className="hover-bg-muted"
+                >
+                  {importResult ? 'Đóng' : 'Hủy'}
+                </button>
+                {!importResult && (
+                  <button
+                    type="submit"
+                    disabled={importLoading || !importFile}
+                    style={{
+                      padding: '10px 20px',
+                      borderRadius: '8px',
+                      border: 'none',
+                      background: importFile ? 'linear-gradient(135deg, var(--accent) 0%, #1d4ed8 100%)' : 'var(--border)',
+                      color: importFile ? '#fff' : 'var(--text-muted)',
+                      fontSize: '0.88rem',
+                      fontWeight: '600',
+                      cursor: (importLoading || !importFile) ? 'not-allowed' : 'pointer',
+                      boxShadow: importFile ? '0 4px 12px rgba(37, 99, 168, 0.3)' : 'none',
+                      transition: 'all 0.2s',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '6px'
+                    }}
+                    className={importFile ? "hover-opacity-90" : ""}
+                  >
+                    <Check size={16} />
+                    Bắt đầu Nhập
+                  </button>
+                )}
+              </div>
+            </form>
+          </div>
+        </div>
       )}
     </div>
   );

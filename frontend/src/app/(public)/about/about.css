@@ -1,0 +1,317 @@
+.app-main-about {
+  flex: 1;
+  background: var(--background);
+  padding-bottom: 4rem;
+  overflow-y: auto;
+}
+
+.about-hero {
+  position: relative;
+  background: linear-gradient(135deg, #0e2a47 0%, #08111a 100%);
+  padding: 5rem 2rem;
+  text-align: center;
+  color: white;
+  overflow: hidden;
+  border-bottom: 1px solid var(--border);
+}
+
+.about-hero-pattern {
+  position: absolute;
+  inset: 0;
+  background-image: 
+    radial-gradient(circle at 10% 20%, rgba(37, 99, 168, 0.12) 0%, transparent 40%),
+    radial-gradient(circle at 90% 80%, rgba(6, 182, 212, 0.1) 0%, transparent 40%);
+  pointer-events: none;
+}
+
+.about-hero-blob {
+  position: absolute;
+  width: 250px;
+  height: 250px;
+  border-radius: 50%;
+  background: var(--accent);
+  filter: blur(120px);
+  top: 10%;
+  left: 50%;
+  transform: translateX(-50%);
+  opacity: 0.25;
+  pointer-events: none;
+}
+
+.about-hero-content {
+  position: relative;
+  z-index: 1;
+  max-width: 780px;
+  margin: 0 auto;
+  animation: fadeInUp 0.6s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.about-badge {
+  display: inline-block;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  background: rgba(37, 99, 168, 0.2);
+  border: 1px solid rgba(37, 99, 168, 0.4);
+  color: #93c5fd;
+  padding: 0.3rem 0.8rem;
+  border-radius: 20px;
+  margin-bottom: 1.2rem;
+}
+
+.about-title {
+  font-size: 2.5rem;
+  font-weight: 800;
+  margin-bottom: 1rem;
+  letter-spacing: -0.03em;
+  line-height: 1.2;
+  background: linear-gradient(135deg, #ffffff 30%, #a5f3fc 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  text-shadow: 0 4px 12px rgba(0,0,0,0.1);
+}
+
+.about-subtitle {
+  font-size: 1.05rem;
+  color: #cbd5e1;
+  font-weight: 400;
+  line-height: 1.6;
+}
+
+.about-container {
+  max-width: 1060px;
+  margin: 0 auto;
+  padding: 2.2rem 1.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 2.2rem;
+}
+
+@keyframes fadeInUp {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.team-section {
+  animation: fadeInUp 0.6s cubic-bezier(0.16, 1, 0.3, 1) both;
+  animation-delay: 0.2s;
+}
+
+.team-title-row {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 0.75rem;
+  margin-bottom: 2rem;
+}
+
+.team-title-row h2 {
+  font-size: 1.4rem;
+  font-weight: 700;
+  color: var(--text);
+  margin: 0;
+}
+
+.team-icon {
+  color: var(--accent);
+  flex-shrink: 0;
+}
+
+.role-group {
+  margin-bottom: 2.5rem;
+}
+
+.role-group-header {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  margin-bottom: 1.5rem;
+}
+
+.role-badge {
+  display: inline-block;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding: 0.35rem 0.85rem;
+  border-radius: 6px;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.08);
+  border: 1px solid var(--border);
+}
+
+.leadership-theme {
+  background: rgba(37, 99, 168, 0.1);
+  color: var(--accent);
+  border-color: rgba(37, 99, 168, 0.25);
+}
+
+.webgis-theme {
+  background: rgba(13, 148, 136, 0.1);
+  color: #0d9488;
+  border-color: rgba(13, 148, 136, 0.25);
+}
+html[data-theme="dark"] .webgis-theme {
+  color: #2dd4bf;
+}
+
+.data-theme {
+  background: rgba(217, 119, 6, 0.1);
+  color: #d97706;
+  border-color: rgba(217, 119, 6, 0.25);
+}
+html[data-theme="dark"] .data-theme {
+  color: #fbbf24;
+}
+
+.role-line {
+  flex: 1;
+  height: 1px;
+  background: var(--border);
+  opacity: 0.6;
+}
+
+.team-members-grid {
+  display: grid;
+  gap: 1.5rem;
+}
+
+.team-members-grid.cols-2 {
+  grid-template-columns: repeat(2, 1fr);
+}
+
+.team-members-grid.cols-3 {
+  grid-template-columns: repeat(3, 1fr);
+}
+
+@media (max-width: 1024px) {
+  .team-members-grid.cols-3 {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+@media (max-width: 768px) {
+  .team-members-grid.cols-2,
+  .team-members-grid.cols-3 {
+    grid-template-columns: 1fr;
+    gap: 1.25rem;
+  }
+  .about-title {
+    font-size: 2rem;
+  }
+  .about-hero {
+    padding: 4rem 1.5rem;
+  }
+  .role-group {
+    margin-bottom: 2rem;
+  }
+}
+
+.member-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 1.6rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  box-shadow: var(--shadow-sm);
+  transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+html[data-theme="dark"] .member-card {
+  background: rgba(43, 48, 53, 0.45);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+}
+
+.member-card:hover {
+  border-color: rgba(37, 99, 168, 0.3);
+  transform: translateY(-3px);
+  box-shadow: var(--shadow-md);
+}
+
+.leadership-card {
+  border-left: 3px solid var(--accent);
+}
+
+.member-header {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+
+.member-avatar {
+  width: 46px;
+  height: 46px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #475569 0%, #64748b 100%);
+  color: white;
+  font-weight: 700;
+  font-size: 0.95rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  box-shadow: 0 2px 6px rgba(71, 85, 105, 0.2);
+}
+
+.member-avatar.avatar-leadership {
+  background: linear-gradient(135deg, #1e40af 0%, #3b82f6 100%);
+  box-shadow: 0 2px 6px rgba(30, 64, 175, 0.25);
+}
+
+.avatar-img {
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  object-fit: cover;
+}
+
+.member-meta-info {
+  display: flex;
+  flex-direction: column;
+}
+
+.member-meta-info h3 {
+  font-size: 1.05rem;
+  font-weight: 700;
+  color: var(--text);
+  margin: 0;
+}
+
+.member-role {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--accent);
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  margin-top: 0.1rem;
+}
+
+.member-email {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  text-decoration: none;
+  margin-top: 0.15rem;
+  transition: color 120ms ease;
+}
+
+.member-email:hover {
+  color: var(--accent);
+}
+
+.member-desc {
+  font-size: 0.85rem;
+  color: var(--text-muted);
+  line-height: 1.6;
+  margin: 0;
+}

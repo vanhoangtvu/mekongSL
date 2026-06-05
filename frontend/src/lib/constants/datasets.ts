@@ -84,12 +84,6 @@ export const DATASETS: DatasetItem[] = [
     name: "Weather",
     slug: "weather",
     group: "station",
-    children: [
-      { id: "weather-rain", name: "Rain Monitoring", slug: "rain-monitoring", gisData: false },
-      { id: "weather-wind", name: "Wind", slug: "wind", gisData: false },
-      { id: "weather-humidity", name: "Humidity", slug: "humidity", gisData: false },
-      { id: "weather-sun", name: "Sun Radiation", slug: "sun-radiation", gisData: false },
-    ],
   },
   // ── Monitoring Data ───────────────────────────────────────
   {

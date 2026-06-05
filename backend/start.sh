@@ -31,8 +31,18 @@ echo "Compiling backend..."
 
 echo "Starting backend on 0.0.0.0:8084..."
 nohup ./mvnw spring-boot:run > "$LOG_FILE" 2>&1 &
-echo $! > "$PID_FILE"
+MAVEN_PID=$!
 
-echo "Backend started with PID: $(cat "$PID_FILE")"
-echo "Access at: http://14.183.200.227:8084"
+# Đợi Java process con khởi động
+sleep 3
+JAVA_PID=$(pgrep -P "$MAVEN_PID" java 2>/dev/null || echo "")
+if [[ -z "$JAVA_PID" ]]; then
+  # Fallback: lưu PID Maven nếu chưa tìm thấy Java process
+  echo "$MAVEN_PID" > "$PID_FILE"
+else
+  echo "$JAVA_PID" > "$PID_FILE"
+fi
+
+echo "Backend started with PID: $(cat "$PID_FILE") (Maven: $MAVEN_PID)"
+echo "Access at: http://14.227.143.142:8084"
 echo "Logs: tail -f $LOG_FILE"

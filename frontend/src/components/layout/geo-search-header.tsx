@@ -12,7 +12,7 @@ export function GeoSearchHeader() {
     <header className="geo-header">
       <div className="geo-header-copy">
         <p className="geo-eyebrow">Hệ thống tra cứu dữ liệu không gian</p>
-        <h1 className="geo-title">Mekong Salt Lab Environment Data</h1>
+        <h1 className="geo-title">Environment Data For Mekong</h1>
         <p className="geo-lead">
           Tra cứu dữ liệu khí tượng, thủy văn, bản đồ và cảnh báo theo khu vực,
           thời gian, nguồn dữ liệu và ngưỡng vận hành.

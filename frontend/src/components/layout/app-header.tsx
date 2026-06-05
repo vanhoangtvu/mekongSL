@@ -27,10 +27,13 @@ export function AppHeader() {
     <header className="app-header">
       <div className="app-header-content">
         <div className="app-header-left">
-          <Link href="/" className="app-logo">
-            <Image src="/logo.png" alt="Mekong Salt Lab" width={36} height={36} style={{ objectFit: "contain" }} />
-            Mekong Salt Lab Environment Data
-          </Link>
+          <div className="app-brand">
+            <Link href="/" className="app-logo">
+              <Image src="/logo.png" alt="Mekong Salt Lab" width={158} height={30} style={{ objectFit: "contain" }} />
+              Environment Data For Mekong
+            </Link>
+            <p className="app-slogan">Bring optimum water solutions for people</p>
+          </div>
         </div>
         <nav className="app-header-nav">
           {user && (user.role === 'ADMIN' || user.role === 'DATA_MANAGER') && (

@@ -20,12 +20,12 @@ Authorization: Bearer <token>
 Content-Type: multipart/form-data
 
 # Example
-curl -X POST http://14.183.200.227:8084/api/s3/upload \
+curl -X POST http://14.227.143.142:8084/api/s3/upload \
   -H "Authorization: Bearer <manager_token>" \
   -F "file=@/path/to/file.pdf"
 
 # Upload với key tùy chỉnh
-curl -X POST http://14.183.200.227:8084/api/s3/upload \
+curl -X POST http://14.227.143.142:8084/api/s3/upload \
   -H "Authorization: Bearer <manager_token>" \
   -F "key=uploads/manual/file.pdf" \
   -F "file=@/path/to/file.pdf"
@@ -44,7 +44,7 @@ GET /api/s3/download/{key}
 Authorization: Bearer <token>
 
 # Example
-curl -X GET http://14.183.200.227:8084/api/s3/download/uploads/20260525_183000_file.pdf \
+curl -X GET http://14.227.143.142:8084/api/s3/download/uploads/20260525_183000_file.pdf \
   -H "Authorization: Bearer <manager_token>" \
   -o downloaded_file.pdf
 ```
@@ -55,7 +55,7 @@ GET /api/s3/list?prefix=uploads/
 Authorization: Bearer <token>
 
 # Example
-curl -X GET http://14.183.200.227:8084/api/s3/list?prefix=uploads/ \
+curl -X GET http://14.227.143.142:8084/api/s3/list?prefix=uploads/ \
   -H "Authorization: Bearer <manager_token>"
 
 # Response
@@ -77,7 +77,7 @@ DELETE /api/s3/delete/{key}
 Authorization: Bearer <token>
 
 # Example
-curl -X DELETE http://14.183.200.227:8084/api/s3/delete/uploads/20260525_183000_file.pdf \
+curl -X DELETE http://14.227.143.142:8084/api/s3/delete/uploads/20260525_183000_file.pdf \
   -H "Authorization: Bearer <manager_token>"
 
 # Response
@@ -92,7 +92,7 @@ GET /api/s3/exists/{key}
 Authorization: Bearer <token>
 
 # Example
-curl -X GET http://14.183.200.227:8084/api/s3/exists/uploads/20260525_183000_file.pdf \
+curl -X GET http://14.227.143.142:8084/api/s3/exists/uploads/20260525_183000_file.pdf \
   -H "Authorization: Bearer <manager_token>"
 
 # Response
@@ -147,18 +147,18 @@ files.forEach(System.out::println);
 
 ```bash
 # 1. Login để lấy token
-TOKEN=$(curl -s -X POST http://14.183.200.227:8084/api/auth/login \
+TOKEN=$(curl -s -X POST http://14.227.143.142:8084/api/auth/login \
   -H "Content-Type: application/json" \
   -d '{"username":"manager","password":"manager123"}' | jq -r '.token')
 
 # 2. Test upload
 echo "Test file content" > test.txt
-curl -X POST http://14.183.200.227:8084/api/s3/upload \
+curl -X POST http://14.227.143.142:8084/api/s3/upload \
   -H "Authorization: Bearer $TOKEN" \
   -F "file=@test.txt"
 
 # 3. Test list
-curl -X GET http://14.183.200.227:8084/api/s3/list \
+curl -X GET http://14.227.143.142:8084/api/s3/list \
   -H "Authorization: Bearer $TOKEN"
 ```
 

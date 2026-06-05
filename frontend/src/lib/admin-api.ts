@@ -2,7 +2,7 @@ import { authService } from './auth';
 import { DEFAULT_DATA_SOURCE, type DataSourceKey } from './constants/data-sources';
 import type { DataRecord } from './utils/record-utils';
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://14.183.200.227:8084/api';
+const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://14.227.143.142:8084/api';
 
 export type AdminRole = 'USER' | 'DATA_MANAGER' | 'ADMIN';
 
@@ -425,4 +425,67 @@ export async function exportMonthlyXlsx(year: number, month: number, metric: str
   link.download = `mekong-${metric}-${year}-${String(month).padStart(2, '0')}.xlsx`;
   link.click();
   URL.revokeObjectURL(objectUrl);
+}
+
+export interface ManualStation {
+  id?: number;
+  stationId?: string;
+  stationType: 'groundwater' | 'surface_water';
+  location: string;
+  hydroChar?: string;
+  x?: number;
+  y?: number;
+  imageCode?: string;
+  isActive?: boolean;
+  createdAt?: string;
+  updatedAt?: string | null;
+}
+
+export async function listManualStations() {
+  return requestJson<ManualStation[]>(getBackendAdminUrl('/gis/manual-stations'));
+}
+
+export async function listManualStationsByType(type: string) {
+  return requestJson<ManualStation[]>(getBackendAdminUrl(`/gis/manual-stations/type/${type}`));
+}
+
+export async function createManualStation(station: ManualStation) {
+  return requestJson<ManualStation>(getBackendAdminUrl('/gis/manual-stations'), {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(station),
+  });
+}
+
+export async function updateManualStation(id: number, station: ManualStation) {
+  return requestJson<ManualStation>(getBackendAdminUrl(`/gis/manual-stations/${id}`), {
+    method: 'PUT',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(station),
+  });
+}
+
+export async function deleteManualStation(id: number) {
+  return fetch(getBackendAdminUrl(`/gis/manual-stations/${id}`), {
+    method: 'DELETE',
+    headers: getHeaders(),
+  });
+}
+
+export async function importManualStations(file: File, stationType: string) {
+  const formData = new FormData();
+  formData.append('file', file);
+  formData.append('stationType', stationType);
+
+  return requestJson<{ successCount: number; duplicateCount?: number; failCount: number; errors: string[]; message: string }>(
+    getBackendAdminUrl('/gis/manual-stations/import'),
+    {
+      method: 'POST',
+      body: formData,
+    }
+  );
 }

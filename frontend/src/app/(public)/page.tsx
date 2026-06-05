@@ -21,9 +21,25 @@ export default function PublicHomePage() {
     }
   }, []);
   
-  const [startDateTime, setStartDateTime] = useState("2026-05-01T00:00");
-  const [endDateTime, setEndDateTime] = useState("2026-05-24T23:59");
+  const getDefaultRange = () => {
+    const now = new Date();
+    const end = now.toISOString().slice(0, 16);
+    const start = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().slice(0, 16);
+    return { start, end };
+  };
+  const [startDateTime, setStartDateTime] = useState(getDefaultRange().start);
+  const [endDateTime, setEndDateTime] = useState(getDefaultRange().end);
+  const [hasExplicitRange, setHasExplicitRange] = useState(false);
   const [appliedDatasets, setAppliedDatasets] = useState<Array<{ id: string; type: string }>>([]);
+
+  const handleStartDateTimeChange = (val: string) => {
+    setStartDateTime(val);
+    setHasExplicitRange(true);
+  };
+  const handleEndDateTimeChange = (val: string) => {
+    setEndDateTime(val);
+    setHasExplicitRange(true);
+  };
 
   useEffect(() => {
     localStorage.setItem('homePage:activeTab', activeTab);
@@ -57,14 +73,14 @@ export default function PublicHomePage() {
               onTabChange={setActiveTab}
               startDateTime={startDateTime}
               endDateTime={endDateTime}
-              onStartDateTimeChange={setStartDateTime}
-              onEndDateTimeChange={setEndDateTime}
+              onStartDateTimeChange={handleStartDateTimeChange}
+              onEndDateTimeChange={handleEndDateTimeChange}
               onApply={handleApplyDatasets}
               appliedDatasets={appliedDatasets}
             />
           </ResizablePanel>
           <div className="geo-panel">
-            <MapStage startDateTime={startDateTime} endDateTime={endDateTime} appliedDatasets={appliedDatasets} onRemoveDataset={handleRemoveDataset} onAddDataset={handleAddDataset} />
+            <MapStage startDateTime={startDateTime} endDateTime={endDateTime} appliedDatasets={appliedDatasets} onRemoveDataset={handleRemoveDataset} onAddDataset={handleAddDataset} hasExplicitRange={hasExplicitRange} onStartDateTimeChange={handleStartDateTimeChange} onEndDateTimeChange={handleEndDateTimeChange} />
           </div>
         </div>
       </main>

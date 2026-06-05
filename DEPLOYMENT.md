@@ -4,12 +4,12 @@
 
 ### Frontend
 ```
-http://14.183.200.227:3004
+http://14.227.143.142:3004
 ```
 
 ### Backend API
 ```
-http://14.183.200.227:8084/api
+http://14.227.143.142:8084/api
 ```
 
 ## 🚀 Khởi động hệ thống
@@ -36,7 +36,7 @@ npm run dev -- -H 0.0.0.0 -p 3004
 
 ### Frontend (.env.local)
 ```env
-NEXT_PUBLIC_API_URL=http://14.183.200.227:8084/api
+NEXT_PUBLIC_API_URL=http://14.227.143.142:8084/api
 ```
 
 ### Backend (application.yaml)
@@ -51,8 +51,8 @@ server:
 configuration.setAllowedOrigins(List.of(
     "http://localhost:3004",
     "http://localhost:3000",
-    "http://14.183.200.227:3004",  // ✅ Added
-    "http://14.183.200.227:3000"   // ✅ Added
+    "http://14.227.143.142:3004",  // ✅ Added
+    "http://14.227.143.142:3000"   // ✅ Added
 ));
 ```
 
@@ -73,14 +73,14 @@ sudo ufw status
 
 ### Test Backend
 ```bash
-curl http://14.183.200.227:8084/api/auth/login \
+curl http://14.227.143.142:8084/api/auth/login \
   -X POST \
   -H "Content-Type: application/json" \
   -d '{"username":"manager","password":"manager123"}'
 ```
 
 ### Test Frontend
-Mở browser: `http://14.183.200.227:3004`
+Mở browser: `http://14.227.143.142:3004`
 
 ## 📝 Lưu ý
 
@@ -125,7 +125,7 @@ Mở browser: `http://14.183.200.227:3004`
 
 Từ bất kỳ máy nào trong mạng (hoặc internet nếu có public IP):
 ```
-http://14.183.200.227:3004
+http://14.227.143.142:3004
 ```
 
 Login với:
