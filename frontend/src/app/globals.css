@@ -50,6 +50,8 @@ html[data-font-size="sm"] {
   font-size: 15px;
 }
 
+
+
 html[data-font-size="md"] {
   font-size: 16px;
 }
@@ -100,13 +102,32 @@ select {
   min-height: 100vh;
 }
 
-/* App Container */
-.app-container {
-  display: flex;
-  flex-direction: column;
-  height: 100dvh;
-  min-height: 100dvh;
-  overflow: hidden;
+/* Old 720px breakpoint: keep min-height for map */
+@media (max-width: 720px) {
+  .search-tabs {
+    padding: 0 0.75rem;
+  }
+
+  .search-tab {
+    padding: 0.85rem 1rem;
+    font-size: 0.88rem;
+  }
+
+  .geo-panel {
+    min-height: 80vh;
+  }
+
+  .geo-map-canvas {
+    min-height: 80vh;
+  }
+
+  .app-footer {
+    padding: 0.9rem 0.75rem;
+  }
+
+  .app-footer-links {
+    gap: 0.75rem 1rem;
+  }
 }
 
 .public-home {
@@ -374,7 +395,7 @@ select {
   }
 
   .geo-sidebar-actions {
-    padding: 0.85rem 1rem;
+    padding: 0.85rem 1rem 1.2rem;
   }
 
   .geo-sidebar--mobile .geo-sidebar-content {
@@ -484,11 +505,11 @@ select {
   }
 
   .geo-panel {
-    min-height: 58vh;
+    min-height: 70vh;
   }
 
   .geo-map-canvas {
-    min-height: 58vh;
+    min-height: 70vh;
   }
 
   .app-footer {
@@ -895,6 +916,17 @@ html[data-theme="light"] .geo-settings-panel {
   border: 3px solid var(--accent);
   box-shadow: var(--shadow-sm);
   transition: all 120ms ease;
+}
+
+.geo-sidebar-actions {
+  padding: 0.85rem 3rem 2rem;
+  border-top: 3px solid var(--border);
+  background: var(--surface-strong);
+  box-shadow: 0 -4px 12px rgba(0, 0, 0, 0.1);
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
 }
 
 .geo-action-secondary:hover {
@@ -3271,8 +3303,8 @@ html[data-theme="dark"] .map-playback-btn:hover {
 .pb-picker-backdrop {
   position: fixed;
   inset: 0;
-  z-index: 999;
-  background: rgba(0,0,0,0.35);
+  z-index: 9999;
+  background: rgba(0,0,0,0.5);
 }
 .pb-picker-panel {
   position: fixed;
@@ -3280,12 +3312,13 @@ html[data-theme="dark"] .map-playback-btn:hover {
   left: 50%;
   transform: translate(-50%, -50%);
   width: 320px;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  box-shadow: 0 12px 48px rgba(0,0,0,0.25);
-  z-index: 1000;
-  overflow: hidden;
+  background: #fff;
+  border: 1px solid #d1d5db;
+  border-radius: 12px;
+  box-shadow: 0 16px 48px rgba(0,0,0,0.3);
+  z-index: 10000;
+  max-height: 80vh;
+  overflow-y: auto;
 }
 .pb-picker-header {
   display: flex;
@@ -3406,9 +3439,55 @@ html[data-theme="dark"] .map-playback-btn:hover {
 
 /* ── Sidebar Drawer Overlay ── */
 @media (max-width: 767px) {
+  /* Chặn scroll trang web */
+  html, body {
+    overflow: hidden !important;
+    height: 100% !important;
+    position: fixed !important;
+    width: 100% !important;
+  }
+  .app-container {
+    overflow: hidden !important;
+    height: 100dvh !important;
+  }
+
+  .app-main {
+    overflow: hidden !important;
+  }
+
   .app-content {
+    overflow: hidden !important;
     flex-direction: row !important;
+  }
+
+  .geo-panel {
+    overflow: hidden !important;
+  }
+
+  /* ── Popup Backdrop ── */
+  .popup-backdrop {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.25);
+    z-index: 200;
+    animation: fadeIn 200ms ease;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  /* ── Bottom Sheet Drag Handle ── */
+  .bottom-sheet-handle {
+    width: 32px;
+    height: 4px;
+    border-radius: 2px;
+    background: #cbd5e1;
+    margin: 8px auto 4px;
+    flex-shrink: 0;
+  }
+
+  /* ── Body scroll lock when sidebar open ── */
+  html.scroll-lock {
     overflow: hidden;
+    position: relative;
   }
 
   .sidebar-backdrop {
@@ -3417,11 +3496,21 @@ html[data-theme="dark"] .map-playback-btn:hover {
     background: rgba(0, 0, 0, 0.45);
     z-index: 900;
     animation: fadeIn 200ms ease;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  .map-player-control .sidebar-backdrop {
+    z-index: 799;
   }
 
   @keyframes fadeIn {
     from { opacity: 0; }
     to { opacity: 1; }
+  }
+
+  /* Ẩn sidebar desktop ngay từ first paint, tránh flash do SSR */
+  .app-content > .resizable-panel:not(.mobile-drawer) {
+    display: none !important;
   }
 
   .resizable-panel.mobile-drawer {
@@ -3449,28 +3538,10 @@ html[data-theme="dark"] .map-playback-btn:hover {
   }
 
   /* ── Mobile Menu Button on Map ── */
-  .map-mobile-menu-btn {
-    position: absolute;
-    top: 0.75rem;
-    left: 0.75rem;
-    z-index: 550;
-    width: 40px;
-    height: 40px;
-    border-radius: 8px;
-    background: rgba(255, 255, 255, 0.95);
-    border: 1px solid rgba(0, 0, 0, 0.1);
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    cursor: pointer;
-    color: #333;
-    -webkit-tap-highlight-color: transparent;
-  }
-
-  .map-mobile-menu-btn:active {
-    background: #e8f0fe;
-    transform: scale(0.95);
+  /* ── Body scroll lock ── */
+  html.scroll-lock {
+    overflow: hidden;
+    position: relative;
   }
 
   /* ── Header Hamburger ── */
@@ -3573,7 +3644,7 @@ html[data-theme="dark"] .map-playback-btn:hover {
   }
 
   /* ── Player Dropdown: Bottom Sheet ── */
-  .map-player-dropdown--mobile {
+  .map-player-dropdown {
     position: fixed !important;
     top: auto !important;
     left: 0 !important;
@@ -3635,192 +3706,378 @@ html[data-theme="dark"] .map-playback-btn:hover {
     color: var(--accent);
   }
 
-  /* ── Ecowitt Popup: Bottom Sheet ── */
-  .ecowitt-popup-wrapper--mobile {
-    position: fixed !important;
-    bottom: 0 !important;
-    left: 0 !important;
-    right: 0 !important;
+  /* ── Water Quality Popup: Floating Card ── */
+  .map-station-popup {
+    position: absolute !important;
     top: auto !important;
-    z-index: 700 !important;
-    max-height: 70vh;
+    left: 12px !important;
+    right: 12px !important;
+    bottom: 12px !important;
+    width: auto !important;
+    max-width: min(calc(100vw - 24px), 480px) !important;
+    max-height: 65vh !important;
+    border-radius: 16px !important;
+    z-index: 10000 !important;
+    display: flex !important;
+    flex-direction: column !important;
+    overflow-y: auto !important;
+    overflow-x: hidden !important;
+    box-shadow: 0 4px 24px rgba(0,0,0,0.15) !important;
+    animation: slideUp 250ms ease;
   }
 
-  .ecowitt-popup-wrapper--mobile > div {
-    position: relative !important;
-    top: auto !important;
-    bottom: auto !important;
-    right: auto !important;
-    left: auto !important;
-    width: 100% !important;
-    max-width: 100% !important;
-    border-radius: 16px 16px 0 0 !important;
-    box-shadow: 0 -8px 32px rgba(0, 0, 0, 0.2) !important;
-    max-height: 70vh;
+  .map-station-popup > div:first-child {
+    position: sticky;
+    top: 0;
+    z-index: 2;
+    border-radius: 16px 16px 0 0;
   }
 
-  /* ── Water Quality Popup: Full Screen ── */
-  .map-station-popup--mobile {
-    position: fixed !important;
-    top: 0 !important;
-    left: 0 !important;
-    right: 0 !important;
-    bottom: 0 !important;
-    width: 100% !important;
-    max-width: 100% !important;
-    max-height: 100% !important;
-    border-radius: 0 !important;
-    z-index: 700 !important;
-  }
-
-  .map-station-popup--mobile .map-station-popup-body-wrap {
+  .map-station-popup .map-station-popup-body-wrap {
     flex-direction: column;
-    overflow-y: auto;
+    overflow-y: visible;
     flex: 1;
   }
 
-  .map-station-popup--mobile .map-station-popup-left {
+  .map-station-popup .map-station-popup-body-wrap--mobile {
+    flex-direction: column;
+    overflow-y: visible;
+    flex: 1;
+    gap: 10px;
+    padding: 10px 14px;
+  }
+
+  .map-station-popup .map-station-popup-left {
     width: 100%;
   }
 
-  /* ── Zoom Controls: Larger on Mobile ── */
-  .map-zoom-controls--mobile {
-    bottom: 5rem !important;
-    right: 1rem !important;
-    z-index: 600;
+  .map-station-popup .map-station-popup-left {
+    width: 100%;
   }
 
-  .map-zoom-controls--mobile .map-zoom-btn {
-    width: 48px;
-    height: 48px;
-    font-size: 26px;
+  .map-station-popup table {
+    font-size: 0.68rem !important;
+  }
+
+  .map-station-popup th,
+  .map-station-popup td {
+    padding: 3px 5px !important;
+  }
+
+  .map-station-popup .map-station-popup-right {
+    gap: 8px !important;
+  }
+
+  /* ── Zoom Controls: Larger on Mobile ── */
+  .map-zoom-controls {
+    bottom: 1rem;
+    right: 0.75rem;
+    z-index: 600;
+    box-shadow: 0 2px 12px rgba(0, 0, 0, 0.12);
+  }
+
+  .map-zoom-controls .map-zoom-btn {
+    width: 44px;
+    height: 44px;
+    font-size: 24px;
   }
 
   /* ── Map Inspector: Compact ── */
-  .geo-map-inspector--mobile {
-    bottom: 5rem !important;
+  .geo-map-inspector {
+    bottom: 4.5rem !important;
     left: 0.75rem !important;
-    width: 180px !important;
-    font-size: 0.68rem !important;
+    width: 160px !important;
+    font-size: 0.65rem !important;
     pointer-events: auto !important;
   }
 
-  .geo-map-inspector--mobile .geo-map-inspector-body {
+  .geo-map-inspector .geo-map-inspector-body {
     padding: 0.4rem 0.6rem !important;
     gap: 0.25rem !important;
   }
 
-  .geo-map-inspector--mobile .geo-map-inspector-header {
+  .geo-map-inspector .geo-map-inspector-header {
     padding: 0.3rem 0.6rem !important;
     font-size: 0.6rem !important;
   }
 
-  .geo-map-inspector--mobile .geo-map-inspector-row {
+  .geo-map-inspector .geo-map-inspector-row {
     font-size: 0.65rem !important;
   }
 
-  .geo-map-inspector--mobile .geo-map-inspector-val.value-highlight {
+  .geo-map-inspector .geo-map-inspector-val.value-highlight {
     font-size: 0.75rem !important;
   }
 
-  /* ── Playback Picker: Full Screen ── */
-  .pb-picker-panel--mobile {
+  /* ── Playback Picker: Bottom Sheet ── */
+  .pb-picker-panel {
     position: fixed !important;
-    top: auto !important;
-    left: 0 !important;
-    right: 0 !important;
-    bottom: 0 !important;
-    transform: none !important;
-    width: 100% !important;
-    border-radius: 16px 16px 0 0 !important;
-    max-height: 70vh;
+    top: 50% !important;
+    left: 50% !important;
+    right: auto !important;
+    bottom: auto !important;
+    transform: translate(-50%, -50%) !important;
+    width: min(calc(100vw - 24px), 360px) !important;
+    border-radius: 16px !important;
+    max-height: 80vh;
     overflow-y: auto;
-    animation: slideUp 250ms ease;
-    z-index: 1001 !important;
+    -webkit-overflow-scrolling: touch;
+    z-index: 10000 !important;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.25) !important;
+    padding: 0;
+  }
+
+  .pb-picker-panel .pb-input {
+    min-height: 44px;
+    font-size: 16px;
+    padding: 0.5rem 0.65rem;
+  }
+
+  .pb-picker-panel .pb-btn-play,
+  .pb-picker-panel .pb-btn-cancel {
+    min-height: 44px;
+    font-size: 0.85rem;
+    padding: 0.5rem 0.75rem;
+  }
+
+  .pb-picker-panel .pb-picker-close {
+    width: 36px;
+    height: 36px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.3rem;
   }
 
   .pb-picker-backdrop {
-    z-index: 1000 !important;
+    z-index: 9999 !important;
   }
 
-  /* ── Top Controls Wrapper ── */
-  .map-top-controls-wrapper--mobile {
-    top: 0.5rem !important;
-    left: 0.5rem !important;
-    right: 0.5rem !important;
-    width: calc(100% - 1rem) !important;
-    gap: 0.4rem;
+  /* ── Top Controls Wrapper: 1 hàng gọn (CSS media query — ap dung ngay, ko can JS) ── */
+  .map-top-controls-wrapper {
+    top: 0.5rem;
+    left: 0.5rem;
+    right: 0.5rem;
+    width: calc(100% - 1rem);
+    gap: 0.3rem;
+    flex-wrap: nowrap;
+    align-items: center;
   }
 
-  .map-top-controls-wrapper--mobile .map-player-control {
-    order: 1;
+  .map-top-controls-wrapper .map-player-control {
+    flex-shrink: 0;
   }
 
-  .map-top-controls-wrapper--mobile .map-layer-switcher {
-    order: 2;
+  .map-top-controls-wrapper .map-layer-switcher {
+    flex-shrink: 0;
   }
 
-  .map-top-controls-wrapper--mobile .map-top-bar {
-    order: 3;
-    width: 100%;
-    flex: 0 0 100%;
-    max-width: 100%;
+  .map-top-controls-wrapper .map-top-bar {
+    flex: 1;
+    min-width: 0;
+    max-width: none;
+    width: auto;
     margin: 0;
-    gap: 0.4rem;
+    gap: 0.3rem;
+    display: flex;
+    align-items: center;
   }
 
-  .map-top-controls-wrapper--mobile .map-timeline-container {
-    padding: 0.35rem 0.6rem;
-    border-radius: 8px;
+  /* Add Layer: icon only */
+  .map-add-layer-btn span {
+    display: none;
   }
-
-  .map-top-controls-wrapper--mobile .map-add-layer-btn {
+  .map-add-layer-btn {
+    width: 36px;
     height: 36px;
-    padding: 0 0.7rem;
-    font-size: 0.72rem;
+    padding: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
   }
 
-  .map-top-controls-wrapper--mobile .map-layer-toggle {
+  /* Time-Lapse: icon only */
+  .map-playback-btn span {
+    display: none;
+  }
+  .map-playback-btn {
+    width: 36px;
+    height: 36px;
+    padding: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .map-layer-toggle {
     width: 36px;
     height: 36px;
   }
 
-  .map-top-controls-wrapper--mobile .map-playback-btn {
-    height: 36px;
-    padding: 0 0.7rem;
-    font-size: 0.72rem;
+  /* Timeline: gọn hơn */
+  .map-timeline-container {
+    padding: 0.15rem 0.4rem;
+    border-radius: 8px;
+    gap: 0;
+    flex: 1;
+    min-width: 0;
   }
 
-  /* ── Search Tabs: Bottom Bar ── */
+  .map-timeline-header {
+    display: none;
+  }
+
+  .map-timeline-scroller {
+    padding: 2px 0;
+  }
+
+  .map-timeline-inner {
+    padding: 0 0.8rem;
+  }
+
+  .map-timeline-slider {
+    height: 16px;
+  }
+
+  .map-timeline-slider::-webkit-slider-runnable-track {
+    height: 4px;
+  }
+
+  .map-timeline-slider::-webkit-slider-thumb {
+    width: 14px;
+    height: 14px;
+    margin-top: -5px;
+    border-width: 2.5px;
+  }
+
+  .map-timeline-slider::-moz-range-track {
+    height: 4px;
+  }
+
+  .map-timeline-slider::-moz-range-thumb {
+    width: 14px;
+    height: 14px;
+    border-width: 2.5px;
+  }
+
+  .map-timeline-ticks {
+    display: none;
+  }
+
+  .map-timeline-tooltip {
+    top: -2rem !important;
+    font-size: 0.6rem;
+    padding: 0.2rem 0.4rem;
+    z-index: 100;
+  }
+
+  /* ── Search Tabs trong Sidebar ── */
   .search-tabs {
-    position: relative;
-    z-index: 50;
+    display: none;
+  }
+
+  .search-tabs--mobile {
+    display: flex !important;
+    border-bottom: 2px solid var(--border);
+    background: var(--surface);
+    padding: 0 0.5rem;
     overflow-x: auto;
-  }
-
-  .search-tab {
-    padding: 0.65rem 0.75rem;
-    font-size: 0.72rem;
     flex-shrink: 0;
+    scrollbar-width: none;
   }
 
-  /* ── Layer Menu: Responsive ── */
+  .search-tabs--mobile::-webkit-scrollbar {
+    display: none;
+  }
+
+  .search-tab--mobile {
+    padding: 0.7rem 0.65rem;
+    font-size: 0.72rem;
+    border: none;
+    border-bottom: 3px solid transparent;
+    background: transparent;
+    color: var(--text-muted);
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 120ms ease;
+    white-space: nowrap;
+    flex-shrink: 0;
+    margin-bottom: -2px;
+  }
+
+  .search-tab--mobile:active {
+    background: rgba(13, 110, 253, 0.08);
+  }
+
+  .search-tab--mobile.is-active {
+    color: var(--accent);
+    border-bottom-color: var(--accent);
+    font-weight: 600;
+  }
+
+  /* ── Layer Menu: Fixed position ── */
   .map-layer-menu {
-    right: 0;
-    left: auto;
-    max-width: calc(100vw - 1rem);
+    position: fixed !important;
+    top: 3.5rem !important;
+    right: 0.75rem !important;
+    left: auto !important;
+    max-width: calc(100vw - 1.5rem);
+    max-height: 60vh;
+    overflow-y: auto;
+    z-index: 800 !important;
   }
 
   /* ── Map Timeline Player Controls ── */
   .map-player-controls {
-    bottom: 0.5rem;
-    padding: 0.2rem 0.4rem;
-    gap: 0.2rem;
+    bottom: 4rem;
+    padding: 0.2rem 0.3rem;
+    gap: 0.15rem;
+    z-index: 500;
+    border-radius: 8px;
   }
 
   .map-player-btn {
-    width: 32px;
-    height: 32px;
+    width: 30px;
+    height: 30px;
+  }
+
+  .map-player-date {
+    font-size: 0.6rem;
+    max-width: 80px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .map-player-speed-btn {
+    padding: 0.08rem 0.2rem;
+    font-size: 0.5rem;
+  }
+
+  /* ── Footer compact, luôn ở bottom ── */
+  .app-footer {
+    padding: 0.2rem 0.5rem;
+    border-top-width: 2px;
+    flex-shrink: 0;
+  }
+
+  .app-footer-content {
+    gap: 0.15rem;
+  }
+
+  .app-footer-links {
+    gap: 0.25rem 0.5rem;
+  }
+
+  .app-footer-links a {
+    font-size: 0.6rem;
+  }
+
+  .app-footer-links a:nth-child(n+4) {
+    display: none;
+  }
+
+  .app-footer-copyright {
+    font-size: 0.55rem;
   }
 
   /* ── Prevent body scroll when sidebar/popup open ── */
@@ -3836,15 +4093,7 @@ html[data-theme="dark"] .map-playback-btn:hover {
     width: min(320px, 50vw) !important;
   }
 
-  .ecowitt-popup-wrapper--mobile {
-    max-height: 85vh;
-  }
-
-  .ecowitt-popup-wrapper--mobile > div {
-    max-height: 85vh;
-  }
-
-  .map-player-dropdown--mobile {
+  .map-player-dropdown {
     max-height: 85vh;
   }
 

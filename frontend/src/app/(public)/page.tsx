@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { AppHeader } from "../../components/layout/app-header";
 import { AppFooter } from "../../components/layout/app-footer";
@@ -9,15 +9,15 @@ import { ResizablePanel } from "../../components/layout/resizable-panel";
 import { MapStage } from "../../features/map/map-stage";
 import { listManualStations, type ManualStation } from "../../lib/admin-api";
 
-type TabType = "criteria" | "datasets" | "additional" | "results";
+type TabType = "datasets" | "additional" | "results";
 
 export default function PublicHomePage() {
   const router = useRouter();
-  const [activeTab, setActiveTab] = useState<TabType>("criteria");
+  const [activeTab, setActiveTab] = useState<TabType>("datasets");
   
   useEffect(() => {
     const saved = localStorage.getItem('homePage:activeTab');
-    if (saved === 'criteria' || saved === 'datasets' || saved === 'additional' || saved === 'results') {
+    if (saved === 'datasets' || saved === 'additional' || saved === 'results') {
       setActiveTab(saved);
     }
   }, []);
@@ -34,11 +34,12 @@ export default function PublicHomePage() {
   const [appliedDatasets, setAppliedDatasets] = useState<Array<{ id: string; type: string }>>([]);
   const [wqStations, setWqStations] = useState<ManualStation[]>([]);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
-  const [isMobile, setIsMobile] = useState(false);
+  const [isMobile, setIsMobile] = useState(() =>
+    typeof window !== 'undefined' ? window.innerWidth < 768 : false
+  );
 
   useEffect(() => {
     const check = () => setIsMobile(window.innerWidth < 768);
-    check();
     window.addEventListener('resize', check);
     return () => window.removeEventListener('resize', check);
   }, []);
@@ -62,52 +63,59 @@ export default function PublicHomePage() {
     }
   }, [appliedDatasets]);
 
-  const handleStartDateTimeChange = (val: string) => {
+  const handleStartDateTimeChange = useCallback((val: string) => {
     setStartDateTime(val);
     setHasExplicitRange(true);
-  };
-  const handleEndDateTimeChange = (val: string) => {
+  }, []);
+  
+  const handleEndDateTimeChange = useCallback((val: string) => {
     setEndDateTime(val);
     setHasExplicitRange(true);
-  };
+  }, []);
 
   useEffect(() => {
     localStorage.setItem('homePage:activeTab', activeTab);
   }, [activeTab]);
 
-  const toggleSidebar = () => setIsSidebarOpen(prev => !prev);
+  useEffect(() => {
+    if (!isMobile) return;
+    document.documentElement.classList.toggle('scroll-lock', isSidebarOpen);
+    return () => document.documentElement.classList.remove('scroll-lock');
+  }, [isMobile, isSidebarOpen]);
 
-  const handleApplyDatasets = (datasets: Array<{ id: string; type: string }>) => {
+  const toggleSidebar = useCallback(() => setIsSidebarOpen(prev => !prev), []);
+
+  const handleApplyDatasets = useCallback((datasets: Array<{ id: string; type: string }>) => {
     setAppliedDatasets(datasets);
     if (isMobile) setIsSidebarOpen(false);
-  };
+  }, [isMobile]);
 
-  const handleRemoveDataset = (id: string, type: string) => {
+  const handleRemoveDataset = useCallback((id: string, type: string) => {
     setAppliedDatasets(prev => prev.filter(d => !(d.id === id && d.type === type)));
-  };
+  }, []);
 
-  const handleAddDataset = (id: string, type: string) => {
-    setAppliedDatasets(prev =>
-      prev.some(d => d.id === id && d.type === type) ? prev : [...prev, { id, type }]
-    );
-  };
+  const handleAddDataset = useCallback((id: string, type: string) => {
+    console.log("[page] handleAddDataset", { id, type });
+    setAppliedDatasets(prev => {
+      const exists = prev.some(d => d.id === id && d.type === type);
+      const next = exists ? prev : [...prev, { id, type }];
+      console.log("[page] setAppliedDatasets", { prev, next, exists });
+      return next;
+    });
+  }, []);
 
   return (
     <div className="app-container public-home">
       <AppHeader onToggleSidebar={toggleSidebar} isSidebarOpen={isSidebarOpen} />
       
       <main className="app-main">
-        <SearchTabs activeTab={activeTab} onTabChange={setActiveTab} />
+        {!isMobile && <SearchTabs activeTab={activeTab} onTabChange={setActiveTab} />}
         
         <div className={`app-content ${isSidebarOpen ? 'sidebar-open' : ''}`}>
           <ResizablePanel defaultWidth={360} minWidth={280} maxWidth={600} side="left" isMobile={isMobile} isSidebarOpen={isSidebarOpen}>
             <GeoSearchSidebar
               activeTab={activeTab}
               onTabChange={(tab) => { setActiveTab(tab); if (isMobile) setIsSidebarOpen(false); }}
-              startDateTime={startDateTime}
-              endDateTime={endDateTime}
-              onStartDateTimeChange={handleStartDateTimeChange}
-              onEndDateTimeChange={handleEndDateTimeChange}
               onApply={handleApplyDatasets}
               appliedDatasets={appliedDatasets}
               isMobile={isMobile}
@@ -117,13 +125,6 @@ export default function PublicHomePage() {
           </ResizablePanel>
           <div className="geo-panel">
             <MapStage startDateTime={startDateTime} endDateTime={endDateTime} appliedDatasets={appliedDatasets} onRemoveDataset={handleRemoveDataset} onAddDataset={handleAddDataset} hasExplicitRange={hasExplicitRange} onStartDateTimeChange={handleStartDateTimeChange} onEndDateTimeChange={handleEndDateTimeChange} waterQualityStations={wqStations} isMobile={isMobile} />
-            {isMobile && !isSidebarOpen && (
-              <button className="map-mobile-menu-btn" onClick={toggleSidebar} type="button" aria-label="Open menu">
-                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                  <line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/>
-                </svg>
-              </button>
-            )}
           </div>
         </div>
       </main>

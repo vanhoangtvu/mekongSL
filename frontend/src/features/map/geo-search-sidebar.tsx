@@ -3,15 +3,11 @@
 import { useState, useEffect } from "react";
 import { AREA_TYPES, DATASETS, getDatasetById } from "../../lib/constants/datasets";
 
-type TabType = "criteria" | "datasets" | "additional" | "results";
+type TabType = "datasets" | "additional" | "results";
 
 type GeoSearchSidebarProps = {
   activeTab: TabType;
   onTabChange: (tab: TabType) => void;
-  startDateTime: string;
-  endDateTime: string;
-  onStartDateTimeChange: (value: string) => void;
-  onEndDateTimeChange: (value: string) => void;
   onApply?: (datasets: Array<{ id: string; type: "raster" | "vector" }>) => void;
   appliedDatasets?: Array<{ id: string; type: string }>;
   isMobile?: boolean;
@@ -27,13 +23,6 @@ type SearchTabsProps = {
 export function SearchTabs({ activeTab, onTabChange }: SearchTabsProps) {
   return (
     <nav className="search-tabs">
-      <button
-        className={`search-tab ${activeTab === "criteria" ? "is-active" : ""}`}
-        onClick={() => onTabChange("criteria")}
-        type="button"
-      >
-        Search Criteria
-      </button>
       <button
         className={`search-tab ${activeTab === "datasets" ? "is-active" : ""}`}
         onClick={() => onTabChange("datasets")}
@@ -62,10 +51,6 @@ export function SearchTabs({ activeTab, onTabChange }: SearchTabsProps) {
 export function GeoSearchSidebar({
   activeTab,
   onTabChange,
-  startDateTime,
-  endDateTime,
-  onStartDateTimeChange,
-  onEndDateTimeChange,
   onApply,
   appliedDatasets,
   isMobile,
@@ -204,82 +189,29 @@ export function GeoSearchSidebar({
   return (
     <aside className={`geo-sidebar ${isMobile ? 'geo-sidebar--mobile' : ''}`}>
       {isMobile && (
-        <div className="geo-sidebar-mobile-header">
-          <span className="geo-sidebar-mobile-title">Data Sets</span>
-          <button className="geo-sidebar-mobile-close" onClick={onClose} type="button" aria-label="Close">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-              <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
-            </svg>
-          </button>
-        </div>
+        <>
+          <div className="geo-sidebar-mobile-header">
+            <span className="geo-sidebar-mobile-title">Menu</span>
+            <button className="geo-sidebar-mobile-close" onClick={onClose} type="button" aria-label="Close">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+              </svg>
+            </button>
+          </div>
+          <nav className="search-tabs search-tabs--mobile">
+            {(["datasets", "additional", "results"] as const).map((tab) => (
+              <button key={tab} className={`search-tab search-tab--mobile ${activeTab === tab ? "is-active" : ""}`}
+                onClick={() => onTabChange(tab)} type="button">
+                {tab === "datasets" && "Data Sets"}
+                {tab === "additional" && "Additional"}
+                {tab === "results" && "Results"}
+              </button>
+            ))}
+          </nav>
+        </>
       )}
 
-      {/* Tab 1: Search Criteria */}
-      {activeTab === "criteria" && (
-        <div className="geo-sidebar-content">
-          <section className="geo-block">
-            <h2>1. Enter Search Criteria</h2>
-            <p>
-              To narrow your search area: type in an address or place name, enter coordinates or
-              click the map to define your search area, and/or choose a date range.
-            </p>
-          </section>
-
-          <section className="geo-block">
-            <label className="geo-label" htmlFor="keyword">
-              Address / Place
-            </label>
-            <input
-              id="keyword"
-              className="geo-input"
-              defaultValue="Vinh Long"
-              placeholder="Province, District, Station..."
-              type="text"
-            />
-          </section>
-
-          <section className="geo-block">
-            <label className="geo-label" htmlFor="data-type">
-              Data
-            </label>
-            <select id="data-type" className="geo-input">
-              <option value="salinity">Salinity</option>
-              <option value="tidal">Tidal</option>
-              <option value="ph">pH Level</option>
-              <option value="conductivity">Conductivity</option>
-            </select>
-          </section>
-
-          <section className="geo-block geo-grid-2">
-            <div>
-              <label className="geo-label" htmlFor="start-date">
-                Start Date & Time
-              </label>
-              <input
-                id="start-date"
-                className="geo-input"
-                onChange={(event) => onStartDateTimeChange(event.target.value)}
-                type="datetime-local"
-                value={startDateTime}
-              />
-            </div>
-            <div>
-              <label className="geo-label" htmlFor="end-date">
-                End Date & Time
-              </label>
-              <input
-                id="end-date"
-                className="geo-input"
-                onChange={(event) => onEndDateTimeChange(event.target.value)}
-                type="datetime-local"
-                value={endDateTime}
-              />
-            </div>
-          </section>
-        </div>
-      )}
-
-      {/* Tab 2: Data Sets */}
+      {/* Tab 1: Data Sets */}
       {activeTab === "datasets" && (
         <div className="geo-sidebar-content">
           <section className="geo-block">

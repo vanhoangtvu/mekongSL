@@ -34,6 +34,7 @@ export function useSingleLayer(
 
   useEffect(() => {
     const dsKey = dataset ? `${dataset.id}-${dataset.type}` : undefined;
+    console.log("[useSingleLayer] trigger", { dataset, dsKey, timelineDate, timeSlot });
 
     // Dataset changed → mark as fresh apply
     if (dsKey !== prevDatasetKeyRef.current) {
@@ -98,6 +99,7 @@ export function useSingleLayer(
           if (dataset.type === "vector") {
             const vFile = allFiles.find(f => (f.key?.toLowerCase() ?? "").endsWith(".vct"))
               ?? allFiles.find(f => [".geojson", ".kml", ".zip"].some(e => (f.key?.toLowerCase() ?? "").endsWith(e)));
+            console.log("[useSingleLayer] vector search", { prefix, files: allFiles.length, vFile: vFile?.key });
             if (!vFile) continue;
             const baseLower = vFile.key!.replace(/\.\w+$/, "").toLowerCase();
             const vdcFile = allFiles.find(f => f.key?.toLowerCase() === baseLower + ".vdc");
@@ -111,6 +113,7 @@ export function useSingleLayer(
                 vdcUrl: vdcFile ? `/api/tif?key=${encodeURIComponent(vdcFile.key!)}` : undefined,
               },
             });
+            console.log("[useSingleLayer] vector renderedLayers set", dsKey);
             isFirstApplyRef.current = false;
             return;
           }

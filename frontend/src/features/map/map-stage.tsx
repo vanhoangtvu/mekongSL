@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import TileLayer from "ol/layer/Tile";
 import VectorLayer from "ol/layer/Vector";
 import Map from "ol/Map";
@@ -529,6 +529,7 @@ function EcowittStationPopup({
   onClose,
   onExpand,
   onCollapse,
+  isMobile,
 }: {
   device: { id: string; name: string; lat?: number; lng?: number };
   data: EcowittPopupSensorData[];
@@ -540,6 +541,7 @@ function EcowittStationPopup({
   onClose: () => void;
   onExpand: () => void;
   onCollapse: () => void;
+  isMobile?: boolean;
 }) {
   const [hoveredIdx, setHoveredIdx] = useState<number | null>(null);
   const latestData = data.length > 0 ? data[data.length - 1] : null;
@@ -554,15 +556,19 @@ function EcowittStationPopup({
     <div
       style={{
         position: "absolute",
-        top: "72px",
-        ...(expanded ? { bottom: "110px" } : {}),
-        right: "12px",
-        width: popupW,
-        maxWidth: "calc(100vw - 24px)",
-        background: "#fff",
-        borderRadius: "14px",
-        boxShadow: "0 6px 32px rgba(0,0,0,0.18)",
-        zIndex: 500,
+        top: isMobile ? "auto" : "72px",
+        bottom: isMobile ? "12px" : expanded ? "110px" : undefined,
+        right: isMobile ? "12px" : "12px",
+        left: isMobile ? "12px" : undefined,
+        width: isMobile ? "auto" : popupW,
+        maxWidth: isMobile ? "min(calc(100vw - 24px), 380px)" : "calc(100vw - 24px)",
+        maxHeight: isMobile ? (expanded ? "55vh" : "40vh") : undefined,
+        background: isMobile ? "rgba(255,255,255,0.92)" : "#fff",
+        backdropFilter: isMobile ? "blur(16px)" : undefined,
+        WebkitBackdropFilter: isMobile ? "blur(16px)" : undefined,
+        borderRadius: isMobile ? "16px" : "14px",
+        boxShadow: isMobile ? "0 4px 24px rgba(0,0,0,0.15)" : "0 6px 32px rgba(0,0,0,0.18)",
+        zIndex: isMobile ? 701 : 500,
         fontFamily: "system-ui, -apple-system, sans-serif",
         display: "flex",
         flexDirection: "column",
@@ -571,19 +577,22 @@ function EcowittStationPopup({
     >
       <style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style>
 
+      {/* ── Drag Handle (Mobile) ── */}
+      {isMobile && <div className="bottom-sheet-handle" />}
+
       {/* ── Header ── */}
       <div
         style={{
           background: "linear-gradient(135deg, #0d6efd 0%, #0dcaf0 100%)",
           color: "#fff",
-          padding: "10px 12px 9px",
+          padding: isMobile ? "8px 14px 8px" : "10px 12px 9px",
           position: "relative",
           flexShrink: 0,
         }}
       >
         <div
           style={{
-            fontSize: "0.6rem",
+            fontSize: isMobile ? "0.7rem" : "0.6rem",
             opacity: 0.78,
             fontWeight: "600",
             letterSpacing: "0.05em",
@@ -594,17 +603,17 @@ function EcowittStationPopup({
         </div>
         <div
           style={{
-            fontSize: "0.9rem",
+            fontSize: isMobile ? "1rem" : "0.9rem",
             fontWeight: "700",
             lineHeight: 1.25,
-            paddingRight: "24px",
+            paddingRight: "32px",
             marginTop: "2px",
           }}
         >
           {device.name}
         </div>
         {device.lat != null && (
-          <div style={{ fontSize: "0.63rem", opacity: 0.72, marginTop: "2px" }}>
+          <div style={{ fontSize: isMobile ? "0.7rem" : "0.63rem", opacity: 0.72, marginTop: "2px" }}>
             {device.lat.toFixed(4)}°N, {device.lng?.toFixed(4)}°E
           </div>
         )}
@@ -613,17 +622,17 @@ function EcowittStationPopup({
           onClick={onClose}
           style={{
             position: "absolute",
-            top: "8px",
-            right: "8px",
+            top: isMobile ? "10px" : "8px",
+            right: isMobile ? "10px" : "8px",
             background: "rgba(255,255,255,0.2)",
             border: "none",
             color: "#fff",
-            width: "20px",
-            height: "20px",
+            width: isMobile ? "32px" : "20px",
+            height: isMobile ? "32px" : "20px",
             borderRadius: "50%",
             cursor: "pointer",
-            fontSize: "0.95rem",
-            lineHeight: "20px",
+            fontSize: isMobile ? "1.3rem" : "0.95rem",
+            lineHeight: isMobile ? "32px" : "20px",
             textAlign: "center",
             display: "flex",
             alignItems: "center",
@@ -670,8 +679,9 @@ function EcowittStationPopup({
             flex: 1,
             border: "1px solid #e2e8f0",
             borderRadius: "6px",
-            padding: "3px 6px",
-            fontSize: "0.75rem",
+            padding: isMobile ? "8px 10px" : "3px 6px",
+            fontSize: isMobile ? "0.85rem" : "0.75rem",
+            minHeight: isMobile ? "40px" : undefined,
             color: "#334155",
             background: "#f8fafc",
             outline: "none",
@@ -697,8 +707,9 @@ function EcowittStationPopup({
       <div
         style={{
           flex: 1,
-          overflowY: expanded ? "auto" : "hidden",
+          overflowY: isMobile ? "auto" : (expanded ? "auto" : "hidden"),
           minHeight: 0,
+          WebkitOverflowScrolling: "touch",
         }}
       >
         {/* Loading */}
@@ -747,12 +758,12 @@ function EcowittStationPopup({
                         background: `${sensor.color}0e`,
                         border: `1px solid ${sensor.color}28`,
                         overflow: "hidden",
-                        padding: "8px 9px 0",
+                        padding: isMobile ? "10px 10px 0" : "8px 9px 0",
                       }}
                     >
                       <div
                         style={{
-                          fontSize: "0.6rem",
+                          fontSize: isMobile ? "0.72rem" : "0.6rem",
                           color: "#64748b",
                           fontWeight: "600",
                           textTransform: "uppercase",
@@ -763,7 +774,7 @@ function EcowittStationPopup({
                       </div>
                       <div
                         style={{
-                          fontSize: "1.1rem",
+                          fontSize: isMobile ? "1.25rem" : "1.1rem",
                           fontWeight: "800",
                           color: sensor.color,
                           marginTop: "1px",
@@ -772,7 +783,7 @@ function EcowittStationPopup({
                         {display}
                         <span
                           style={{
-                            fontSize: "0.62rem",
+                            fontSize: isMobile ? "0.72rem" : "0.62rem",
                             fontWeight: "500",
                             color: "#94a3b8",
                             marginLeft: "2px",
@@ -786,7 +797,7 @@ function EcowittStationPopup({
                         sensor={sensor}
                         hoveredIdx={hoveredIdx}
                         onHover={setHoveredIdx}
-                        chartH={40}
+                        chartH={isMobile ? 52 : 40}
                       />
                     </div>
                   );
@@ -814,24 +825,25 @@ function EcowittStationPopup({
               style={{
                 width: "100%",
                 marginTop: "8px",
-                padding: "6px 0",
+                padding: isMobile ? "12px 0" : "6px 0",
                 background: "linear-gradient(135deg,rgba(13,110,253,0.07),rgba(13,202,240,0.07))",
                 border: "1px solid rgba(13,110,253,0.18)",
                 borderRadius: "8px",
                 color: "#0d6efd",
-                fontSize: "0.72rem",
+                fontSize: isMobile ? "0.85rem" : "0.72rem",
                 fontWeight: "700",
                 cursor: "pointer",
                 display: "flex",
                 alignItems: "center",
                 justifyContent: "center",
                 gap: "4px",
+                minHeight: isMobile ? "44px" : undefined,
               }}
             >
               Xem chi tiết
               <svg
-                width="11"
-                height="11"
+                width={isMobile ? 14 : 11}
+                height={isMobile ? 14 : 11}
                 viewBox="0 0 24 24"
                 fill="none"
                 stroke="currentColor"
@@ -855,23 +867,24 @@ function EcowittStationPopup({
               style={{
                 width: "100%",
                 marginBottom: "9px",
-                padding: "5px 0",
+                padding: isMobile ? "12px 0" : "5px 0",
                 background: "#f8fafc",
                 border: "1px solid #e2e8f0",
                 borderRadius: "7px",
                 color: "#64748b",
-                fontSize: "0.68rem",
+                fontSize: isMobile ? "0.82rem" : "0.68rem",
                 fontWeight: "700",
                 cursor: "pointer",
                 display: "flex",
                 alignItems: "center",
                 justifyContent: "center",
                 gap: "4px",
+                minHeight: isMobile ? "44px" : undefined,
               }}
             >
               <svg
-                width="10"
-                height="10"
+                width={isMobile ? 14 : 10}
+                height={isMobile ? 14 : 10}
                 viewBox="0 0 24 24"
                 fill="none"
                 stroke="currentColor"
@@ -889,7 +902,7 @@ function EcowittStationPopup({
               <>
                 <div
                   style={{
-                    fontSize: "0.6rem",
+                    fontSize: isMobile ? "0.72rem" : "0.6rem",
                     fontWeight: "700",
                     color: "#94a3b8",
                     textTransform: "uppercase",
@@ -902,7 +915,7 @@ function EcowittStationPopup({
                 <div
                   style={{
                     display: "grid",
-                    gridTemplateColumns: "1fr 1fr",
+                    gridTemplateColumns: isMobile ? "1fr 1fr" : "1fr 1fr",
                     gap: "5px",
                     marginBottom: "12px",
                   }}
@@ -919,26 +932,26 @@ function EcowittStationPopup({
                           borderLeft: `2.5px solid ${sensor.color}`,
                         }}
                       >
-                        <div
-                          style={{
-                            fontSize: "0.59rem",
-                            color: "#64748b",
-                            fontWeight: "600",
-                            textTransform: "uppercase",
-                            letterSpacing: "0.03em",
-                          }}
-                        >
-                          {sensor.label}
-                        </div>
-                        <div
-                          style={{
-                            fontSize: "0.95rem",
-                            fontWeight: "800",
-                            color: sensor.color,
-                            marginTop: "1px",
-                          }}
-                        >
-                          {display}
+                          <div
+                            style={{
+                              fontSize: isMobile ? "0.72rem" : "0.59rem",
+                              color: "#64748b",
+                              fontWeight: "600",
+                              textTransform: "uppercase",
+                              letterSpacing: "0.03em",
+                            }}
+                          >
+                            {sensor.label}
+                          </div>
+                          <div
+                            style={{
+                              fontSize: isMobile ? "1.1rem" : "0.95rem",
+                              fontWeight: "800",
+                              color: sensor.color,
+                              marginTop: "1px",
+                            }}
+                          >
+                            {display}
                           <span
                             style={{
                               fontSize: "0.6rem",
@@ -962,7 +975,7 @@ function EcowittStationPopup({
               <>
                 <div
                   style={{
-                    fontSize: "0.6rem",
+                    fontSize: isMobile ? "0.72rem" : "0.6rem",
                     fontWeight: "700",
                     color: "#94a3b8",
                     textTransform: "uppercase",
@@ -984,7 +997,7 @@ function EcowittStationPopup({
                     >
                       <span
                         style={{
-                          fontSize: "0.67rem",
+                          fontSize: isMobile ? "0.8rem" : "0.67rem",
                           color: "#475569",
                           fontWeight: "600",
                         }}
@@ -1004,7 +1017,7 @@ function EcowittStationPopup({
                       </span>
                       <span
                         style={{
-                          fontSize: "0.7rem",
+                          fontSize: isMobile ? "0.85rem" : "0.7rem",
                           color: sensor.color,
                           fontWeight: "700",
                         }}
@@ -1025,6 +1038,7 @@ function EcowittStationPopup({
                         sensor={sensor}
                         hoveredIdx={hoveredIdx}
                         onHover={setHoveredIdx}
+                        chartH={isMobile ? 72 : 56}
                       />
                     </div>
                   </div>
@@ -1052,7 +1066,8 @@ function EcowittStationPopup({
   );
 }
 
-export function MapStage({ startDateTime, endDateTime, appliedDatasets, onRemoveDataset, onAddDataset, onStartDateTimeChange, onEndDateTimeChange, waterQualityStations, isMobile }: MapStageProps) {
+export const MapStage = React.memo(function MapStage({ startDateTime, endDateTime, appliedDatasets, onRemoveDataset, onAddDataset, onStartDateTimeChange, onEndDateTimeChange, waterQualityStations, isMobile }: MapStageProps) {
+  console.log("[MapStage] render", { datasets: appliedDatasets, single: (appliedDatasets?.length ?? 0) === 1 });
   const mapContainerRef = useRef<HTMLDivElement | null>(null);
   const scrollerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<Map | null>(null);
@@ -1142,7 +1157,11 @@ export function MapStage({ startDateTime, endDateTime, appliedDatasets, onRemove
   const isSingleMode = (appliedDatasets?.length ?? 0) === 1;
   const singleDataset = isSingleMode ? appliedDatasets![0] : undefined;
 
+  const isTimelinePlayingRef = useRef(false);
+
   const onActualSlot = (actualDate: string, actualSlot: string) => {
+    // Don't snap timeline during playback — timelapse hook already shows correct frame
+    if (isTimelinePlayingRef.current) return;
     const targetValue = `${actualDate}T${actualSlot.replace("-", ":")}`;
     const idx = timelineUnits.findIndex(u => u.value === targetValue);
     if (idx >= 0) setTimelineIndex(idx);
@@ -1150,26 +1169,55 @@ export function MapStage({ startDateTime, endDateTime, appliedDatasets, onRemove
 
   // Single-layer mode: exact slot fetch, no cache
   const singleResult = useSingleLayer(singleDataset, mapRef, timelineDate, timeSlot, onActualSlot);
-  // Timelapse mode: preload all frames, instant setVisible() swap
+
+  // Split datasets: raster → timelapse, vector → legacy renderer (timelapse skips vector)
+  const rasterDatasets = useMemo(
+    () => (appliedDatasets ?? []).filter(d => d.type !== "vector"),
+    [appliedDatasets],
+  );
+  const vectorDatasets = useMemo(
+    () => (appliedDatasets ?? []).filter(d => d.type === "vector"),
+    [appliedDatasets],
+  );
+
+  // Timelapse mode: preload all frames, instant setVisible() swap (raster only)
   const timelapseResult = useTimelapseLayer(
-    isSingleMode ? undefined : appliedDatasets,
+    isSingleMode ? undefined : (rasterDatasets.length > 0 ? rasterDatasets : undefined),
     mapRef, timelineDate, timeSlot, allTimelineDates, onActualSlot,
   );
-  // Legacy multi-layer fallback (unused but hooks must always be called)
-  const _legacyResult = useS3DatasetLayers(undefined, mapRef, undefined, undefined, undefined, undefined);
+  // Vector layers always go through the legacy multi-layer hook
+  const vectorResult = useS3DatasetLayers(
+    isSingleMode ? undefined : (vectorDatasets.length > 0 ? vectorDatasets : undefined),
+    mapRef, timelineDate, timeSlot, prefetchDate, allTimelineDates,
+  );
 
-  const { renderedLayers, layerRefs } = isSingleMode ? singleResult : timelapseResult;
-  const { layersCacheRef } = _legacyResult;
+  const { renderedLayers: baseRenderedLayers, layerRefs: baseLayerRefs, preloadFrames } =
+    isSingleMode ? { ...singleResult, preloadFrames: undefined } : timelapseResult;
+
+  // Merge vector rendered layers into the main set
+  const renderedLayers = useMemo(
+    () => isSingleMode ? baseRenderedLayers : { ...baseRenderedLayers, ...vectorResult.renderedLayers },
+    [isSingleMode, baseRenderedLayers, vectorResult.renderedLayers],
+  );
+
+  // Merged layerRefs: combine base (raster/single) + vector refs into one object
+  const layerRefs = useMemo(() => {
+    const merged: { current: Record<string, import("ol/layer/WebGLTile").default | import("ol/layer/Vector").default> } = {
+      get current() {
+        return { ...baseLayerRefs.current, ...vectorResult.layerRefs.current };
+      },
+      set current(v) {
+        baseLayerRefs.current = v;
+      },
+    };
+    return merged;
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Keep a ref so the pointermove closure (created once) can read current renderedLayers
   const renderedLayersRef = useRef(renderedLayers);
   useEffect(() => { renderedLayersRef.current = renderedLayers; }, [renderedLayers]);
 
-  // Prepare state: preload all frames before playing
-  const [isPreparing, setIsPreparing] = useState(false);
-  const [prepareProgress, setPrepareProgress] = useState({ current: 0, total: 1, label: '' });
-  const [isReady, setIsReady] = useState(false);
-
+  // Store playback frames for controlling auto-advance range
   const [activeBaseLayer, setActiveBaseLayer] = useState<BaseLayerType>("light");
   const [showLayerMenu, setShowLayerMenu] = useState(false);
   const [showTimeline, setShowTimeline] = useState(true);
@@ -1246,18 +1294,17 @@ export function MapStage({ startDateTime, endDateTime, appliedDatasets, onRemove
   const [pbEndDate, setPbEndDate] = useState("");
   const [pbError, setPbError] = useState("");
   const [isTimelinePlaying, setIsTimelinePlaying] = useState(false);
+  useEffect(() => { isTimelinePlayingRef.current = isTimelinePlaying; }, [isTimelinePlaying]);
   const [playbackSpeed, setPlaybackSpeed] = useState(0.5);
   const [pendingPlayback, setPendingPlayback] = useState<{ start: string; end: string } | null>(null);
+  const [pbLoading, setPbLoading] = useState(false);
 
   const handleOpenPlayback = () => {
     setPbStartDate("");
     setPbEndDate("");
     setPbError("");
-    setIsReady(false);
     setShowPlaybackPicker(true);
   };
-
-  // Store playback frames for controlling auto-advance range
   const playbackFramesRef = useRef<TimelineUnit[]>([]);
 
   // Auto-advance timeline during playback (only within selected frames)
@@ -1317,68 +1364,54 @@ export function MapStage({ startDateTime, endDateTime, appliedDatasets, onRemove
     }
 
     // Timeline already covers the range — start playback immediately
-    setIsPreparing(true);
-    setIsReady(false);
-
     const frames = timelineUnits.filter(u => {
       const d = u.value.slice(0, 10);
       return d >= pbStartDate && d <= pbEndDate;
     });
 
+    if (frames.length === 0) {
+      setPbError("No data frames in the selected range.");
+      return;
+    }
+
     playbackFramesRef.current = frames;
+    setShowPlaybackPicker(false);
 
-    setPrepareProgress({ current: 0, total: frames.length, label: 'Starting...' });
+    const dsKeys = appliedDatasets
+      ?.filter(ds => ds.type === "raster")
+      .map(ds => `${ds.id}-${ds.type}`) ?? [];
 
-    const cache = layersCacheRef.current;
-    const loadedDates = new Set(Object.keys(cache));
-    const uniqueDates = [...new Set(frames.map(f => f.value.slice(0, 10)))].filter(d => !loadedDates.has(d));
-
-    const firstFrameValue = frames.length > 0 ? frames[0].value : null;
-
-    let idx = 0;
-    const preloadNext = () => {
-      if (idx >= uniqueDates.length) {
-        setIsPreparing(false);
-        setIsReady(true);
-        setShowPlaybackPicker(false);
-        if (firstFrameValue) {
-          const firstUnit = timelineUnits.findIndex(u => u.value === firstFrameValue);
-          if (firstUnit >= 0) setTimelineIndex(firstUnit);
-        }
-        setPrepareProgress({ current: frames.length, total: frames.length, label: 'Playing' });
-        setIsTimelinePlaying(true);
-        return;
+    const allFrameKeys: string[] = [];
+    for (const f of frames) {
+      const date = f.value.slice(0, 10);
+      const slot = f.value.slice(11, 16).replace(":", "-");
+      for (const dk of dsKeys) {
+        allFrameKeys.push(`${dk}__${date}__${slot}`);
       }
-      const date = uniqueDates[idx];
-      setPrepareProgress({ current: idx + 1, total: uniqueDates.length, label: date });
-      setTimelineDate(date);
-      setTimeSlot("00-00");
-      const matchIdx = timelineUnits.findIndex(u => u.value.startsWith(date));
-      if (matchIdx >= 0) setTimelineIndex(matchIdx);
-      idx++;
-      setTimeout(preloadNext, 1500);
-    };
+    }
 
-    if (uniqueDates.length === 0) {
-      setIsPreparing(false);
-      setIsReady(true);
-      setShowPlaybackPicker(false);
-      if (firstFrameValue) {
-        const firstUnit = timelineUnits.findIndex(u => u.value === firstFrameValue);
+    if (preloadFrames && allFrameKeys.length > 0) {
+      setPbLoading(true);
+      preloadFrames(allFrameKeys).then(() => {
+        setPbLoading(false);
+        const firstUnit = timelineUnits.findIndex(u => u.value === frames[0].value);
         if (firstUnit >= 0) setTimelineIndex(firstUnit);
-      }
-      setPrepareProgress({ current: frames.length, total: frames.length, label: 'Playing' });
-      setIsTimelinePlaying(true);
+        setIsTimelinePlaying(true);
+      });
     } else {
-      preloadNext();
+      const firstUnit = timelineUnits.findIndex(u => u.value === frames[0].value);
+      if (firstUnit >= 0) setTimelineIndex(firstUnit);
+      setIsTimelinePlaying(true);
     }
   };
 
   const confirmAddLayer = (key: string, layerType: "raster" | "vector") => {
+    console.log("[MapStage] confirmAddLayer", { key, layerType });
     setPlayerLayers(prev => prev.map(l => getLayerKey(l) === key ? { ...l, added: true, type: layerType } : l));
     setPendingLayerId(null);
     // Sync lên appliedDatasets — lấy id từ key (bỏ suffix -raster/-vector nếu có)
     const id = key.replace(/-(?:raster|vector)$/, "");
+    console.log("[MapStage] calling onAddDataset", { id, layerType });
     onAddDataset?.(id, layerType);
   };
 
@@ -1440,8 +1473,8 @@ export function MapStage({ startDateTime, endDateTime, appliedDatasets, onRemove
 
   useEffect(() => {
     if (timelineUnits.length === 0) return;
-    // Don't reset timeline position during playback or preload
-    if (isTimelinePlaying || isPreparing) return;
+    // Don't reset timeline position during playback
+    if (isTimelinePlaying) return;
     const today = new Date();
     const todayMs = today.getTime();
     let bestIdx = 0;
@@ -1454,7 +1487,7 @@ export function MapStage({ startDateTime, endDateTime, appliedDatasets, onRemove
       }
     }
     setTimelineIndex(bestIdx);
-  }, [startDateTime, endDateTime, appliedDatasets, isTimelinePlaying, isPreparing]);
+  }, [startDateTime, endDateTime, appliedDatasets, isTimelinePlaying]);
 
   useEffect(() => {
     if (timelineUnits.length === 0) {
@@ -1474,7 +1507,6 @@ export function MapStage({ startDateTime, endDateTime, appliedDatasets, onRemove
     if (!firstInTimeline || !lastInTimeline) return;
     if (firstInTimeline <= start && lastInTimeline >= end) {
       setPendingPlayback(null);
-      // Now build frames and start playback
       const frames = timelineUnits.filter(u => {
         const d = u.value.slice(0, 10);
         return d >= start && d <= end;
@@ -1482,10 +1514,34 @@ export function MapStage({ startDateTime, endDateTime, appliedDatasets, onRemove
       playbackFramesRef.current = frames;
       if (frames.length === 0) return;
 
-      const firstFrameValue = frames[0].value;
-      const firstUnit = timelineUnits.findIndex(u => u.value === firstFrameValue);
-      if (firstUnit >= 0) setTimelineIndex(firstUnit);
-      setIsTimelinePlaying(true);
+      const dsKeys = appliedDatasets
+        ?.filter(ds => ds.type === "raster")
+        .map(ds => `${ds.id}-${ds.type}`) ?? [];
+
+      const allFrameKeys: string[] = [];
+      for (const f of frames) {
+        const date = f.value.slice(0, 10);
+        const slot = f.value.slice(11, 16).replace(":", "-");
+        for (const dk of dsKeys) {
+          allFrameKeys.push(`${dk}__${date}__${slot}`);
+        }
+      }
+
+      if (preloadFrames && allFrameKeys.length > 0) {
+        setPbLoading(true);
+        preloadFrames(allFrameKeys).then(() => {
+          setPbLoading(false);
+          const firstFrameValue = frames[0].value;
+          const firstUnit = timelineUnits.findIndex(u => u.value === firstFrameValue);
+          if (firstUnit >= 0) setTimelineIndex(firstUnit);
+          setIsTimelinePlaying(true);
+        });
+      } else {
+        const firstFrameValue = frames[0].value;
+        const firstUnit = timelineUnits.findIndex(u => u.value === firstFrameValue);
+        if (firstUnit >= 0) setTimelineIndex(firstUnit);
+        setIsTimelinePlaying(true);
+      }
     }
   }, [timelineUnits, pendingPlayback]);
 
@@ -1595,15 +1651,10 @@ export function MapStage({ startDateTime, endDateTime, appliedDatasets, onRemove
     map.addLayer(wqLayer);
     wqLayerRef.current = wqLayer;
 
-    // Click handler for station markers — mở popup inline thay vì điều hướng trang
+    // Click handler: only for WQ station popup; Ecowitt popup is hover-driven
     map.on("click", (evt) => {
       const feature = map.forEachFeatureAtPixel(evt.pixel, (f) => f as Feature | undefined);
       if (feature) {
-        const devId = feature.get("deviceId") as string | undefined;
-        if (devId) {
-          setPopupDeviceId((prev) => (prev === devId ? null : devId));
-          return;
-        }
         const wqId = feature.get("wqStationId") as number | undefined;
         if (wqId) {
           setSelectedWqStation((prev) => {
@@ -1613,8 +1664,10 @@ export function MapStage({ startDateTime, endDateTime, appliedDatasets, onRemove
           });
           return;
         }
+        // Clicking on an Ecowitt marker also works
+        const devId = feature.get("deviceId") as string | undefined;
+        if (devId) return; // popup already shown by hover
       }
-      setPopupDeviceId(null);
       setSelectedWqStation(null);
     });
 
@@ -1632,18 +1685,32 @@ export function MapStage({ startDateTime, endDateTime, appliedDatasets, onRemove
       const coordinate = evt.coordinate;
       setMouseCoords(coordinate as [number, number]);
 
+      // Hover to show Ecowitt station popup
+      const hoveredFeature = map.forEachFeatureAtPixel(evt.pixel, (f) => f as Feature | undefined);
+      const hoveredDeviceId = hoveredFeature?.get("deviceId") as string | undefined;
+      if (hoveredDeviceId) {
+        map.getTargetElement().style.cursor = "pointer";
+        setPopupDeviceId(hoveredDeviceId);
+      } else {
+        map.getTargetElement().style.cursor = "";
+        setPopupDeviceId(null);
+      }
+
       const layers = layerRefs.current;
       const collected: Record<string, number> = {};
       let firstValue: number | null = null;
       if (layers && typeof layers === 'object') {
-        for (const [key, layer] of Object.entries(layers)) {
+        const visibleLayers = Object.entries(layers)
+          .filter(([, layer]) => layer.getVisible())
+          .sort((a, b) => (b[1].getZIndex?.() ?? 0) - (a[1].getZIndex?.() ?? 0));
+
+        for (const [key, layer] of visibleLayers) {
           try {
             if (!('getData' in layer)) continue;
-            if (!layer.getVisible()) continue;
             // Only read from active rendered layers, not fading-out old layers
             if (!renderedLayersRef.current[key]) continue;
             const buf = (layer as import("ol/layer/WebGLTile").default).getData(evt.pixel);
-            if (buf && !(buf instanceof DataView) && buf.length > 0 && buf[0] > 0) {
+            if (buf && !(buf instanceof DataView) && buf.length > 0) {
               collected[key] = buf[0];
               if (firstValue === null) firstValue = buf[0];
             }
@@ -1765,7 +1832,7 @@ export function MapStage({ startDateTime, endDateTime, appliedDatasets, onRemove
     }
   }, [popupDeviceId, selectedWqStation]);
 
-  // Zoom and pan map to selected manual station, with a slight offset to avoid popup coverage
+  // Zoom and pan map to selected manual station, with offset to avoid popup coverage
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !selectedWqStation) return;
@@ -1779,22 +1846,31 @@ export function MapStage({ startDateTime, endDateTime, appliedDatasets, onRemove
         ? fromLonLat([st.x, st.y])
         : transform([st.x, st.y], 'EPSG:32648', 'EPSG:3857');
 
-      // Calculate target resolution at zoom 12.5 to get correct pixel offset
       const targetResolution = (view.getResolutionForZoom ? view.getResolutionForZoom(12.5) : view.getResolution()) || 26;
-      // Dynamic offset: wide 2-column popup (surface water with images) needs ~350px offset, narrow needs ~220px
       const hasImages = st.stationType === 'surface_water';
-      const offsetPixels = hasImages ? 350 : 220;
-      // Shift map center to the East to shift the marker physically to the left side of screen
-      const offsetX = offsetPixels * targetResolution;
-      const offsetCoords = [coords[0] + offsetX, coords[1]];
 
-      view.animate({
-        center: offsetCoords,
-        zoom: 12.5,
-        duration: 800
-      });
+      if (isMobile) {
+        // Mobile: marker must be visible above the bottom popup (60vh popup + 12px gap)
+        // Shift map UP to show marker in top 35% of screen
+        const offsetPixels = -Math.round(window.innerHeight * 0.3);
+        const offsetY = offsetPixels * targetResolution;
+        view.animate({
+          center: [coords[0], coords[1] - offsetY],
+          zoom: 11,
+          duration: 800
+        });
+      } else {
+        // Desktop: shift map to the East so marker is left of the popup
+        const offsetPixels = hasImages ? 350 : 220;
+        const offsetX = offsetPixels * targetResolution;
+        view.animate({
+          center: [coords[0] + offsetX, coords[1]],
+          zoom: 12.5,
+          duration: 800
+        });
+      }
     }
-  }, [selectedWqStation]);
+  }, [selectedWqStation, isMobile]);
 
   // Zoom and pan map to selected Ecowitt station, with a slight offset to avoid popup coverage
   useEffect(() => {
@@ -2039,6 +2115,7 @@ export function MapStage({ startDateTime, endDateTime, appliedDatasets, onRemove
   }, [activeBaseLayer]);
 
   return (
+    <>
     <section className="geo-map">
       <div className="geo-map-canvas">
         <div 
@@ -2065,6 +2142,9 @@ export function MapStage({ startDateTime, endDateTime, appliedDatasets, onRemove
               <span>Add Layer</span>
             </button>
 
+            {isMobile && showPlayerDropdown && (
+              <div className="sidebar-backdrop" onClick={() => setShowPlayerDropdown(false)} />
+            )}
             {showPlayerDropdown && (
               <div className={`map-player-dropdown ${isMobile ? 'map-player-dropdown--mobile' : ''}`}>
                 <div className="map-player-dropdown-title">Select Data Layer</div>
@@ -2366,61 +2446,6 @@ export function MapStage({ startDateTime, endDateTime, appliedDatasets, onRemove
                 <span>Time-Lapse</span>
               </button>
 
-              {showPlaybackPicker && (
-                <>
-                  <div className="pb-picker-backdrop" onClick={() => setShowPlaybackPicker(false)} />
-                  <div className={`pb-picker-panel ${isMobile ? 'pb-picker-panel--mobile' : ''}`}>
-                    <div className="pb-picker-header">
-                      <div className="pb-picker-title">
-                        <Clock size={16} />
-                        Set Time-Lapse Period
-                      </div>
-                      <button className="pb-picker-close" onClick={() => setShowPlaybackPicker(false)} type="button">×</button>
-                    </div>
-
-                    <div className="pb-picker-body">
-                      <div className="pb-field">
-                        <label className="pb-label">Start Date</label>
-                        <input
-                          className="pb-input"
-                          type="date"
-                          value={pbStartDate}
-                          onChange={e => { setPbStartDate(e.target.value); setPbError(""); }}
-                        />
-                      </div>
-                      <div className="pb-field">
-                        <label className="pb-label">End Date</label>
-                        <input
-                          className="pb-input"
-                          type="date"
-                          value={pbEndDate}
-                          onChange={e => { setPbEndDate(e.target.value); setPbError(""); }}
-                        />
-                      </div>
-                      {pbError && <div className="pb-error">{pbError}</div>}
-                    </div>
-
-                    <div className="pb-picker-footer">
-                      <button className="pb-btn-cancel" onClick={() => setShowPlaybackPicker(false)} type="button">Cancel</button>
-                      {isPreparing ? (
-                        <div className="pb-preparing">
-                          <div className="pb-prepare-label">
-                            Loading {prepareProgress.current}/{prepareProgress.total}...
-                          </div>
-                          <div className="pb-prepare-track">
-                            <div className="pb-prepare-fill" style={{ width: `${(prepareProgress.current / Math.max(1, prepareProgress.total)) * 100}%` }} />
-                          </div>
-                        </div>
-                      ) : (
-                        <button className="pb-btn-play" onClick={handleStartPlayback} type="button" disabled={isPreparing}>
-                          <Play size={14} fill="currentColor" />
-                          {isReady ? 'Ready' : 'Play'}
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                </>
-              )}
             </div>
           </div>
 
@@ -2457,31 +2482,7 @@ export function MapStage({ startDateTime, endDateTime, appliedDatasets, onRemove
           </div>
         </div>
 
-        {/* Zoom Controls */}
-        <div className={`map-zoom-controls ${isMobile ? 'map-zoom-controls--mobile' : ''}`}>
-          <button
-            className="map-zoom-btn"
-            onClick={() => {
-              const view = mapRef.current?.getView();
-              if (view) view.animate({ zoom: (view.getZoom() || 10) + 1, duration: 200 });
-            }}
-            type="button"
-            title="Zoom in"
-          >
-            +
-          </button>
-          <button
-            className="map-zoom-btn"
-            onClick={() => {
-              const view = mapRef.current?.getView();
-              if (view) view.animate({ zoom: (view.getZoom() || 10) - 1, duration: 200 });
-            }}
-            type="button"
-            title="Zoom out"
-          >
-            −
-          </button>
-        </div>
+
 
         {/* Timeline Player Controls */}
         {isTimelinePlaying && (
@@ -2498,7 +2499,8 @@ export function MapStage({ startDateTime, endDateTime, appliedDatasets, onRemove
               className={`map-player-btn ${isTimelinePlaying ? 'is-active' : ''}`}
               onClick={() => setIsTimelinePlaying(!isTimelinePlaying)}
               type="button"
-              title={isTimelinePlaying ? 'Pause' : 'Play'}
+              title={pbLoading ? 'Loading...' : isTimelinePlaying ? 'Pause' : 'Play'}
+              disabled={pbLoading}
             >
               {isTimelinePlaying ? (
                 <Pause size={14} fill="currentColor" />
@@ -2517,6 +2519,11 @@ export function MapStage({ startDateTime, endDateTime, appliedDatasets, onRemove
             <span className="map-player-date">
               {timelineUnits[timelineIndex]?.label || ''}
             </span>
+            {pbLoading && (
+              <span className="map-player-loading">
+                Loading frames…
+              </span>
+            )}
             <div className="map-player-speed">
               {[0.25, 0.5, 1, 1.5, 2].map((s) => (
                 <button
@@ -2530,276 +2537,12 @@ export function MapStage({ startDateTime, endDateTime, appliedDatasets, onRemove
           </div>
         )}
 
-        {/* ---- Ecowitt Station Popup ---- */}
-        {popupDeviceId && (() => {
-          const device = ecowittDevices.find((d) => d.id === popupDeviceId);
-          if (!device) return null;
-          return (
-            <div className={`ecowitt-popup-wrapper ${isMobile ? 'ecowitt-popup-wrapper--mobile' : ''}`}>
-              <EcowittStationPopup
-                device={device}
-                data={popupData}
-                loading={popupLoading}
-                error={popupError}
-                expanded={popupExpanded}
-                dateStr={popupDate}
-                onDateChange={setPopupDate}
-                onClose={() => setPopupDeviceId(null)}
-                onExpand={() => setPopupExpanded(true)}
-                onCollapse={() => setPopupExpanded(false)}
-              />
-            </div>
-          );
-        })()}
-
-        {/* ---- Water Quality Station Popup ---- */}
-        {selectedWqStation && (
-          <div className={`map-station-popup ${isMobile ? 'map-station-popup--mobile' : ''}`} style={{
-            width: isMobile ? '100%' : (selectedWqStation.stationType === 'surface_water' ? '720px' : '420px'), 
-            background: '#ffffff', borderRadius: '16px',
-            boxShadow: '0 10px 25px -5px rgba(0,0,0,0.1), 0 8px 10px -6px rgba(0,0,0,0.1), 0 0 0 1px rgba(0,0,0,0.05)', 
-            border: '1px solid #e2e8f0',
-          }}>
-            {/* Header */}
-            <div style={{ 
-              display: 'flex', justifyContent: 'space-between', alignItems: 'center', 
-              padding: '14px 16px', 
-              borderBottom: '1px solid #e2e8f0',
-              background: `linear-gradient(135deg, ${selectedWqStation.stationType === 'groundwater' ? 'rgba(13, 110, 253, 0.05)' : 'rgba(25, 135, 84, 0.05)'} 0%, #ffffff 100%)`
-            }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', minWidth: 0 }}>
-                <MapPin size={18} color={selectedWqStation.stationType === 'groundwater' ? '#0d6efd' : '#198754'} style={{ flexShrink: 0 }} />
-                <div style={{ minWidth: 0 }}>
-                  <div style={{ fontSize: '0.9rem', fontWeight: '700', color: '#0f172a', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} title={selectedWqStation.location || ''}>
-                    {selectedWqStation.location || 'Trạm đo thủ công'}
-                  </div>
-                  <div style={{ fontSize: '0.72rem', color: '#64748b', fontWeight: '600' }}>
-                    Mã: {selectedWqStation.stationId || '—'}
-                  </div>
-                </div>
-              </div>
-              <button onClick={() => setSelectedWqStation(null)}
-                style={{ 
-                  background: '#f1f5f9', border: '1px solid #cbd5e1', cursor: 'pointer', color: '#475569', 
-                  width: '28px', height: '28px', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  transition: 'all 0.2s'
-                }}
-                onMouseEnter={e => { e.currentTarget.style.background = '#e2e8f0'; }}
-                onMouseLeave={e => { e.currentTarget.style.background = '#f1f5f9'; }}
-              >
-                <X size={14} />
-              </button>
-            </div>
-
-            {/* Body */}
-            {selectedWqStation.stationType === 'surface_water' ? (
-              <div className="map-station-popup-body-wrap">
-                {/* LEFT: Large Image Display */}
-                <div className="map-station-popup-left">
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: '#0f172a', marginBottom: '2px' }}>
-                    <Image size={14} color="#10b981" />
-                    <strong style={{ fontSize: '0.82rem' }}>Ảnh hiện trường</strong>
-                  </div>
-                  
-                  {wqStationImages.length > 0 ? (
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', maxHeight: '430px', overflowY: 'auto' }} className="custom-scrollbar">
-                      {wqStationImages.map((url, idx) => (
-                        <img 
-                          key={idx} 
-                          src={url} 
-                          alt={`Ảnh hiện trường ${idx + 1}`}
-                          onClick={() => setWqImagePreviewUrl(url)}
-                          style={{ 
-                            width: '100%', height: '200px', borderRadius: '10px', 
-                            border: '1px solid #cbd5e1', objectFit: 'cover', cursor: 'zoom-in',
-                            boxShadow: '0 4px 12px rgba(0,0,0,0.05)', display: 'block'
-                          }} 
-                        />
-                      ))}
-                    </div>
-                  ) : (
-                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '8px', height: '200px', borderRadius: '10px', border: '1px dashed #cbd5e1', background: '#f8fafc', color: '#94a3b8', fontSize: '0.8rem' }}>
-                      <Image size={24} />
-                      Chưa có ảnh hiện trường
-                    </div>
-                  )}
-                </div>
-
-                {/* RIGHT: Station Details + Parameters */}
-                <div className="map-station-popup-right">
-                  {/* Info grid */}
-                  <div style={{ fontSize: '0.8rem', color: '#334155', display: 'flex', flexDirection: 'column', gap: '6px', background: '#f8fafc', padding: '10px 12px', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                      <span style={{ color: '#64748b', fontWeight: '500' }}>Loại nguồn nước:</span>
-                      <span style={{ 
-                        padding: '2px 8px', borderRadius: '4px', fontSize: '0.72rem', fontWeight: '700',
-                        background: 'rgba(25, 135, 84, 0.1)', color: '#198754'
-                      }}>
-                        Nước mặt
-                      </span>
-                    </div>
-                    {selectedWqStation.hydroChar && (
-                      <div style={{ display: 'flex', justifyContent: 'space-between', gap: '10px' }}>
-                        <span style={{ color: '#64748b', fontWeight: '500', flexShrink: 0 }}>Đặc tính thủy vực:</span>
-                        <span style={{ fontWeight: '600', color: '#0f172a', textAlign: 'right' }}>{selectedWqStation.hydroChar}</span>
-                      </div>
-                    )}
-                    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                      <span style={{ color: '#64748b', fontWeight: '500' }}>Tọa độ (X, Y):</span>
-                      <span style={{ fontFamily: 'monospace', fontWeight: '600', color: '#0f172a' }}>
-                        {selectedWqStation.x?.toFixed(4)}, {selectedWqStation.y?.toFixed(4)}
-                      </span>
-                    </div>
-                  </div>
-
-                  {/* Data parameters */}
-                  <div style={{ borderTop: '1px solid #e2e8f0', paddingTop: '10px' }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: '#0f172a' }}>
-                        <Activity size={14} color="var(--accent)" />
-                        <strong style={{ fontSize: '0.82rem' }}>Dữ liệu quan trắc</strong>
-                      </div>
-                      {wqSamplesLoading && <span style={{ fontSize: '0.72rem', color: '#94a3b8' }}>Đang tải...</span>}
-                    </div>
-
-                    {wqStationSamples.length > 0 ? (
-                      <>
-                        <div style={{ display: 'flex', gap: '8px', alignItems: 'center', marginBottom: '10px' }}>
-                          <label style={{ fontSize: '0.78rem', color: '#475569', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '4px' }}>
-                            <Calendar size={13} /> Ngày lấy mẫu:
-                          </label>
-                          <select value={wqStationSampleDate} onChange={e => setWqStationSampleDate(e.target.value)}
-                            style={{ flex: 1, padding: '5px 8px', fontSize: '0.78rem', border: '1px solid #cbd5e1', borderRadius: '6px', background: '#f8fafc', color: '#0f172a', cursor: 'pointer', fontWeight: '600' }}>
-                            {wqStationSamples.map(s => (<option key={s.id} value={s.sampleDate}>{s.sampleDate}</option>))}
-                          </select>
-                        </div>
-
-                        {wqStationSample && wqStationSample.parameters && wqStationSample.parameters.length > 0 ? (
-                          <div style={{ overflowX: 'auto', borderRadius: '10px', border: '1px solid #e2e8f0', maxHeight: '180px', overflowY: 'auto' }} className="custom-scrollbar">
-                            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.78rem' }}>
-                              <thead>
-                                <tr style={{ background: '#f8fafc', position: 'sticky', top: 0, zIndex: 1, borderBottom: '1px solid #cbd5e1' }}>
-                                  {['Thông số', 'Đơn vị', 'Giá trị', 'Tiêu chuẩn'].map(h => (
-                                    <th key={h} style={{ padding: '6px 10px', textAlign: 'left', fontWeight: '700', color: '#475569' }}>{h}</th>
-                                  ))}
-                                </tr>
-                              </thead>
-                              <tbody>
-                                {wqStationSample.parameters.map((p, idx) => (
-                                  <tr key={idx} style={{ borderBottom: idx === wqStationSample.parameters!.length - 1 ? 'none' : '1px solid #f1f5f9', background: idx % 2 === 0 ? '#ffffff' : '#fcfdfe' }}>
-                                    <td style={{ padding: '6px 10px', fontWeight: '600', color: '#0f172a' }}>{p.parameterName}</td>
-                                    <td style={{ padding: '6px 10px', color: '#475569' }}>{p.unit || '—'}</td>
-                                    <td style={{ padding: '6px 10px', fontFamily: '"JetBrains Mono",monospace', color: '#0f172a', fontWeight: '600' }}>{p.valueRaw || '—'}</td>
-                                    <td style={{ padding: '6px 10px', color: '#64748b', fontSize: '0.72rem' }}>{p.referenceStandard || '—'}</td>
-                                  </tr>
-                                ))}
-                              </tbody>
-                            </table>
-                          </div>
-                        ) : wqSamplesLoading ? null : (
-                          <p style={{ fontSize: '0.78rem', color: '#64748b', fontStyle: 'italic', margin: '4px 0' }}>Chưa tải được chi tiết dữ liệu.</p>
-                        )}
-                      </>
-                    ) : (
-                      !wqSamplesLoading && (
-                        <p style={{ fontSize: '0.78rem', color: '#64748b', fontStyle: 'italic', margin: '4px 0' }}>Chưa có dữ liệu quan trắc cho trạm này.</p>
-                      )
-                    )}
-                  </div>
-                </div>
-              </div>
-            ) : (
-              <div style={{ padding: '16px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
-                {/* Info grid */}
-                <div style={{ fontSize: '0.8rem', color: '#334155', display: 'flex', flexDirection: 'column', gap: '6px', background: '#f8fafc', padding: '10px 12px', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                    <span style={{ color: '#64748b', fontWeight: '500' }}>Loại nguồn nước:</span>
-                    <span style={{ 
-                      padding: '2px 8px', borderRadius: '4px', fontSize: '0.72rem', fontWeight: '700',
-                      background: 'rgba(13, 110, 253, 0.1)', color: '#0d6efd'
-                    }}>
-                      Nước ngầm
-                    </span>
-                  </div>
-                  {selectedWqStation.hydroChar && (
-                    <div style={{ display: 'flex', justifyContent: 'space-between', gap: '10px' }}>
-                      <span style={{ color: '#64748b', fontWeight: '500', flexShrink: 0 }}>Đặc tính thủy vực:</span>
-                      <span style={{ fontWeight: '600', color: '#0f172a', textAlign: 'right' }}>{selectedWqStation.hydroChar}</span>
-                    </div>
-                  )}
-                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                    <span style={{ color: '#64748b', fontWeight: '500' }}>Tọa độ (X, Y):</span>
-                    <span style={{ fontFamily: 'monospace', fontWeight: '600', color: '#0f172a' }}>
-                      {selectedWqStation.x?.toFixed(4)}, {selectedWqStation.y?.toFixed(4)}
-                    </span>
-                  </div>
-                </div>
-
-                {/* Data parameters */}
-                <div style={{ borderTop: '1px solid #e2e8f0', paddingTop: '10px' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: '#0f172a' }}>
-                      <Activity size={14} color="var(--accent)" />
-                      <strong style={{ fontSize: '0.82rem' }}>Dữ liệu quan trắc</strong>
-                    </div>
-                    {wqSamplesLoading && <span style={{ fontSize: '0.72rem', color: '#94a3b8' }}>Đang tải...</span>}
-                  </div>
-
-                  {wqStationSamples.length > 0 ? (
-                    <>
-                      <div style={{ display: 'flex', gap: '8px', alignItems: 'center', marginBottom: '10px' }}>
-                        <label style={{ fontSize: '0.78rem', color: '#475569', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '4px' }}>
-                          <Calendar size={13} /> Ngày lấy mẫu:
-                        </label>
-                        <select value={wqStationSampleDate} onChange={e => setWqStationSampleDate(e.target.value)}
-                          style={{ flex: 1, padding: '5px 8px', fontSize: '0.78rem', border: '1px solid #cbd5e1', borderRadius: '6px', background: '#f8fafc', color: '#0f172a', cursor: 'pointer', fontWeight: '600' }}>
-                          {wqStationSamples.map(s => (<option key={s.id} value={s.sampleDate}>{s.sampleDate}</option>))}
-                        </select>
-                      </div>
-
-                      {wqStationSample && wqStationSample.parameters && wqStationSample.parameters.length > 0 ? (
-                        <div style={{ overflowX: 'auto', borderRadius: '10px', border: '1px solid #e2e8f0', maxHeight: '180px', overflowY: 'auto' }} className="custom-scrollbar">
-                          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.78rem' }}>
-                            <thead>
-                              <tr style={{ background: '#f8fafc', position: 'sticky', top: 0, zIndex: 1, borderBottom: '1px solid #cbd5e1' }}>
-                                {['Thông số', 'Đơn vị', 'Giá trị', 'Tiêu chuẩn'].map(h => (
-                                  <th key={h} style={{ padding: '6px 10px', textAlign: 'left', fontWeight: '700', color: '#475569' }}>{h}</th>
-                                ))}
-                              </tr>
-                            </thead>
-                            <tbody>
-                              {wqStationSample.parameters.map((p, idx) => (
-                                <tr key={idx} style={{ borderBottom: idx === wqStationSample.parameters!.length - 1 ? 'none' : '1px solid #f1f5f9', background: idx % 2 === 0 ? '#ffffff' : '#fcfdfe' }}>
-                                  <td style={{ padding: '6px 10px', fontWeight: '600', color: '#0f172a' }}>{p.parameterName}</td>
-                                  <td style={{ padding: '6px 10px', color: '#475569' }}>{p.unit || '—'}</td>
-                                  <td style={{ padding: '6px 10px', fontFamily: '"JetBrains Mono",monospace', color: '#0f172a', fontWeight: '600' }}>{p.valueRaw || '—'}</td>
-                                  <td style={{ padding: '6px 10px', color: '#64748b', fontSize: '0.72rem' }}>{p.referenceStandard || '—'}</td>
-                                </tr>
-                              ))}
-                            </tbody>
-                          </table>
-                        </div>
-                      ) : wqSamplesLoading ? null : (
-                        <p style={{ fontSize: '0.78rem', color: '#64748b', fontStyle: 'italic', margin: '4px 0' }}>Chưa tải được chi tiết dữ liệu.</p>
-                      )}
-                    </>
-                  ) : (
-                    !wqSamplesLoading && (
-                      <p style={{ fontSize: '0.78rem', color: '#64748b', fontStyle: 'italic', margin: '4px 0' }}>Chưa có dữ liệu quan trắc cho trạm này.</p>
-                    )
-                  )}
-                </div>
-              </div>
-            )}
-          </div>
-        )}
-
         {/* Image Lightbox */}
         {wqImagePreviewUrl && (
           <div onClick={() => setWqImagePreviewUrl(null)}
             style={{
               position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
-              background: 'rgba(0,0,0,0.85)', zIndex: 9999,
+              background: 'rgba(0,0,0,0.85)', zIndex: 100001,
               display: 'flex', alignItems: 'center', justifyContent: 'center',
               cursor: 'zoom-out'
             }}>
@@ -2869,6 +2612,301 @@ export function MapStage({ startDateTime, endDateTime, appliedDatasets, onRemove
           </div>
         )}
       </div>
+
+        {/* ---- Ecowitt Station Popup ---- */}
+        {popupDeviceId && (() => {
+          const device = ecowittDevices.find((d) => d.id === popupDeviceId);
+          if (!device) return null;
+          return (
+            <EcowittStationPopup
+              device={device}
+              data={popupData}
+              loading={popupLoading}
+              error={popupError}
+              expanded={popupExpanded}
+              dateStr={popupDate}
+              onDateChange={setPopupDate}
+              onClose={() => setPopupDeviceId(null)}
+              onExpand={() => setPopupExpanded(true)}
+              onCollapse={() => setPopupExpanded(false)}
+              isMobile={isMobile}
+            />
+          );
+        })()}
+
+        {/* ---- Water Quality Station Popup ---- */}
+        {selectedWqStation && (
+          <div className={`map-station-popup ${isMobile ? 'map-station-popup--mobile' : ''}`} onClick={(e) => e.stopPropagation()} style={{
+            position: isMobile ? 'fixed' : 'absolute',
+            top: isMobile ? 'auto' : '72px',
+            right: isMobile ? '12px' : '12px',
+            bottom: isMobile ? '12px' : 'auto',
+            left: isMobile ? '12px' : 'auto',
+            width: isMobile ? 'auto' : (selectedWqStation.stationType === 'surface_water' ? '720px' : '420px'), 
+            background: isMobile ? 'rgba(255,255,255,0.92)' : '#ffffff', 
+            borderRadius: '16px',
+            boxShadow: isMobile ? '0 4px 24px rgba(0,0,0,0.15)' : '0 10px 25px -5px rgba(0,0,0,0.1), 0 8px 10px -6px rgba(0,0,0,0.1), 0 0 0 1px rgba(0,0,0,0.05)', 
+            zIndex: isMobile ? 10000 : 1000,
+            border: '1px solid #e2e8f0',
+            backdropFilter: isMobile ? 'blur(16px)' : undefined,
+            WebkitBackdropFilter: isMobile ? 'blur(16px)' : undefined,
+          }}>
+            {/* Header */}
+            <div style={{ 
+              display: 'flex', justifyContent: 'space-between', alignItems: 'center', 
+              padding: '14px 16px', 
+              borderBottom: '1px solid #e2e8f0',
+              background: `linear-gradient(135deg, ${selectedWqStation.stationType === 'groundwater' ? 'rgba(13, 110, 253, 0.05)' : 'rgba(25, 135, 84, 0.05)'} 0%, #ffffff 100%)`
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', minWidth: 0 }}>
+                <MapPin size={18} color={selectedWqStation.stationType === 'groundwater' ? '#0d6efd' : '#198754'} style={{ flexShrink: 0 }} />
+                <div style={{ minWidth: 0 }}>
+                  <div style={{ fontSize: '0.9rem', fontWeight: '700', color: '#0f172a', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} title={selectedWqStation.location || ''}>
+                    {selectedWqStation.location || 'Trạm đo thủ công'}
+                  </div>
+                  <div style={{ fontSize: '0.72rem', color: '#64748b', fontWeight: '600' }}>
+                    Mã: {selectedWqStation.stationId || '—'}
+                  </div>
+                </div>
+              </div>
+              <button onClick={() => setSelectedWqStation(null)}
+                style={{ 
+                  background: '#f1f5f9', border: '1px solid #cbd5e1', cursor: 'pointer', color: '#475569', 
+                  width: isMobile ? '36px' : '28px', height: isMobile ? '36px' : '28px', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  transition: 'all 0.2s'
+                }}
+                onMouseEnter={e => { e.currentTarget.style.background = '#e2e8f0'; }}
+                onMouseLeave={e => { e.currentTarget.style.background = '#f1f5f9'; }}
+              >
+                <X size={isMobile ? 18 : 14} />
+              </button>
+            </div>
+
+            {/* Body */}
+            {selectedWqStation.stationType === 'surface_water' ? (
+              <div className={`map-station-popup-body-wrap ${isMobile ? 'map-station-popup-body-wrap--mobile' : ''}`}>
+                {/* LEFT: Large Image Display */}
+                <div className="map-station-popup-left">
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: '#0f172a', marginBottom: '2px' }}>
+                    <Image size={14} color="#10b981" />
+                    <strong style={{ fontSize: '0.82rem' }}>Ảnh hiện trường</strong>
+                  </div>
+                  
+                  {wqStationImages.length > 0 ? (
+                    isMobile ? (
+                      <div style={{ display: 'flex', flexDirection: 'row', gap: '6px', overflowX: 'auto', overflowY: 'hidden', paddingBottom: '4px', WebkitOverflowScrolling: 'touch' }} className="custom-scrollbar">
+                        {wqStationImages.map((url, idx) => (
+                          <img key={idx} src={url} alt={`Ảnh hiện trường ${idx + 1}`} onClick={() => setWqImagePreviewUrl(url)}
+                            style={{ width: '100px', height: '72px', borderRadius: '8px', border: '1px solid #cbd5e1', objectFit: 'cover', cursor: 'zoom-in', boxShadow: '0 2px 8px rgba(0,0,0,0.08)', display: 'block', flexShrink: 0 }} />
+                        ))}
+                      </div>
+                    ) : (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', maxHeight: '430px', overflowY: 'auto' }} className="custom-scrollbar">
+                        {wqStationImages.map((url, idx) => (
+                          <img key={idx} src={url} alt={`Ảnh hiện trường ${idx + 1}`} onClick={() => setWqImagePreviewUrl(url)}
+                            style={{ width: '100%', height: '200px', borderRadius: '10px', border: '1px solid #cbd5e1', objectFit: 'cover', cursor: 'zoom-in', boxShadow: '0 4px 12px rgba(0,0,0,0.05)', display: 'block' }} />
+                        ))}
+                      </div>
+                    )
+                  ) : (
+                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '8px', height: '200px', borderRadius: '10px', border: '1px dashed #cbd5e1', background: '#f8fafc', color: '#94a3b8', fontSize: '0.8rem' }}>
+                      <Image size={24} />
+                      Chưa có ảnh hiện trường
+                    </div>
+                  )}
+                </div>
+
+                {/* RIGHT: Station Details + Parameters */}
+                <div className="map-station-popup-right">
+                  <div style={{ fontSize: '0.8rem', color: '#334155', display: 'flex', flexDirection: 'column', gap: '6px', background: '#f8fafc', padding: '10px 12px', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                      <span style={{ color: '#64748b', fontWeight: '500' }}>Loại nguồn nước:</span>
+                      <span style={{ padding: '2px 8px', borderRadius: '4px', fontSize: '0.72rem', fontWeight: '700', background: 'rgba(25, 135, 84, 0.1)', color: '#198754' }}>Nước mặt</span>
+                    </div>
+                    {selectedWqStation.hydroChar && (
+                      <div style={{ display: 'flex', justifyContent: 'space-between', gap: '10px' }}>
+                        <span style={{ color: '#64748b', fontWeight: '500', flexShrink: 0 }}>Đặc tính thủy vực:</span>
+                        <span style={{ fontWeight: '600', color: '#0f172a', textAlign: 'right' }}>{selectedWqStation.hydroChar}</span>
+                      </div>
+                    )}
+                    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                      <span style={{ color: '#64748b', fontWeight: '500' }}>Tọa độ (X, Y):</span>
+                      <span style={{ fontFamily: 'monospace', fontWeight: '600', color: '#0f172a' }}>{selectedWqStation.x?.toFixed(4)}, {selectedWqStation.y?.toFixed(4)}</span>
+                    </div>
+                  </div>
+
+                  <div style={{ borderTop: '1px solid #e2e8f0', paddingTop: '10px' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: '#0f172a' }}>
+                        <Activity size={14} color="var(--accent)" />
+                        <strong style={{ fontSize: '0.82rem' }}>Dữ liệu quan trắc</strong>
+                      </div>
+                      {wqSamplesLoading && <span style={{ fontSize: '0.72rem', color: '#94a3b8' }}>Đang tải...</span>}
+                    </div>
+
+                    {wqStationSamples.length > 0 ? (
+                      <>
+                        <div style={{ display: 'flex', gap: '8px', alignItems: 'center', marginBottom: '10px' }}>
+                          <label style={{ fontSize: '0.78rem', color: '#475569', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '4px' }}><Calendar size={13} /> Ngày lấy mẫu:</label>
+                          <select value={wqStationSampleDate} onChange={e => setWqStationSampleDate(e.target.value)}
+                            style={{ flex: 1, padding: '5px 8px', fontSize: '0.78rem', border: '1px solid #cbd5e1', borderRadius: '6px', background: '#f8fafc', color: '#0f172a', cursor: 'pointer', fontWeight: '600' }}>
+                            {wqStationSamples.map(s => (<option key={s.id} value={s.sampleDate}>{s.sampleDate}</option>))}
+                          </select>
+                        </div>
+
+                        {wqStationSample && wqStationSample.parameters && wqStationSample.parameters.length > 0 ? (
+                          <div style={{ overflowX: 'auto', borderRadius: '10px', border: '1px solid #e2e8f0', maxHeight: isMobile ? 'none' : '180px', overflowY: 'auto' }} className="custom-scrollbar">
+                            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.78rem' }}>
+                              <thead>
+                                <tr style={{ background: '#f8fafc', position: 'sticky', top: 0, zIndex: 1, borderBottom: '1px solid #cbd5e1' }}>
+                                  {['Thông số', 'Đơn vị', 'Giá trị', 'Tiêu chuẩn'].map(h => (<th key={h} style={{ padding: '6px 10px', textAlign: 'left', fontWeight: '700', color: '#475569' }}>{h}</th>))}
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {wqStationSample.parameters.map((p, idx) => (
+                                  <tr key={idx} style={{ borderBottom: idx === wqStationSample.parameters!.length - 1 ? 'none' : '1px solid #f1f5f9', background: idx % 2 === 0 ? '#ffffff' : '#fcfdfe' }}>
+                                    <td style={{ padding: '6px 10px', fontWeight: '600', color: '#0f172a' }}>{p.parameterName}</td>
+                                    <td style={{ padding: '6px 10px', color: '#475569' }}>{p.unit || '—'}</td>
+                                    <td style={{ padding: '6px 10px', fontFamily: '"JetBrains Mono",monospace', color: '#0f172a', fontWeight: '600' }}>{p.valueRaw || '—'}</td>
+                                    <td style={{ padding: '6px 10px', color: '#64748b', fontSize: '0.72rem' }}>{p.referenceStandard || '—'}</td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        ) : wqSamplesLoading ? null : (
+                          <p style={{ fontSize: '0.78rem', color: '#64748b', fontStyle: 'italic', margin: '4px 0' }}>Chưa tải được chi tiết dữ liệu.</p>
+                        )}
+                      </>
+                    ) : (
+                      !wqSamplesLoading && (<p style={{ fontSize: '0.78rem', color: '#64748b', fontStyle: 'italic', margin: '4px 0' }}>Chưa có dữ liệu quan trắc cho trạm này.</p>)
+                    )}
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <div style={{ padding: '16px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                <div style={{ fontSize: '0.8rem', color: '#334155', display: 'flex', flexDirection: 'column', gap: '6px', background: '#f8fafc', padding: '10px 12px', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                    <span style={{ color: '#64748b', fontWeight: '500' }}>Loại nguồn nước:</span>
+                    <span style={{ padding: '2px 8px', borderRadius: '4px', fontSize: '0.72rem', fontWeight: '700', background: 'rgba(13, 110, 253, 0.1)', color: '#0d6efd' }}>Nước ngầm</span>
+                  </div>
+                  {selectedWqStation.hydroChar && (
+                    <div style={{ display: 'flex', justifyContent: 'space-between', gap: '10px' }}>
+                      <span style={{ color: '#64748b', fontWeight: '500', flexShrink: 0 }}>Đặc tính thủy vực:</span>
+                      <span style={{ fontWeight: '600', color: '#0f172a', textAlign: 'right' }}>{selectedWqStation.hydroChar}</span>
+                    </div>
+                  )}
+                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                    <span style={{ color: '#64748b', fontWeight: '500' }}>Tọa độ (X, Y):</span>
+                    <span style={{ fontFamily: 'monospace', fontWeight: '600', color: '#0f172a' }}>{selectedWqStation.x?.toFixed(4)}, {selectedWqStation.y?.toFixed(4)}</span>
+                  </div>
+                </div>
+                <div style={{ borderTop: '1px solid #e2e8f0', paddingTop: '10px' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: '#0f172a' }}>
+                      <Activity size={14} color="var(--accent)" />
+                      <strong style={{ fontSize: '0.82rem' }}>Dữ liệu quan trắc</strong>
+                    </div>
+                    {wqSamplesLoading && <span style={{ fontSize: '0.72rem', color: '#94a3b8' }}>Đang tải...</span>}
+                  </div>
+                  {wqStationSamples.length > 0 ? (
+                    <>
+                      <div style={{ display: 'flex', gap: '8px', alignItems: 'center', marginBottom: '10px' }}>
+                        <label style={{ fontSize: '0.78rem', color: '#475569', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '4px' }}><Calendar size={13} /> Ngày lấy mẫu:</label>
+                        <select value={wqStationSampleDate} onChange={e => setWqStationSampleDate(e.target.value)}
+                          style={{ flex: 1, padding: '5px 8px', fontSize: '0.78rem', border: '1px solid #cbd5e1', borderRadius: '6px', background: '#f8fafc', color: '#0f172a', cursor: 'pointer', fontWeight: '600' }}>
+                          {wqStationSamples.map(s => (<option key={s.id} value={s.sampleDate}>{s.sampleDate}</option>))}
+                        </select>
+                      </div>
+                      {wqStationSample && wqStationSample.parameters && wqStationSample.parameters.length > 0 ? (
+                        <div style={{ overflowX: 'auto', borderRadius: '10px', border: '1px solid #e2e8f0', maxHeight: isMobile ? 'none' : '180px', overflowY: 'auto' }} className="custom-scrollbar">
+                          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.78rem' }}>
+                            <thead><tr style={{ background: '#f8fafc', position: 'sticky', top: 0, zIndex: 1, borderBottom: '1px solid #cbd5e1' }}>
+                              {['Thông số', 'Đơn vị', 'Giá trị', 'Tiêu chuẩn'].map(h => (<th key={h} style={{ padding: '6px 10px', textAlign: 'left', fontWeight: '700', color: '#475569' }}>{h}</th>))}
+                            </tr></thead>
+                            <tbody>
+                              {wqStationSample.parameters.map((p, idx) => (
+                                <tr key={idx} style={{ borderBottom: idx === wqStationSample.parameters!.length - 1 ? 'none' : '1px solid #f1f5f9', background: idx % 2 === 0 ? '#ffffff' : '#fcfdfe' }}>
+                                  <td style={{ padding: '6px 10px', fontWeight: '600', color: '#0f172a' }}>{p.parameterName}</td>
+                                  <td style={{ padding: '6px 10px', color: '#475569' }}>{p.unit || '—'}</td>
+                                  <td style={{ padding: '6px 10px', fontFamily: '"JetBrains Mono",monospace', color: '#0f172a', fontWeight: '600' }}>{p.valueRaw || '—'}</td>
+                                  <td style={{ padding: '6px 10px', color: '#64748b', fontSize: '0.72rem' }}>{p.referenceStandard || '—'}</td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      ) : wqSamplesLoading ? null : (<p style={{ fontSize: '0.78rem', color: '#64748b', fontStyle: 'italic', margin: '4px 0' }}>Chưa tải được chi tiết dữ liệu.</p>)}
+                    </>
+                  ) : (!wqSamplesLoading && <p style={{ fontSize: '0.78rem', color: '#64748b', fontStyle: 'italic', margin: '4px 0' }}>Chưa có dữ liệu quan trắc cho trạm này.</p>)}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ---- Mobile Popup Backdrop ---- */}
+        {isMobile && (popupDeviceId || selectedWqStation) && (
+          <div className="popup-backdrop" onClick={() => { setPopupDeviceId(null); setSelectedWqStation(null); }} />
+        )}
     </section>
+
+    {/* ---- Time-Lapse Picker (root level, outside geo-map) ---- */}
+    {showPlaybackPicker && (
+      <>
+        <div className="pb-picker-backdrop" onClick={() => setShowPlaybackPicker(false)} />
+        <div className={`pb-picker-panel ${isMobile ? 'pb-picker-panel--mobile' : ''}`}>
+          <div className="pb-picker-header">
+            <div className="pb-picker-title">
+              <Clock size={16} />
+              Set Time-Lapse Period
+            </div>
+            <button className="pb-picker-close" onClick={() => setShowPlaybackPicker(false)} type="button">×</button>
+          </div>
+
+          <div className="pb-picker-body">
+            <div className="pb-field">
+              <label className="pb-label">Start Date</label>
+              <input className="pb-input" type="date" value={pbStartDate} onChange={e => { setPbStartDate(e.target.value); setPbError(""); }} />
+            </div>
+            <div className="pb-field">
+              <label className="pb-label">End Date</label>
+              <input className="pb-input" type="date" value={pbEndDate} onChange={e => { setPbEndDate(e.target.value); setPbError(""); }} />
+            </div>
+            {pbError && <div className="pb-error">{pbError}</div>}
+          </div>
+
+          <div className="pb-picker-footer">
+            <button className="pb-btn-cancel" onClick={() => setShowPlaybackPicker(false)} type="button">Cancel</button>
+            <button className="pb-btn-play" onClick={handleStartPlayback} type="button">
+              <Play size={14} fill="currentColor" />
+              Play
+            </button>
+          </div>
+        </div>
+      </>
+    )}
+  </>
+);
+}, (prevProps, nextProps) => {
+  // Custom comparison - chỉ re-render khi props thực sự thay đổi
+  const datasetsEqual: boolean = 
+    prevProps.appliedDatasets?.length === nextProps.appliedDatasets?.length &&
+    (prevProps.appliedDatasets?.every((d, i) => 
+      d.id === nextProps.appliedDatasets?.[i]?.id && 
+      d.type === nextProps.appliedDatasets?.[i]?.type
+    ) ?? false);
+  
+  return (
+    prevProps.startDateTime === nextProps.startDateTime &&
+    prevProps.endDateTime === nextProps.endDateTime &&
+    datasetsEqual &&
+    prevProps.isMobile === nextProps.isMobile &&
+    prevProps.waterQualityStations === nextProps.waterQualityStations &&
+    prevProps.onRemoveDataset === nextProps.onRemoveDataset &&
+    prevProps.onAddDataset === nextProps.onAddDataset &&
+    prevProps.onStartDateTimeChange === nextProps.onStartDateTimeChange &&
+    prevProps.onEndDateTimeChange === nextProps.onEndDateTimeChange
   );
-}
+});

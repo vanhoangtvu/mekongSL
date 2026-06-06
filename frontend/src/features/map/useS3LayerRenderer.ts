@@ -163,6 +163,7 @@ export function useS3LayerRenderer(
 
   useEffect(() => {
     const map = mapRef.current;
+    console.log("[useS3LayerRenderer] sync", { layers: Object.keys(renderedLayers), mapExists: !!map });
     if (!map) return;
     const safeMap = map;
     const currentLayers = layerRefs.current;
