@@ -1175,6 +1175,210 @@ function StationImage({ imageKey }: { imageKey: string }) {
   );
 }
 
+interface WaterQualityDetailModalProps {
+  sample: WaterQualitySampleDto;
+  onClose: () => void;
+}
+
+function WaterQualityDetailModal({ sample, onClose }: WaterQualityDetailModalProps) {
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [onClose]);
+
+  const isGroundwater = sample.stationType === 'groundwater';
+
+  return (
+    <div
+      onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
+      style={{
+        position: 'fixed',
+        top: 0, left: 0, right: 0, bottom: 0,
+        zIndex: 9999,
+        background: 'rgba(6, 8, 16, 0.82)',
+        backdropFilter: 'blur(18px) saturate(1.4)',
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        padding: '20px',
+        animation: 'modalOverlayIn 0.25s ease'
+      }}
+    >
+      <div style={{
+        background: 'linear-gradient(160deg, rgba(22,27,46,0.98) 0%, rgba(13,17,33,0.99) 100%)',
+        border: '1px solid rgba(255,255,255,0.08)',
+        borderRadius: '20px',
+        boxShadow: `0 0 0 1px rgba(255,255,255,0.04), 0 32px 64px -12px rgba(0,0,0,0.8), 0 0 80px -20px ${isGroundwater ? '#6f42c1' : '#0dcaf0'}33`,
+        width: '100%',
+        maxWidth: '850px',
+        maxHeight: '92vh',
+        display: 'flex', flexDirection: 'column',
+        overflow: 'hidden',
+        animation: 'modalPanelIn 0.35s cubic-bezier(0.22, 1, 0.36, 1)'
+      }}>
+        {/* Header */}
+        <div style={{
+          padding: '20px 24px 18px',
+          borderBottom: '1px solid rgba(255,255,255,0.06)',
+          background: `linear-gradient(135deg, ${isGroundwater ? 'rgba(111,66,193,0.12)' : 'rgba(13,202,240,0.12)'} 0%, transparent 60%)`,
+          display: 'flex', alignItems: 'center', gap: '16px', flexShrink: 0
+        }}>
+          <div style={{
+            width: '48px', height: '48px', borderRadius: '14px',
+            background: isGroundwater ? 'rgba(111, 66, 193, 0.12)' : 'rgba(13, 202, 240, 0.12)',
+            border: `1px solid ${isGroundwater ? '#6f42c1' : '#0dcaf0'}33`,
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            color: isGroundwater ? '#af8bfa' : '#33ddfc', flexShrink: 0,
+            boxShadow: `0 4px 16px ${isGroundwater ? '#6f42c1' : '#0dcaf0'}22`
+          }}>
+            <FileSpreadsheet size={22} />
+          </div>
+
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+              <h3 style={{
+                margin: 0, fontSize: '1.05rem', fontWeight: '700', color: '#f1f5f9',
+                whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '450px'
+              }}>
+                {sample.stationLocation || 'Trạm đo chưa rõ tên'}
+              </h3>
+              <span style={{
+                padding: '2px 10px', borderRadius: '999px',
+                background: isGroundwater ? 'rgba(111, 66, 193, 0.12)' : 'rgba(13, 202, 240, 0.12)',
+                border: `1px solid ${isGroundwater ? '#6f42c1' : '#0dcaf0'}44`,
+                color: isGroundwater ? '#af8bfa' : '#33ddfc', fontSize: '0.72rem', fontWeight: '700',
+                letterSpacing: '0.04em', textTransform: 'uppercase' as const, flexShrink: 0
+              }}>
+                {isGroundwater ? 'Nước ngầm' : 'Nước mặt'}
+              </span>
+              {sample.stationId && (
+                <span style={{
+                  padding: '2px 8px', borderRadius: '6px',
+                  background: 'rgba(255, 255, 255, 0.05)',
+                  border: '1px solid rgba(255, 255, 255, 0.1)',
+                  color: '#e2e8f0', fontSize: '0.72rem', fontWeight: '700', flexShrink: 0
+                }}>
+                  {sample.stationId}
+                </span>
+              )}
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '14px', marginTop: '5px', flexWrap: 'wrap', color: 'rgba(148,163,184,0.7)', fontSize: '0.76rem' }}>
+              <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                <Calendar size={12} color="var(--accent)" />
+                Ngày lấy mẫu: <strong style={{ color: '#f1f5f9' }}>{sample.sampleDate}</strong>
+              </span>
+              {sample.zoneDescription && (
+                <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                  <MapPin size={12} color="#10b981" />
+                  Khu vực: <strong style={{ color: '#f1f5f9' }}>{sample.zoneDescription}</strong>
+                </span>
+              )}
+              {sample.qcvnStandard && (
+                <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                  <Layers size={12} color="#f59e0b" />
+                  Tiêu chuẩn: <strong style={{ color: '#f1f5f9' }}>{sample.qcvnStandard}</strong>
+                </span>
+              )}
+            </div>
+          </div>
+
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0 }}>
+            <button
+              type="button"
+              onClick={onClose}
+              style={{
+                background: 'rgba(255, 255, 255, 0.04)',
+                border: '1px solid rgba(255, 255, 255, 0.08)',
+                color: '#94a3b8', padding: '9px 12px', borderRadius: '10px',
+                fontSize: '0.83rem', fontWeight: '600', cursor: 'pointer',
+                display: 'flex', alignItems: 'center', gap: '4px', transition: 'all 0.18s ease'
+              }}
+              title="Đóng cửa sổ"
+            >
+              <X size={14} /> Đóng
+            </button>
+          </div>
+        </div>
+
+        {/* Content */}
+        <div className="custom-scrollbar" style={{ flex: 1, overflowY: 'auto', padding: '20px 24px' }}>
+          {sample.notes && (
+            <div style={{
+              background: 'rgba(255, 255, 255, 0.02)',
+              border: '1px solid rgba(255, 255, 255, 0.05)',
+              borderRadius: '12px',
+              padding: '12px 16px',
+              marginBottom: '16px',
+              fontSize: '0.82rem',
+              color: '#cbd5e1'
+            }}>
+              <div style={{ fontSize: '0.72rem', textTransform: 'uppercase', color: 'rgba(148,163,184,0.5)', fontWeight: '700', letterSpacing: '0.04em', marginBottom: '4px' }}>Ghi chú đợt nhập</div>
+              <p style={{ margin: 0, lineHeight: 1.4 }}>{sample.notes}</p>
+            </div>
+          )}
+
+          <div style={{ overflowX: 'auto', borderRadius: '12px', border: '1px solid rgba(255,255,255,0.06)' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.82rem' }}>
+              <thead>
+                <tr style={{ background: 'rgba(255,255,255,0.02)', borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
+                  {['Thông số', 'Đơn vị', 'Giá trị', 'Tiêu chuẩn'].map(h => (
+                    <th key={h} style={{ padding: '10px 16px', textAlign: 'left', color: 'rgba(148, 163, 184, 0.7)', fontWeight: '600' }}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {sample.parameters && sample.parameters.length > 0 ? (
+                  sample.parameters.map((p, idx) => (
+                    <tr 
+                      key={idx} 
+                      style={{ 
+                        borderBottom: idx === sample.parameters!.length - 1 ? 'none' : '1px solid rgba(255,255,255,0.04)',
+                        background: idx % 2 === 0 ? 'transparent' : 'rgba(255, 255, 255, 0.01)'
+                      }}
+                    >
+                      <td style={{ padding: '10px 16px', fontWeight: '600', color: '#e2e8f0' }}>{p.parameterName}</td>
+                      <td style={{ padding: '10px 16px', color: '#94a3b8' }}>{p.unit || '—'}</td>
+                      <td style={{ padding: '10px 16px', fontFamily: '"JetBrains Mono",monospace', color: '#f1f5f9' }}>{p.valueRaw || '—'}</td>
+                      <td style={{ padding: '10px 16px', color: '#94a3b8', fontSize: '0.78rem' }}>{p.referenceStandard || '—'}</td>
+                    </tr>
+                  ))
+                ) : (
+                  <tr>
+                    <td colSpan={4} style={{ padding: '24px', textAlign: 'center', color: 'rgba(148, 163, 184, 0.5)' }}>
+                      Không có thông số nào được tìm thấy.
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        {/* Footer */}
+        <div style={{
+          padding: '12px 24px',
+          borderTop: '1px solid rgba(255, 255, 255, 0.06)',
+          background: 'rgba(255,255,255,0.01)',
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '16px', flexShrink: 0,
+          fontSize: '0.75rem', color: 'rgba(148,163,184,0.5)'
+        }}>
+          <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+            <Clock size={12} />
+            Thời gian import: {new Date(sample.importedAt).toLocaleString('vi-VN')}
+          </span>
+          {sample.importedBy && (
+            <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+              <User size={12} />
+              Người import: {sample.importedBy}
+            </span>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 interface MapPreviewModalProps {
   station: ManualStation;
   onClose: () => void;
@@ -4921,6 +5125,13 @@ function ScheduleConfig({ source }: { source: string }) {
         <MapPreviewModal
           station={mapPreviewStation}
           onClose={() => setMapPreviewStation(null)}
+        />
+      )}
+
+      {selectedSampleDetail && (
+        <WaterQualityDetailModal
+          sample={selectedSampleDetail}
+          onClose={() => setSelectedSampleDetail(null)}
         />
       )}
 
