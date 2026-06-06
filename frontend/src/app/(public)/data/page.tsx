@@ -1198,20 +1198,20 @@ function WaterQualityDetailModal({ sample, onClose }: WaterQualityDetailModalPro
         position: 'fixed',
         top: 0, left: 0, right: 0, bottom: 0,
         zIndex: 9999,
-        background: 'rgba(6, 8, 16, 0.82)',
-        backdropFilter: 'blur(18px) saturate(1.4)',
+        background: 'rgba(15, 23, 42, 0.4)',
+        backdropFilter: 'blur(12px) saturate(1.2)',
         display: 'flex', alignItems: 'center', justifyContent: 'center',
         padding: '20px',
         animation: 'modalOverlayIn 0.25s ease'
       }}
     >
       <div style={{
-        background: 'linear-gradient(160deg, rgba(22,27,46,0.98) 0%, rgba(13,17,33,0.99) 100%)',
-        border: '1px solid rgba(255,255,255,0.08)',
-        borderRadius: '20px',
-        boxShadow: `0 0 0 1px rgba(255,255,255,0.04), 0 32px 64px -12px rgba(0,0,0,0.8), 0 0 80px -20px ${isGroundwater ? '#6f42c1' : '#0dcaf0'}33`,
+        background: '#ffffff',
+        border: '1px solid #e2e8f0',
+        borderRadius: '24px',
+        boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.25), 0 0 0 1px rgba(0, 0, 0, 0.02)',
         width: '100%',
-        maxWidth: '850px',
+        maxWidth: '1050px',
         maxHeight: '92vh',
         display: 'flex', flexDirection: 'column',
         overflow: 'hidden',
@@ -1219,65 +1219,66 @@ function WaterQualityDetailModal({ sample, onClose }: WaterQualityDetailModalPro
       }}>
         {/* Header */}
         <div style={{
-          padding: '20px 24px 18px',
-          borderBottom: '1px solid rgba(255,255,255,0.06)',
-          background: `linear-gradient(135deg, ${isGroundwater ? 'rgba(111,66,193,0.12)' : 'rgba(13,202,240,0.12)'} 0%, transparent 60%)`,
-          display: 'flex', alignItems: 'center', gap: '16px', flexShrink: 0
+          padding: '24px 32px 20px',
+          borderBottom: '1px solid #e2e8f0',
+          background: `linear-gradient(135deg, ${isGroundwater ? 'rgba(111,66,193,0.06)' : 'rgba(13,202,240,0.06)'} 0%, #ffffff 100%)`,
+          display: 'flex', alignItems: 'center', gap: '20px', flexShrink: 0
         }}>
           <div style={{
-            width: '48px', height: '48px', borderRadius: '14px',
-            background: isGroundwater ? 'rgba(111, 66, 193, 0.12)' : 'rgba(13, 202, 240, 0.12)',
-            border: `1px solid ${isGroundwater ? '#6f42c1' : '#0dcaf0'}33`,
+            width: '56px', height: '56px', borderRadius: '16px',
+            background: isGroundwater ? 'rgba(111, 66, 193, 0.08)' : 'rgba(13, 202, 240, 0.08)',
+            border: `1px solid ${isGroundwater ? 'rgba(111, 66, 193, 0.2)' : 'rgba(13, 202, 240, 0.2)'}`,
             display: 'flex', alignItems: 'center', justifyContent: 'center',
-            color: isGroundwater ? '#af8bfa' : '#33ddfc', flexShrink: 0,
-            boxShadow: `0 4px 16px ${isGroundwater ? '#6f42c1' : '#0dcaf0'}22`
+            color: isGroundwater ? '#6f42c1' : '#0ea5e9', flexShrink: 0,
+            boxShadow: `0 4px 16px ${isGroundwater ? 'rgba(111, 66, 193, 0.15)' : 'rgba(13, 202, 240, 0.15)'}`
           }}>
-            <FileSpreadsheet size={22} />
+            <FileSpreadsheet size={26} />
           </div>
 
           <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
               <h3 style={{
-                margin: 0, fontSize: '1.05rem', fontWeight: '700', color: '#f1f5f9',
-                whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '450px'
+                margin: 0, fontSize: '1.4rem', fontWeight: '800', color: '#0f172a',
+                whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '600px',
+                lineHeight: 1.2
               }}>
                 {sample.stationLocation || 'Trạm đo chưa rõ tên'}
               </h3>
               <span style={{
-                padding: '2px 10px', borderRadius: '999px',
-                background: isGroundwater ? 'rgba(111, 66, 193, 0.12)' : 'rgba(13, 202, 240, 0.12)',
-                border: `1px solid ${isGroundwater ? '#6f42c1' : '#0dcaf0'}44`,
-                color: isGroundwater ? '#af8bfa' : '#33ddfc', fontSize: '0.72rem', fontWeight: '700',
+                padding: '4px 14px', borderRadius: '999px',
+                background: isGroundwater ? 'rgba(111, 66, 193, 0.08)' : 'rgba(13, 202, 240, 0.08)',
+                border: `1px solid ${isGroundwater ? 'rgba(111, 66, 193, 0.2)' : 'rgba(13, 202, 240, 0.2)'}`,
+                color: isGroundwater ? '#6f42c1' : '#0974a6', fontSize: '0.82rem', fontWeight: '700',
                 letterSpacing: '0.04em', textTransform: 'uppercase' as const, flexShrink: 0
               }}>
                 {isGroundwater ? 'Nước ngầm' : 'Nước mặt'}
               </span>
               {sample.stationId && (
                 <span style={{
-                  padding: '2px 8px', borderRadius: '6px',
-                  background: 'rgba(255, 255, 255, 0.05)',
-                  border: '1px solid rgba(255, 255, 255, 0.1)',
-                  color: '#e2e8f0', fontSize: '0.72rem', fontWeight: '700', flexShrink: 0
+                  padding: '4px 10px', borderRadius: '8px',
+                  background: '#f1f5f9',
+                  border: '1px solid #e2e8f0',
+                  color: '#334155', fontSize: '0.82rem', fontWeight: '700', flexShrink: 0
                 }}>
                   {sample.stationId}
                 </span>
               )}
             </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '14px', marginTop: '5px', flexWrap: 'wrap', color: 'rgba(148,163,184,0.7)', fontSize: '0.76rem' }}>
-              <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-                <Calendar size={12} color="var(--accent)" />
-                Ngày lấy mẫu: <strong style={{ color: '#f1f5f9' }}>{sample.sampleDate}</strong>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '18px', marginTop: '8px', flexWrap: 'wrap', color: '#475569', fontSize: '0.88rem' }}>
+              <span style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                <Calendar size={14} color="var(--accent)" />
+                Ngày lấy mẫu: <strong style={{ color: '#0f172a' }}>{sample.sampleDate}</strong>
               </span>
               {sample.zoneDescription && (
-                <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-                  <MapPin size={12} color="#10b981" />
-                  Khu vực: <strong style={{ color: '#f1f5f9' }}>{sample.zoneDescription}</strong>
+                <span style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  <MapPin size={14} color="#10b981" />
+                  Khu vực: <strong style={{ color: '#0f172a' }}>{sample.zoneDescription}</strong>
                 </span>
               )}
               {sample.qcvnStandard && (
-                <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-                  <Layers size={12} color="#f59e0b" />
-                  Tiêu chuẩn: <strong style={{ color: '#f1f5f9' }}>{sample.qcvnStandard}</strong>
+                <span style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  <Layers size={14} color="#f59e0b" />
+                  Tiêu chuẩn: <strong style={{ color: '#0f172a' }}>{sample.qcvnStandard}</strong>
                 </span>
               )}
             </div>
@@ -1288,42 +1289,42 @@ function WaterQualityDetailModal({ sample, onClose }: WaterQualityDetailModalPro
               type="button"
               onClick={onClose}
               style={{
-                background: 'rgba(255, 255, 255, 0.04)',
-                border: '1px solid rgba(255, 255, 255, 0.08)',
-                color: '#94a3b8', padding: '9px 12px', borderRadius: '10px',
-                fontSize: '0.83rem', fontWeight: '600', cursor: 'pointer',
-                display: 'flex', alignItems: 'center', gap: '4px', transition: 'all 0.18s ease'
+                background: '#f1f5f9',
+                border: '1px solid #cbd5e1',
+                color: '#475569', padding: '10px 18px', borderRadius: '12px',
+                fontSize: '0.9rem', fontWeight: '600', cursor: 'pointer',
+                display: 'flex', alignItems: 'center', gap: '6px', transition: 'all 0.18s ease'
               }}
               title="Đóng cửa sổ"
             >
-              <X size={14} /> Đóng
+              <X size={16} /> Đóng
             </button>
           </div>
         </div>
 
         {/* Content */}
-        <div className="custom-scrollbar" style={{ flex: 1, overflowY: 'auto', padding: '20px 24px' }}>
+        <div className="custom-scrollbar" style={{ flex: 1, overflowY: 'auto', padding: '24px 32px' }}>
           {sample.notes && (
             <div style={{
-              background: 'rgba(255, 255, 255, 0.02)',
-              border: '1px solid rgba(255, 255, 255, 0.05)',
-              borderRadius: '12px',
-              padding: '12px 16px',
-              marginBottom: '16px',
-              fontSize: '0.82rem',
-              color: '#cbd5e1'
+              background: '#f8fafc',
+              border: '1px solid #e2e8f0',
+              borderRadius: '14px',
+              padding: '16px 20px',
+              marginBottom: '20px',
+              fontSize: '0.9rem',
+              color: '#334155'
             }}>
-              <div style={{ fontSize: '0.72rem', textTransform: 'uppercase', color: 'rgba(148,163,184,0.5)', fontWeight: '700', letterSpacing: '0.04em', marginBottom: '4px' }}>Ghi chú đợt nhập</div>
-              <p style={{ margin: 0, lineHeight: 1.4 }}>{sample.notes}</p>
+              <div style={{ fontSize: '0.78rem', textTransform: 'uppercase', color: '#64748b', fontWeight: '700', letterSpacing: '0.04em', marginBottom: '6px' }}>Ghi chú đợt nhập</div>
+              <p style={{ margin: 0, lineHeight: 1.5 }}>{sample.notes}</p>
             </div>
           )}
 
-          <div style={{ overflowX: 'auto', borderRadius: '12px', border: '1px solid rgba(255,255,255,0.06)' }}>
-            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.82rem' }}>
+          <div style={{ overflowX: 'auto', borderRadius: '14px', border: '1px solid #e2e8f0', boxShadow: '0 1px 3px 0 rgba(0, 0, 0, 0.05)' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.92rem' }}>
               <thead>
-                <tr style={{ background: 'rgba(255,255,255,0.02)', borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
+                <tr style={{ background: '#f8fafc', borderBottom: '1px solid #cbd5e1' }}>
                   {['Thông số', 'Đơn vị', 'Giá trị', 'Tiêu chuẩn'].map(h => (
-                    <th key={h} style={{ padding: '10px 16px', textAlign: 'left', color: 'rgba(148, 163, 184, 0.7)', fontWeight: '600' }}>{h}</th>
+                    <th key={h} style={{ padding: '14px 20px', textAlign: 'left', color: '#334155', fontWeight: '700' }}>{h}</th>
                   ))}
                 </tr>
               </thead>
@@ -1333,19 +1334,19 @@ function WaterQualityDetailModal({ sample, onClose }: WaterQualityDetailModalPro
                     <tr 
                       key={idx} 
                       style={{ 
-                        borderBottom: idx === sample.parameters!.length - 1 ? 'none' : '1px solid rgba(255,255,255,0.04)',
-                        background: idx % 2 === 0 ? 'transparent' : 'rgba(255, 255, 255, 0.01)'
+                        borderBottom: idx === sample.parameters!.length - 1 ? 'none' : '1px solid #f1f5f9',
+                        background: idx % 2 === 0 ? '#ffffff' : '#fcfdfe'
                       }}
                     >
-                      <td style={{ padding: '10px 16px', fontWeight: '600', color: '#e2e8f0' }}>{p.parameterName}</td>
-                      <td style={{ padding: '10px 16px', color: '#94a3b8' }}>{p.unit || '—'}</td>
-                      <td style={{ padding: '10px 16px', fontFamily: '"JetBrains Mono",monospace', color: '#f1f5f9' }}>{p.valueRaw || '—'}</td>
-                      <td style={{ padding: '10px 16px', color: '#94a3b8', fontSize: '0.78rem' }}>{p.referenceStandard || '—'}</td>
+                      <td style={{ padding: '14px 20px', fontWeight: '600', color: '#0f172a' }}>{p.parameterName}</td>
+                      <td style={{ padding: '14px 20px', color: '#475569' }}>{p.unit || '—'}</td>
+                      <td style={{ padding: '14px 20px', fontFamily: '"JetBrains Mono",monospace', color: '#0f172a', fontWeight: '700' }}>{p.valueRaw || '—'}</td>
+                      <td style={{ padding: '14px 20px', color: '#475569', fontSize: '0.88rem' }}>{p.referenceStandard || '—'}</td>
                     </tr>
                   ))
                 ) : (
                   <tr>
-                    <td colSpan={4} style={{ padding: '24px', textAlign: 'center', color: 'rgba(148, 163, 184, 0.5)' }}>
+                    <td colSpan={4} style={{ padding: '32px', textAlign: 'center', color: '#64748b' }}>
                       Không có thông số nào được tìm thấy.
                     </td>
                   </tr>
@@ -1357,20 +1358,20 @@ function WaterQualityDetailModal({ sample, onClose }: WaterQualityDetailModalPro
 
         {/* Footer */}
         <div style={{
-          padding: '12px 24px',
-          borderTop: '1px solid rgba(255, 255, 255, 0.06)',
-          background: 'rgba(255,255,255,0.01)',
+          padding: '16px 32px',
+          borderTop: '1px solid #e2e8f0',
+          background: '#f8fafc',
           display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '16px', flexShrink: 0,
-          fontSize: '0.75rem', color: 'rgba(148,163,184,0.5)'
+          fontSize: '0.85rem', color: '#475569'
         }}>
-          <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-            <Clock size={12} />
-            Thời gian import: {new Date(sample.importedAt).toLocaleString('vi-VN')}
+          <span style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+            <Clock size={14} />
+            Thời gian import: <strong>{new Date(sample.importedAt).toLocaleString('vi-VN')}</strong>
           </span>
           {sample.importedBy && (
-            <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-              <User size={12} />
-              Người import: {sample.importedBy}
+            <span style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+              <User size={14} />
+              Người import: <strong>{sample.importedBy}</strong>
             </span>
           )}
         </div>

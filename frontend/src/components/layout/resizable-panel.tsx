@@ -8,6 +8,8 @@ type ResizablePanelProps = {
   minWidth?: number;
   maxWidth?: number;
   side?: "left" | "right";
+  isMobile?: boolean;
+  isSidebarOpen?: boolean;
 };
 
 export function ResizablePanel({
@@ -16,6 +18,8 @@ export function ResizablePanel({
   minWidth = 280,
   maxWidth = 600,
   side = "left",
+  isMobile,
+  isSidebarOpen,
 }: ResizablePanelProps) {
   const [width, setWidth] = useState(defaultWidth);
   const [isDragging, setIsDragging] = useState(false);
@@ -57,6 +61,21 @@ export function ResizablePanel({
     e.preventDefault();
     setIsDragging(true);
   };
+
+  if (isMobile) {
+    return (
+      <>
+        {isSidebarOpen && <div className="sidebar-backdrop" onClick={() => {}} />}
+        <div
+          ref={panelRef}
+          className={`resizable-panel mobile-drawer ${isSidebarOpen ? 'mobile-drawer--open' : ''}`}
+          style={{ width: `${Math.min(width, window.innerWidth - 48)}px` }}
+        >
+          {children}
+        </div>
+      </>
+    );
+  }
 
   return (
     <div

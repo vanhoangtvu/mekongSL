@@ -5,9 +5,14 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import Image from "next/image";
 import { authService } from "../../lib/auth";
-import { LogOut, User } from "lucide-react";
+import { LogOut, User, Menu, X } from "lucide-react";
 
-export function AppHeader() {
+type AppHeaderProps = {
+  onToggleSidebar?: () => void;
+  isSidebarOpen?: boolean;
+};
+
+export function AppHeader({ onToggleSidebar, isSidebarOpen }: AppHeaderProps) {
   const router = useRouter();
   const [user, setUser] = useState<{ username: string; role: string } | null>(null);
 
@@ -27,10 +32,13 @@ export function AppHeader() {
     <header className="app-header">
       <div className="app-header-content">
         <div className="app-header-left">
+          <button className="app-header-mobile-toggle" onClick={onToggleSidebar} type="button" aria-label="Toggle menu">
+            {isSidebarOpen ? <X size={20} /> : <Menu size={20} />}
+          </button>
           <div className="app-brand">
             <Link href="/" className="app-logo">
               <Image src="/logo.png" alt="Mekong Salt Lab" width={158} height={30} style={{ objectFit: "contain" }} />
-              Environmental Data For Mekong
+              <span className="app-logo-text">Environmental Data For Mekong</span>
             </Link>
              <p className="app-slogan">Empowering Sustainable Water Management Through Data</p>
           </div>
@@ -43,11 +51,11 @@ export function AppHeader() {
             <>
               <span className="user-info">
                 <User size={16} />
-                {user.username} ({user.role})
+                <span className="user-info-text">{user.username} ({user.role})</span>
               </span>
               <button onClick={handleLogout} className="logout-btn">
                 <LogOut size={16} />
-                Đăng xuất
+                <span className="logout-btn-text">Đăng xuất</span>
               </button>
             </>
           ) : (

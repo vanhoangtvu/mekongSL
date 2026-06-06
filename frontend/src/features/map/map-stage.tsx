@@ -17,8 +17,11 @@ import { register } from "ol/proj/proj4";
 import { DATASETS } from "../../lib/constants/datasets";
 import { ECOWITT_DEVICES, type EcowittDevice } from "../../lib/constants/data-sources";
 import { useS3DatasetLayers } from "./useS3DatasetLayers";
+import { useSingleLayer } from "./useSingleLayer";
+import { useTimelapseLayer } from "./useTimelapseLayer";
 import type { ManualStation } from "../../lib/admin-api";
 import { listWaterQualitySamples, getWaterQualitySample, getBackendAdminUrl, type WaterQualitySampleDto } from "../../lib/admin-api";
+import { MapPin, Activity, Image, Calendar, X, Play, Pause, SkipForward, SkipBack, Layers, Plus, Clock } from "lucide-react";
 
 // Register UTM 48N projection
 proj4.defs("EPSG:32648", "+proj=utm +zone=48 +datum=WGS84 +units=m +no_defs");
@@ -272,6 +275,7 @@ type MapStageProps = {
   onStartDateTimeChange?: (val: string) => void;
   onEndDateTimeChange?: (val: string) => void;
   waterQualityStations?: ManualStation[];
+  isMobile?: boolean;
 };
 
 function parseDateTimeLocal(value: string) {
@@ -342,9 +346,12 @@ function buildTimelineUnits(startDate: Date, endDate: Date, mode: TimelineResolv
         t.setHours(h, 0, 0, 0);
         if (t > endDate) break;
         const hh = String(h).padStart(2, "0");
+        const yyyy = t.getFullYear();
+        const mm = String(t.getMonth() + 1).padStart(2, "0");
+        const dd = String(t.getDate()).padStart(2, "0");
         units.push({
           label: `${t.getDate()}/${t.getMonth() + 1} ${hh}:00`,
-          value: t.toISOString(),
+          value: `${yyyy}-${mm}-${dd}T${hh}:00`,
           isMajor: h === 0,
         });
       }
@@ -363,11 +370,13 @@ function buildTimelineUnits(startDate: Date, endDate: Date, mode: TimelineResolv
     }
 
     const isFirstDay = current.getDate() === 1;
-
+    const cy = current.getFullYear();
+    const cm = String(current.getMonth() + 1).padStart(2, "0");
+    const cd = String(current.getDate()).padStart(2, "0");
     units.push({
       label: formatMonthLabel(current),
-      value: current.toISOString(),
-      isMajor: isFirstDay, // Only major if it's the 1st of the month
+      value: `${cy}-${cm}-${cd}T00:00`,
+      isMajor: isFirstDay,
     });
 
     // Add a middle-of-the-month tick
@@ -549,6 +558,7 @@ function EcowittStationPopup({
         ...(expanded ? { bottom: "110px" } : {}),
         right: "12px",
         width: popupW,
+        maxWidth: "calc(100vw - 24px)",
         background: "#fff",
         borderRadius: "14px",
         boxShadow: "0 6px 32px rgba(0,0,0,0.18)",
@@ -1042,7 +1052,7 @@ function EcowittStationPopup({
   );
 }
 
-export function MapStage({ startDateTime, endDateTime, appliedDatasets, onRemoveDataset, onAddDataset, onStartDateTimeChange, onEndDateTimeChange, waterQualityStations }: MapStageProps) {
+export function MapStage({ startDateTime, endDateTime, appliedDatasets, onRemoveDataset, onAddDataset, onStartDateTimeChange, onEndDateTimeChange, waterQualityStations, isMobile }: MapStageProps) {
   const mapContainerRef = useRef<HTMLDivElement | null>(null);
   const scrollerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<Map | null>(null);
@@ -1052,6 +1062,7 @@ export function MapStage({ startDateTime, endDateTime, appliedDatasets, onRemove
   const wqSourceRef = useRef<VectorSource | null>(null);
   const wqStationsRef = useRef<ManualStation[]>([]);
   const baseLayerRef = useRef<TileLayer | null>(null);
+  const previousMapViewStateRef = useRef<{ center: [number, number]; zoom: number } | null>(null);
   const [pixelValue, setPixelValue] = useState<number | null>(null);
   const [pixelValues, setPixelValues] = useState<Record<string, number>>({});
   const [mouseCoords, setMouseCoords] = useState<[number, number] | null>(null);
@@ -1101,8 +1112,9 @@ export function MapStage({ startDateTime, endDateTime, appliedDatasets, onRemove
   const rawTimeSlot = useMemo(() => {
     const unit = timelineUnits[timelineIndex];
     if (!unit?.value) return "00-00";
-    const d = new Date(unit.value);
-    return `${String(d.getHours()).padStart(2, "0")}-${String(d.getMinutes()).padStart(2, "0")}`;
+    // value is local "YYYY-MM-DDTHH:MM" — extract HH:MM directly, no timezone conversion
+    const timePart = unit.value.slice(11, 16); // "HH:MM"
+    return timePart.replace(":", "-");
   }, [timelineIndex, timelineUnits]);
 
   // Next date in timeline for prefetching
@@ -1127,7 +1139,31 @@ export function MapStage({ startDateTime, endDateTime, appliedDatasets, onRemove
     setTimeSlot(rawTimeSlot);
   }, [rawTimelineDate, rawTimeSlot]);
 
-  const { renderedLayers, layerRefs, layersCacheRef } = useS3DatasetLayers(appliedDatasets, mapRef, timelineDate, timeSlot, prefetchDate, allTimelineDates);
+  const isSingleMode = (appliedDatasets?.length ?? 0) === 1;
+  const singleDataset = isSingleMode ? appliedDatasets![0] : undefined;
+
+  const onActualSlot = (actualDate: string, actualSlot: string) => {
+    const targetValue = `${actualDate}T${actualSlot.replace("-", ":")}`;
+    const idx = timelineUnits.findIndex(u => u.value === targetValue);
+    if (idx >= 0) setTimelineIndex(idx);
+  };
+
+  // Single-layer mode: exact slot fetch, no cache
+  const singleResult = useSingleLayer(singleDataset, mapRef, timelineDate, timeSlot, onActualSlot);
+  // Timelapse mode: preload all frames, instant setVisible() swap
+  const timelapseResult = useTimelapseLayer(
+    isSingleMode ? undefined : appliedDatasets,
+    mapRef, timelineDate, timeSlot, allTimelineDates, onActualSlot,
+  );
+  // Legacy multi-layer fallback (unused but hooks must always be called)
+  const _legacyResult = useS3DatasetLayers(undefined, mapRef, undefined, undefined, undefined, undefined);
+
+  const { renderedLayers, layerRefs } = isSingleMode ? singleResult : timelapseResult;
+  const { layersCacheRef } = _legacyResult;
+
+  // Keep a ref so the pointermove closure (created once) can read current renderedLayers
+  const renderedLayersRef = useRef(renderedLayers);
+  useEffect(() => { renderedLayersRef.current = renderedLayers; }, [renderedLayers]);
 
   // Prepare state: preload all frames before playing
   const [isPreparing, setIsPreparing] = useState(false);
@@ -1376,6 +1412,7 @@ export function MapStage({ startDateTime, endDateTime, appliedDatasets, onRemove
   const [wqStationImages, setWqStationImages] = useState<string[]>([]);
   const [wqSamplesLoading, setWqSamplesLoading] = useState(false);
   const [wqImagePreviewUrl, setWqImagePreviewUrl] = useState<string | null>(null);
+  const [activeWqImageIdx, setActiveWqImageIdx] = useState<number>(0);
   const [ecowittDevices, setEcowittDevices] = useState<EcowittDevice[]>([...ECOWITT_DEVICES] as EcowittDevice[]);
 
   const getLayerKey = (l: {id: string, type?: string}) => l.type ? `${l.id}-${l.type}` : l.id;
@@ -1603,6 +1640,8 @@ export function MapStage({ startDateTime, endDateTime, appliedDatasets, onRemove
           try {
             if (!('getData' in layer)) continue;
             if (!layer.getVisible()) continue;
+            // Only read from active rendered layers, not fading-out old layers
+            if (!renderedLayersRef.current[key]) continue;
             const buf = (layer as import("ol/layer/WebGLTile").default).getData(evt.pixel);
             if (buf && !(buf instanceof DataView) && buf.length > 0 && buf[0] > 0) {
               collected[key] = buf[0];
@@ -1662,18 +1701,124 @@ export function MapStage({ startDateTime, endDateTime, appliedDatasets, onRemove
     return () => { active = false; };
   }, []);
 
-  // Pulse animation loop for selected marker
+  // Sync selection flags on map features and run pulse animation loop for selected marker
   useEffect(() => {
-    const source = ecowittSourceRef.current;
-    if (!source || !popupDeviceId) return;
+    const ecowittSource = ecowittSourceRef.current;
+    const wqSource = wqSourceRef.current;
+    
+    // Update selected property on features
+    if (ecowittSource) {
+      ecowittSource.getFeatures().forEach(f => {
+        f.set("selected", f.getId() === popupDeviceId);
+      });
+      ecowittSource.changed();
+    }
+    if (wqSource) {
+      wqSource.getFeatures().forEach(f => {
+        f.set("selected", f.getId() === selectedWqStation?.id);
+      });
+      wqSource.changed();
+    }
+
+    if (!popupDeviceId && !selectedWqStation) return;
+
     let animId: number;
     const tick = () => {
-      source.changed();
+      if (ecowittSource && popupDeviceId) ecowittSource.changed();
+      if (wqSource && selectedWqStation) wqSource.changed();
       animId = requestAnimationFrame(tick);
     };
     animId = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(animId);
-  }, [popupDeviceId]);
+  }, [popupDeviceId, selectedWqStation]);
+
+  // Save/Restore Map View State when selecting/deselecting stations
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+    const view = map.getView();
+    if (!view) return;
+
+    const hasSelection = !!popupDeviceId || !!selectedWqStation;
+
+    if (hasSelection) {
+      if (!previousMapViewStateRef.current) {
+        const center = view.getCenter();
+        const zoom = view.getZoom();
+        if (center && zoom !== undefined) {
+          previousMapViewStateRef.current = {
+            center: [center[0], center[1]],
+            zoom: zoom
+          };
+        }
+      }
+    } else {
+      if (previousMapViewStateRef.current) {
+        const saved = previousMapViewStateRef.current;
+        previousMapViewStateRef.current = null; // Clear first to prevent loop
+        view.animate({
+          center: saved.center,
+          zoom: saved.zoom,
+          duration: 800
+        });
+      }
+    }
+  }, [popupDeviceId, selectedWqStation]);
+
+  // Zoom and pan map to selected manual station, with a slight offset to avoid popup coverage
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !selectedWqStation) return;
+    const view = map.getView();
+    if (!view) return;
+
+    const st = selectedWqStation;
+    if (st.x != null && st.y != null) {
+      const isWgs84 = Math.abs(st.x) <= 180 && Math.abs(st.y) <= 90;
+      const coords = isWgs84
+        ? fromLonLat([st.x, st.y])
+        : transform([st.x, st.y], 'EPSG:32648', 'EPSG:3857');
+
+      // Calculate target resolution at zoom 12.5 to get correct pixel offset
+      const targetResolution = (view.getResolutionForZoom ? view.getResolutionForZoom(12.5) : view.getResolution()) || 26;
+      // Dynamic offset: wide 2-column popup (surface water with images) needs ~350px offset, narrow needs ~220px
+      const hasImages = st.stationType === 'surface_water';
+      const offsetPixels = hasImages ? 350 : 220;
+      // Shift map center to the East to shift the marker physically to the left side of screen
+      const offsetX = offsetPixels * targetResolution;
+      const offsetCoords = [coords[0] + offsetX, coords[1]];
+
+      view.animate({
+        center: offsetCoords,
+        zoom: 12.5,
+        duration: 800
+      });
+    }
+  }, [selectedWqStation]);
+
+  // Zoom and pan map to selected Ecowitt station, with a slight offset to avoid popup coverage
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !popupDeviceId) return;
+    const view = map.getView();
+    if (!view) return;
+
+    const device = ecowittDevices.find(d => d.id === popupDeviceId);
+    if (device && device.lat != null && device.lng != null) {
+      const coords = fromLonLat([device.lng, device.lat]);
+      // Calculate target resolution at zoom 12.5 to get correct pixel offset
+      const targetResolution = (view.getResolutionForZoom ? view.getResolutionForZoom(12.5) : view.getResolution()) || 26;
+      // Ecowitt popup is narrower, shift map center East by ~140px
+      const offsetX = 140 * targetResolution;
+      const offsetCoords = [coords[0] + offsetX, coords[1]];
+
+      view.animate({
+        center: offsetCoords,
+        zoom: 12.5,
+        duration: 800
+      });
+    }
+  }, [popupDeviceId, ecowittDevices]);
 
   // Update marker features when ecowittDevices changes
   useEffect(() => {
@@ -1726,8 +1871,10 @@ export function MapStage({ startDateTime, endDateTime, appliedDatasets, onRemove
       setWqStationSampleDate('');
       setWqStationSample(null);
       setWqStationImages([]);
+      setActiveWqImageIdx(0);
       return;
     }
+    setActiveWqImageIdx(0);
     const st = selectedWqStation;
     const stId = st.id!;
     setWqSamplesLoading(true);
@@ -1904,216 +2051,414 @@ export function MapStage({ startDateTime, endDateTime, appliedDatasets, onRemove
           }}
         />
 
-        {/* Base Layer Switcher */}
-        <div className="map-layer-switcher">
-          <button
-            className="map-layer-toggle"
-            onClick={() => setShowLayerMenu(!showLayerMenu)}
-            type="button"
-            title="Change base layer"
-          >
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
-              <path d="M11.99 18.54l-7.37-5.73L3 14.07l9 7 9-7-1.63-1.27-7.38 5.74zM12 16l7.36-5.73L21 9l-9-7-9 7 1.63 1.27L12 16z" />
-            </svg>
-          </button>
+        {/* Top Floating Controls Wrapper */}
+        <div className={`map-top-controls-wrapper ${isMobile ? 'map-top-controls-wrapper--mobile' : ''}`}>
+          {/* Add Player Button & Dropdown */}
+          <div className="map-player-control">
+            <button
+              className="map-add-layer-btn"
+              onClick={() => { setShowPlayerDropdown(!showPlayerDropdown); setPendingLayerId(null); }}
+              type="button"
+              title="Manage layers"
+            >
+              <Plus size={15} />
+              <span>Add Layer</span>
+            </button>
 
-          {showLayerMenu && (
-            <div className="map-layer-menu">
-              <div className="map-layer-switcher-title">Base Layers</div>
-              {(Object.keys(baseLayers) as BaseLayerType[]).map((layerKey) => (
-                <label key={layerKey} className="map-layer-item">
-                  <input
-                    type="radio"
-                    name="baseLayer"
-                    checked={activeBaseLayer === layerKey}
-                    onChange={() => {
-                      setActiveBaseLayer(layerKey);
-                      setShowLayerMenu(false);
-                    }}
-                  />
-                  <span>{baseLayers[layerKey].name}</span>
-                </label>
-              ))}
-            </div>
-          )}
-        </div>
+            {showPlayerDropdown && (
+              <div className={`map-player-dropdown ${isMobile ? 'map-player-dropdown--mobile' : ''}`}>
+                <div className="map-player-dropdown-title">Select Data Layer</div>
+                {isMobile && (
+                  <div className="map-player-dropdown-handle" />
+                )}
+                <div className="map-player-list">
+                  {playerLayers.map((layer) => {
+                    const layerKey = getLayerKey(layer);
+                    return (
+                      <div
+                        key={layerKey}
+                        className={`map-player-item ${dragLayerId === layerKey ? "is-dragging" : ""}`}
+                        draggable={!isMobile}
+                        onDragStart={() => !isMobile && setDragLayerId(layerKey)}
+                        onDragEnd={() => !isMobile && setDragLayerId(null)}
+                        onDragOver={(e) => { if (!isMobile) e.preventDefault(); }}
+                        onDrop={(e) => {
+                          e.preventDefault();
+                          if (!isMobile && dragLayerId) reorderLayers(dragLayerId, layerKey);
+                        }}
+                      >
+                        {/* Drag handle (desktop) / reorder buttons (mobile) */}
+                        {!isMobile && (
+                          <span className="map-player-drag-handle" title="Drag to reorder">
+                            <svg width="10" height="14" viewBox="0 0 10 16" fill="currentColor">
+                              <circle cx="3" cy="2" r="1.5"/><circle cx="7" cy="2" r="1.5"/>
+                              <circle cx="3" cy="6" r="1.5"/><circle cx="7" cy="6" r="1.5"/>
+                              <circle cx="3" cy="10" r="1.5"/><circle cx="7" cy="10" r="1.5"/>
+                              <circle cx="3" cy="14" r="1.5"/><circle cx="7" cy="14" r="1.5"/>
+                            </svg>
+                          </span>
+                        )}
+                        {isMobile && (
+                          <span className="map-player-reorder">
+                            <button className="map-player-reorder-btn" type="button" onClick={(e) => { e.stopPropagation(); const idx = playerLayers.findIndex(l => getLayerKey(l) === layerKey); if (idx > 0) reorderLayers(layerKey, getLayerKey(playerLayers[idx - 1])); }} tabIndex={-1}>
+                              <svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round"><polyline points="18 15 12 9 6 15"/></svg>
+                            </button>
+                            <button className="map-player-reorder-btn" type="button" onClick={(e) => { e.stopPropagation(); const idx = playerLayers.findIndex(l => getLayerKey(l) === layerKey); if (idx < playerLayers.length - 1) reorderLayers(layerKey, getLayerKey(playerLayers[idx + 1])); }} tabIndex={-1}>
+                              <svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round"><polyline points="6 9 12 15 18 9"/></svg>
+                            </button>
+                          </span>
+                        )}
+                        {/* Category badge */}
+                        <span className={`map-player-item-type map-player-item-type--${layer.categoryId}`}>
+                          {layer.categoryId === "hydrology" && (
+                            <svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2c-5.33 4.55-8 8.48-8 11.8C4 17.78 7.58 22 12 22s8-4.22 8-8.2C20 10.48 17.33 6.55 12 2z"/></svg>
+                          )}
+                          {layer.categoryId === "weather" && (
+                            <svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor"><path d="M6.76 4.84l-1.8-1.79-1.41 1.41 1.79 1.79 1.42-1.41zM4 10.5H1v2h3v-2zm9-9.95h-2V3.5h2V.55zm7.45 3.91l-1.41-1.41-1.79 1.79 1.41 1.41 1.79-1.79zM20 10.5v2h3v-2h-3zm-8-5c-3.31 0-6 2.69-6 6s2.69 6 6 6 6-2.69 6-6-2.69-6-6-6z"/></svg>
+                          )}
+                          {layer.categoryId === "flooding" && (
+                            <svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor"><path d="M1 21h22L12 2 1 21zm12-3h-2v-2h2v2zm0-4h-2v-4h2v4z"/></svg>
+                          )}
+                          {layer.categoryId === "baseline" && (
+                            <svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor"><path d="M20.5 3l-.16.03L15 5.1 9 3 3.36 4.9c-.21.07-.36.25-.36.48V20.5c0 .28.22.5.5.5l.16-.03L9 18.9l6 2.1 5.64-1.9c.21-.07.36-.25.36-.48V3.5c0-.28-.22-.5-.5-.5zM15 19l-6-2.11V5l6 2.11V19z"/></svg>
+                          )}
+                          {layer.categoryId === "ecology" && (
+                            <svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor"><path d="M17 8C8 10 5.9 16.17 3.82 21h1.3c2.12-4.2 4.87-8 11.88-10V8zm3-5c-3.86 0-7.15 2.33-8.72 5.71L13 10c1.33-2.73 4.05-4.62 7.22-4.96V3c0-.55-.45-1-1-1z"/></svg>
+                          )}
+                          {layer.categoryId === "landsat" && (
+                            <svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor"><path d="M21 3H3C2 3 1 4 1 5v14c0 1.1.9 2 2 2h18c1 0 2-1 2-2V5c0-1-1-2-2-2zm0 16H3V5h18v14zM5 15l3.5-4.5 2.5 3.01L14.5 9l4.5 6H5z"/></svg>
+                          )}
+                          {layer.categoryId === "admin" && (
+                            <svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor"><path d="M12 7V3H2v18h20V7H12zM6 19H4v-2h2v2zm0-4H4v-2h2v2zm0-4H4V9h2v2zm0-4H4V5h2v2zm4 12H8v-2h2v2zm0-4H8v-2h2v2zm0-4H8V9h2v2zm0-4H8V5h2v2zm10 12h-8v-2h2v-2h-2v-2h2v-2h-2V9h8v10z"/></svg>
+                          )}
+                          {layer.categoryId === "water-quality" && (
+                            <svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor"><path d="M19.14 12.94c.04-.3.06-.61.06-.94s-.02-.64-.07-.94l2.03-1.58c.18-.14.23-.41.12-.61l-1.92-3.32c-.12-.22-.37-.29-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54c-.04-.24-.24-.41-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.09.63-.09.94s.02.64.07.94l-2.03 1.58c-.18.14-.23.41-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z"/></svg>
+                          )}
+                          <span>{layer.categoryName}</span>
+                        </span>
 
-        {/* Add Player Button & Dropdown */}
-        <div className="map-player-control">
-          <button
-            className="map-add-layer-btn"
-            onClick={() => { setShowPlayerDropdown(!showPlayerDropdown); setPendingLayerId(null); }}
-            type="button"
-            title="Manage layers"
-          >
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-              <polygon points="12 2 2 7 12 12 22 7 12 2"/>
-              <polyline points="2 17 12 22 22 17"/>
-              <polyline points="2 12 12 17 22 12"/>
-            </svg>
-            <span>Add Layer</span>
-          </button>
+                        {/* Layer name */}
+                        <span className="map-player-item-name">{layer.name}</span>
 
-          {showPlayerDropdown && (
-            <div className="map-player-dropdown">
-              <div className="map-player-dropdown-title">Select Data Layer</div>
-              <div className="map-player-list">
-                {playerLayers.map((layer) => {
-                  const layerKey = getLayerKey(layer);
-                  return (
-                  <div
-                    key={layerKey}
-                    className={`map-player-item ${dragLayerId === layerKey ? "is-dragging" : ""}`}
-                    draggable
-                    onDragStart={() => setDragLayerId(layerKey)}
-                    onDragEnd={() => setDragLayerId(null)}
-                    onDragOver={(e) => e.preventDefault()}
-                    onDrop={(e) => {
-                      e.preventDefault();
-                      if (dragLayerId) reorderLayers(dragLayerId, layerKey);
+                        {/* Opacity slider — only when added */}
+                        {layer.added && (
+                          <input
+                            className="map-player-opacity-slider"
+                            type="range"
+                            min={0} max={1} step={0.05}
+                            value={layer.opacity ?? 0.7}
+                            title={`Opacity: ${Math.round((layer.opacity ?? 0.7) * 100)}%`}
+                            onClick={(e) => e.stopPropagation()}
+                            onChange={(e) => {
+                              const val = parseFloat(e.target.value);
+                              setPlayerLayers(prev => prev.map(l => getLayerKey(l) === layerKey ? { ...l, opacity: val } : l));
+                            }}
+                          />
+                        )}
+
+                        {/* Layer type badge */}
+                        {layer.type && (
+                          <span className="map-player-item-type-badge">{layer.type}</span>
+                        )}
+
+                        {/* Add / Added button */}
+                        {layer.added ? (
+                          <button
+                            className="map-player-item-tick is-added"
+                            title="Added - Click to remove"
+                            type="button"
+                            onClick={() => removeLayer(layerKey)}
+                          >
+                            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+                              <polyline points="20 6 9 17 4 12"/>
+                            </svg>
+                          </button>
+                        ) : (
+                          <button
+                            className={`map-player-item-tick ${pendingLayerId === layerKey ? "is-pending" : ""}`}
+                            title="Add layer"
+                            type="button"
+                            onClick={() => {
+                              if (layer.type) {
+                                // Already has type from sidebar — add directly
+                                confirmAddLayer(layerKey, layer.type as "raster" | "vector");
+                              } else {
+                                setPendingLayerId(pendingLayerId === layerKey ? null : layerKey);
+                              }
+                            }}
+                          >
+                            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+                              <line x1="12" y1="5" x2="12" y2="19"/>
+                              <line x1="5" y1="12" x2="19" y2="12"/>
+                            </svg>
+                          </button>
+                        )}
+
+                        {/* Inline type-picker popover */}
+                        {pendingLayerId === layerKey && (
+                          <div className="map-player-type-popover">
+                            <div className="map-player-type-popover-label">Select layer format:</div>
+                            <div className="map-player-type-popover-options">
+                              <button
+                                className="map-player-type-opt"
+                                type="button"
+                                onClick={() => confirmAddLayer(layerKey, "raster")}
+                              >
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><rect x="3" y="3" width="18" height="18"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="3" y1="15" x2="21" y2="15"/><line x1="9" y1="3" x2="9" y2="21"/><line x1="15" y1="3" x2="15" y2="21"/></svg>
+                                Raster
+                              </button>
+                              <button
+                                className="map-player-type-opt"
+                                type="button"
+                                onClick={() => confirmAddLayer(layerKey, "vector")}
+                              >
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="3,18 8,8 13,13 18,6"/><circle cx="3" cy="18" r="1.5" fill="currentColor"/><circle cx="8" cy="8" r="1.5" fill="currentColor"/><circle cx="13" cy="13" r="1.5" fill="currentColor"/><circle cx="18" cy="6" r="1.5" fill="currentColor"/></svg>
+                                Vector
+                              </button>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+
+                {/* Summary of added layers */}
+                {playerLayers.some(l => l.added) && (
+                  <div className="map-player-summary">
+                    <span>{playerLayers.filter(l => l.added).length} layers added</span>
+                    <button
+                      className="map-player-summary-clear"
+                      type="button"
+                      onClick={() => setPlayerLayers(prev => prev.map(l => ({ ...l, added: false })))}
+                    >Clear all</button>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+
+          {/* Top Control Bar (Timeline & Playback) */}
+          <div className="map-top-bar">
+            {showTimeline && (
+              <div 
+                className="map-timeline-container" 
+                data-unit-mode={timelineData.mode} 
+                title="Timeline control"
+                onMouseLeave={() => setHoverTime(null)}
+              >
+                {hoverTime && (
+                  <div 
+                    className="map-timeline-tooltip"
+                    style={{ 
+                      left: `${tooltipPos.x}px`, 
+                      top: `${tooltipPos.y}px`,
+                      position: 'absolute',
+                      zIndex: 100
                     }}
                   >
-                    {/* Drag handle */}
-                    <span className="map-player-drag-handle" title="Drag to reorder">
-                      <svg width="10" height="14" viewBox="0 0 10 16" fill="currentColor">
-                        <circle cx="3" cy="2" r="1.5"/><circle cx="7" cy="2" r="1.5"/>
-                        <circle cx="3" cy="6" r="1.5"/><circle cx="7" cy="6" r="1.5"/>
-                        <circle cx="3" cy="10" r="1.5"/><circle cx="7" cy="10" r="1.5"/>
-                        <circle cx="3" cy="14" r="1.5"/><circle cx="7" cy="14" r="1.5"/>
+                    {hoverTime}
+                  </div>
+                )}
+                <div className="map-timeline-header">
+                  <div className="map-timeline-unit-control">
+                    <button 
+                      className={`map-timeline-unit-toggle ${showUnitMenu ? 'is-active' : ''}`}
+                      onClick={() => setShowUnitMenu(!showUnitMenu)}
+                      title="Select timeline unit"
+                      type="button"
+                    >
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M4 21v-7"></path>
+                        <path d="M4 10V3"></path>
+                        <path d="M12 21v-9"></path>
+                        <path d="M12 8V3"></path>
+                        <path d="M20 21v-5"></path>
+                        <path d="M20 12V3"></path>
+                        <line x1="1" y1="14" x2="7" y2="14"></line>
+                        <line x1="9" y1="8" x2="15" y2="8"></line>
+                        <line x1="17" y1="16" x2="23" y2="16"></line>
                       </svg>
-                    </span>
-                    {/* Category badge */}
-                    <span className={`map-player-item-type map-player-item-type--${layer.categoryId}`}>
-                      {layer.categoryId === "hydrology" && (
-                        <svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2c-5.33 4.55-8 8.48-8 11.8C4 17.78 7.58 22 12 22s8-4.22 8-8.2C20 10.48 17.33 6.55 12 2z"/></svg>
-                      )}
-                      {layer.categoryId === "weather" && (
-                        <svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor"><path d="M6.76 4.84l-1.8-1.79-1.41 1.41 1.79 1.79 1.42-1.41zM4 10.5H1v2h3v-2zm9-9.95h-2V3.5h2V.55zm7.45 3.91l-1.41-1.41-1.79 1.79 1.41 1.41 1.79-1.79zM20 10.5v2h3v-2h-3zm-8-5c-3.31 0-6 2.69-6 6s2.69 6 6 6 6-2.69 6-6-2.69-6-6-6z"/></svg>
-                      )}
-                      {layer.categoryId === "flooding" && (
-                        <svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor"><path d="M1 21h22L12 2 1 21zm12-3h-2v-2h2v2zm0-4h-2v-4h2v4z"/></svg>
-                      )}
-                      {layer.categoryId === "baseline" && (
-                        <svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor"><path d="M20.5 3l-.16.03L15 5.1 9 3 3.36 4.9c-.21.07-.36.25-.36.48V20.5c0 .28.22.5.5.5l.16-.03L9 18.9l6 2.1 5.64-1.9c.21-.07.36-.25.36-.48V3.5c0-.28-.22-.5-.5-.5zM15 19l-6-2.11V5l6 2.11V19z"/></svg>
-                      )}
-                      {layer.categoryId === "ecology" && (
-                        <svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor"><path d="M17 8C8 10 5.9 16.17 3.82 21h1.3c2.12-4.2 4.87-8 11.88-10V8zm3-5c-3.86 0-7.15 2.33-8.72 5.71L13 10c1.33-2.73 4.05-4.62 7.22-4.96V3c0-.55-.45-1-1-1z"/></svg>
-                      )}
-                      {layer.categoryId === "landsat" && (
-                        <svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor"><path d="M21 3H3C2 3 1 4 1 5v14c0 1.1.9 2 2 2h18c1 0 2-1 2-2V5c0-1-1-2-2-2zm0 16H3V5h18v14zM5 15l3.5-4.5 2.5 3.01L14.5 9l4.5 6H5z"/></svg>
-                      )}
-                      {layer.categoryId === "admin" && (
-                        <svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor"><path d="M12 7V3H2v18h20V7H12zM6 19H4v-2h2v2zm0-4H4v-2h2v2zm0-4H4V9h2v2zm0-4H4V5h2v2zm4 12H8v-2h2v2zm0-4H8v-2h2v2zm0-4H8V9h2v2zm0-4H8V5h2v2zm10 12h-8v-2h2v-2h-2v-2h2v-2h-2V9h8v10z"/></svg>
-                      )}
-                      {layer.categoryId === "water-quality" && (
-                        <svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor"><path d="M19.14 12.94c.04-.3.06-.61.06-.94s-.02-.64-.07-.94l2.03-1.58c.18-.14.23-.41.12-.61l-1.92-3.32c-.12-.22-.37-.29-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54c-.04-.24-.24-.41-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.09.63-.09.94s.02.64.07.94l-2.03 1.58c-.18.14-.23.41-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z"/></svg>
-                      )}
-                      <span>{layer.categoryName}</span>
-                    </span>
+                      <span className="unit-label-current">{timelineUnitOptions.find(o => o.value === timelineUnitMode)?.label}</span>
+                    </button>
 
-                    {/* Layer name */}
-                    <span className="map-player-item-name">{layer.name}</span>
-
-                    {/* Opacity slider — only when added */}
-                    {layer.added && (
-                      <input
-                        className="map-player-opacity-slider"
-                        type="range"
-                        min={0} max={1} step={0.05}
-                        value={layer.opacity ?? 0.7}
-                        title={`Opacity: ${Math.round((layer.opacity ?? 0.7) * 100)}%`}
-                        onClick={(e) => e.stopPropagation()}
-                        onChange={(e) => {
-                          const val = parseFloat(e.target.value);
-                          setPlayerLayers(prev => prev.map(l => getLayerKey(l) === layerKey ? { ...l, opacity: val } : l));
-                        }}
-                      />
-                    )}
-
-                    {/* Layer type badge */}
-                    {layer.type && (
-                      <span className="map-player-item-type-badge">{layer.type}</span>
-                    )}
-
-                    {/* Add / Added button */}
-                    {layer.added ? (
-                      <button
-                        className="map-player-item-tick is-added"
-                        title="Added - Click to remove"
-                        type="button"
-                        onClick={() => removeLayer(layerKey)}
-                      >
-                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
-                          <polyline points="20 6 9 17 4 12"/>
-                        </svg>
-                      </button>
-                    ) : (
-                      <button
-                        className={`map-player-item-tick ${pendingLayerId === layerKey ? "is-pending" : ""}`}
-                        title="Add layer"
-                        type="button"
-                        onClick={() => {
-                          if (layer.type) {
-                            // Already has type from sidebar — add directly
-                            confirmAddLayer(layerKey, layer.type as "raster" | "vector");
-                          } else {
-                            setPendingLayerId(pendingLayerId === layerKey ? null : layerKey);
-                          }
-                        }}
-                      >
-                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
-                          <line x1="12" y1="5" x2="12" y2="19"/>
-                          <line x1="5" y1="12" x2="19" y2="12"/>
-                        </svg>
-                      </button>
-                    )}
-
-                    {/* Inline type-picker popover */}
-                    {pendingLayerId === layerKey && (
-                      <div className="map-player-type-popover">
-                        <div className="map-player-type-popover-label">Select layer format:</div>
-                        <div className="map-player-type-popover-options">
+                    {showUnitMenu && (
+                      <div className="map-timeline-unit-dropdown">
+                        {timelineUnitOptions.map((option) => (
                           <button
-                            className="map-player-type-opt"
+                            key={option.value}
+                            className={`map-timeline-unit-option ${timelineUnitMode === option.value ? "is-active" : ""}`}
+                            onClick={() => {
+                              setTimelineUnitMode(option.value);
+                              setShowUnitMenu(false);
+                            }}
                             type="button"
-                            onClick={() => confirmAddLayer(layerKey, "raster")}
                           >
-                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><rect x="3" y="3" width="18" height="18"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="3" y1="15" x2="21" y2="15"/><line x1="9" y1="3" x2="9" y2="21"/><line x1="15" y1="3" x2="15" y2="21"/></svg>
-                            Raster
+                            {option.label}
                           </button>
-                          <button
-                            className="map-player-type-opt"
-                            type="button"
-                            onClick={() => confirmAddLayer(layerKey, "vector")}
-                          >
-                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="3,18 8,8 13,13 18,6"/><circle cx="3" cy="18" r="1.5" fill="currentColor"/><circle cx="8" cy="8" r="1.5" fill="currentColor"/><circle cx="13" cy="13" r="1.5" fill="currentColor"/><circle cx="18" cy="6" r="1.5" fill="currentColor"/></svg>
-                            Vector
-                          </button>
-                        </div>
+                        ))}
                       </div>
                     )}
                   </div>
-                );
-              })}
-              </div>
-
-              {/* Summary of added layers */}
-              {playerLayers.some(l => l.added) && (
-                <div className="map-player-summary">
-                  <span>{playerLayers.filter(l => l.added).length} layers added</span>
-                  <button
-                    className="map-player-summary-clear"
-                    type="button"
-                    onClick={() => setPlayerLayers(prev => prev.map(l => ({ ...l, added: false })))}
-                  >Clear all</button>
                 </div>
+                
+                <div 
+                  ref={scrollerRef}
+                  className="map-timeline-scroller" 
+                  onClick={(event) => event.stopPropagation()}
+                  onMouseMove={(e) => {
+                    const containerRect = e.currentTarget.parentElement?.getBoundingClientRect();
+                    if (!containerRect) return;
+
+                    const rect = e.currentTarget.getBoundingClientRect();
+                    const x = e.clientX - rect.left;
+                    const ratio = Math.max(0, Math.min(1, x / rect.width));
+                    const index = Math.round(ratio * (timelineUnits.length - 1));
+                    const unit = timelineUnits[index];
+
+                    if (unit) {
+                      setHoverTime(unit.label);
+                      setHoverPos({
+                        x: e.clientX - containerRect.left,
+                        y: e.clientY - containerRect.top - 25,
+                      });
+                    }
+                  }}
+                >
+                  <div className="map-timeline-inner">
+                    <div className="map-timeline-track-wrap">
+                      <input
+                        className="map-timeline-slider"
+                        max={Math.max(0, timelineUnits.length - 1)}
+                        min="0"
+                        onChange={(event) => setTimelineIndex(Number(event.target.value))}
+                        style={{
+                          "--timeline-fill": `${(timelineIndex / Math.max(1, timelineUnits.length - 1)) * 100}%`,
+                        } as CSSProperties}
+                        type="range"
+                        value={timelineIndex}
+                      />
+                    </div>
+                    <div className="map-timeline-ticks">
+                      {timelineUnits.map((unit, index) => (
+                        <span
+                          key={unit.value}
+                          data-label={unit.label}
+                          data-major={unit.isMajor ? "true" : "false"}
+                          className={`map-timeline-tick ${index === timelineIndex ? "is-active" : ""}`}
+                        />
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Time-Lapse Button & Dropdown Control */}
+            <div className="map-playback-control">
+              <button
+                className="map-playback-btn"
+                onClick={handleOpenPlayback}
+                type="button"
+                title="Time-lapse map animation"
+              >
+                <Play size={14} fill="currentColor" />
+                <span>Time-Lapse</span>
+              </button>
+
+              {showPlaybackPicker && (
+                <>
+                  <div className="pb-picker-backdrop" onClick={() => setShowPlaybackPicker(false)} />
+                  <div className={`pb-picker-panel ${isMobile ? 'pb-picker-panel--mobile' : ''}`}>
+                    <div className="pb-picker-header">
+                      <div className="pb-picker-title">
+                        <Clock size={16} />
+                        Set Time-Lapse Period
+                      </div>
+                      <button className="pb-picker-close" onClick={() => setShowPlaybackPicker(false)} type="button">×</button>
+                    </div>
+
+                    <div className="pb-picker-body">
+                      <div className="pb-field">
+                        <label className="pb-label">Start Date</label>
+                        <input
+                          className="pb-input"
+                          type="date"
+                          value={pbStartDate}
+                          onChange={e => { setPbStartDate(e.target.value); setPbError(""); }}
+                        />
+                      </div>
+                      <div className="pb-field">
+                        <label className="pb-label">End Date</label>
+                        <input
+                          className="pb-input"
+                          type="date"
+                          value={pbEndDate}
+                          onChange={e => { setPbEndDate(e.target.value); setPbError(""); }}
+                        />
+                      </div>
+                      {pbError && <div className="pb-error">{pbError}</div>}
+                    </div>
+
+                    <div className="pb-picker-footer">
+                      <button className="pb-btn-cancel" onClick={() => setShowPlaybackPicker(false)} type="button">Cancel</button>
+                      {isPreparing ? (
+                        <div className="pb-preparing">
+                          <div className="pb-prepare-label">
+                            Loading {prepareProgress.current}/{prepareProgress.total}...
+                          </div>
+                          <div className="pb-prepare-track">
+                            <div className="pb-prepare-fill" style={{ width: `${(prepareProgress.current / Math.max(1, prepareProgress.total)) * 100}%` }} />
+                          </div>
+                        </div>
+                      ) : (
+                        <button className="pb-btn-play" onClick={handleStartPlayback} type="button" disabled={isPreparing}>
+                          <Play size={14} fill="currentColor" />
+                          {isReady ? 'Ready' : 'Play'}
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                </>
               )}
             </div>
-          )}
+          </div>
+
+          {/* Base Layer Switcher */}
+          <div className="map-layer-switcher">
+            <button
+              className="map-layer-toggle"
+              onClick={() => setShowLayerMenu(!showLayerMenu)}
+              type="button"
+              title="Change base layer"
+            >
+              <Layers size={18} />
+            </button>
+
+            {showLayerMenu && (
+              <div className="map-layer-menu">
+                <div className="map-layer-switcher-title">Base Layers</div>
+                {(Object.keys(baseLayers) as BaseLayerType[]).map((layerKey) => (
+                  <label key={layerKey} className="map-layer-item">
+                    <input
+                      type="radio"
+                      name="baseLayer"
+                      checked={activeBaseLayer === layerKey}
+                      onChange={() => {
+                        setActiveBaseLayer(layerKey);
+                        setShowLayerMenu(false);
+                      }}
+                    />
+                    <span>{baseLayers[layerKey].name}</span>
+                  </label>
+                ))}
+              </div>
+            )}
+          </div>
         </div>
 
         {/* Zoom Controls */}
-        <div className="map-zoom-controls">
+        <div className={`map-zoom-controls ${isMobile ? 'map-zoom-controls--mobile' : ''}`}>
           <button
             className="map-zoom-btn"
             onClick={() => {
@@ -2138,199 +2483,6 @@ export function MapStage({ startDateTime, endDateTime, appliedDatasets, onRemove
           </button>
         </div>
 
-        {/* Top Control Bar (Timeline & Playback) */}
-        <div className="map-top-bar">
-          {showTimeline && (
-            <div 
-              className="map-timeline-container" 
-              data-unit-mode={timelineData.mode} 
-              title="Timeline control"
-              onMouseLeave={() => setHoverTime(null)}
-            >
-              {hoverTime && (
-                <div 
-                  className="map-timeline-tooltip"
-                  style={{ 
-                    left: `${tooltipPos.x}px`, 
-                    top: `${tooltipPos.y}px`,
-                    position: 'absolute',
-                    zIndex: 100
-                  }}
-                >
-                  {hoverTime}
-                </div>
-              )}
-              <div className="map-timeline-header">
-                <div className="map-timeline-unit-control">
-                  <button 
-                    className={`map-timeline-unit-toggle ${showUnitMenu ? 'is-active' : ''}`}
-                    onClick={() => setShowUnitMenu(!showUnitMenu)}
-                    title="Select timeline unit"
-                    type="button"
-                  >
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                      <path d="M4 21v-7"></path>
-                      <path d="M4 10V3"></path>
-                      <path d="M12 21v-9"></path>
-                      <path d="M12 8V3"></path>
-                      <path d="M20 21v-5"></path>
-                      <path d="M20 12V3"></path>
-                      <line x1="1" y1="14" x2="7" y2="14"></line>
-                      <line x1="9" y1="8" x2="15" y2="8"></line>
-                      <line x1="17" y1="16" x2="23" y2="16"></line>
-                    </svg>
-                    <span className="unit-label-current">{timelineUnitOptions.find(o => o.value === timelineUnitMode)?.label}</span>
-                  </button>
-
-                  {showUnitMenu && (
-                    <div className="map-timeline-unit-dropdown">
-                      {timelineUnitOptions.map((option) => (
-                        <button
-                          key={option.value}
-                          className={`map-timeline-unit-option ${timelineUnitMode === option.value ? "is-active" : ""}`}
-                          onClick={() => {
-                            setTimelineUnitMode(option.value);
-                            setShowUnitMenu(false);
-                          }}
-                          type="button"
-                        >
-                          {option.label}
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              </div>
-              
-              <div 
-                ref={scrollerRef}
-                className="map-timeline-scroller" 
-                onClick={(event) => event.stopPropagation()}
-                onMouseMove={(e) => {
-                  const containerRect = e.currentTarget.parentElement?.getBoundingClientRect();
-                  if (!containerRect) return;
-
-                  const rect = e.currentTarget.getBoundingClientRect();
-                  const x = e.clientX - rect.left;
-                  const ratio = Math.max(0, Math.min(1, x / rect.width));
-                  const index = Math.round(ratio * (timelineUnits.length - 1));
-                  const unit = timelineUnits[index];
-
-                  if (unit) {
-                    setHoverTime(unit.label);
-                    setHoverPos({
-                      x: e.clientX - containerRect.left,
-                      y: e.clientY - containerRect.top - 25,
-                    });
-                  }
-                }}
-              >
-                <div className="map-timeline-inner">
-                  <div className="map-timeline-track-wrap">
-                    <input
-                      className="map-timeline-slider"
-                      max={Math.max(0, timelineUnits.length - 1)}
-                      min="0"
-                      onChange={(event) => setTimelineIndex(Number(event.target.value))}
-                      style={{
-                        "--timeline-fill": `${(timelineIndex / Math.max(1, timelineUnits.length - 1)) * 100}%`,
-                      } as CSSProperties}
-                      type="range"
-                      value={timelineIndex}
-                    />
-                  </div>
-                  <div className="map-timeline-ticks">
-                    {timelineUnits.map((unit, index) => (
-                      <span
-                        key={unit.value}
-                        data-label={unit.label}
-                        data-major={unit.isMajor ? "true" : "false"}
-                        className={`map-timeline-tick ${index === timelineIndex ? "is-active" : ""}`}
-                      />
-                    ))}
-                  </div>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* Time-Lapse Button & Dropdown Control */}
-          <div className="map-playback-control">
-            <button
-              className="map-playback-btn"
-              onClick={handleOpenPlayback}
-              type="button"
-              title="Time-lapse map animation"
-            >
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
-                <path d="M8 5v14l11-7L8 5z"/>
-              </svg>
-              <span>Time-Lapse</span>
-            </button>
-
-            {showPlaybackPicker && (
-              <>
-                <div className="pb-picker-backdrop" onClick={() => setShowPlaybackPicker(false)} />
-                <div className="pb-picker-panel">
-                  <div className="pb-picker-header">
-                    <div className="pb-picker-title">
-                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                        <circle cx="12" cy="12" r="10"/>
-                        <polyline points="12 6 12 12 16 14"/>
-                      </svg>
-                      Set Time-Lapse Period
-                    </div>
-                    <button className="pb-picker-close" onClick={() => setShowPlaybackPicker(false)} type="button">×</button>
-                  </div>
-
-                  <div className="pb-picker-body">
-                    <div className="pb-field">
-                      <label className="pb-label">Start Date</label>
-                      <input
-                        className="pb-input"
-                        type="date"
-                        value={pbStartDate}
-                        onChange={e => { setPbStartDate(e.target.value); setPbError(""); }}
-                      />
-                    </div>
-                    <div className="pb-field">
-                      <label className="pb-label">End Date</label>
-                      <input
-                        className="pb-input"
-                        type="date"
-                        value={pbEndDate}
-                        onChange={e => { setPbEndDate(e.target.value); setPbError(""); }}
-                      />
-                    </div>
-                    {pbError && <div className="pb-error">{pbError}</div>}
-                  </div>
-
-                  <div className="pb-picker-footer">
-                    <button className="pb-btn-cancel" onClick={() => setShowPlaybackPicker(false)} type="button">Cancel</button>
-                    {isPreparing ? (
-                      <div className="pb-preparing">
-                        <div className="pb-prepare-label">
-                          Loading {prepareProgress.current}/{prepareProgress.total}...
-                        </div>
-                        <div className="pb-prepare-track">
-                          <div className="pb-prepare-fill" style={{ width: `${(prepareProgress.current / Math.max(1, prepareProgress.total)) * 100}%` }} />
-                        </div>
-                      </div>
-                    ) : (
-                      <button className="pb-btn-play" onClick={handleStartPlayback} type="button" disabled={isPreparing}>
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
-                          <path d="M8 5v14l11-7L8 5z"/>
-                        </svg>
-                        {isReady ? 'Ready' : 'Play'}
-                      </button>
-                    )}
-                  </div>
-                </div>
-              </>
-            )}
-          </div>
-        </div>
-
         {/* Timeline Player Controls */}
         {isTimelinePlaying && (
           <div className="map-player-controls">
@@ -2340,7 +2492,7 @@ export function MapStage({ startDateTime, endDateTime, appliedDatasets, onRemove
               type="button"
               title="Previous"
             >
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M15 18l-6-6 6-6v12z"/></svg>
+              <SkipBack size={14} fill="currentColor" />
             </button>
             <button
               className={`map-player-btn ${isTimelinePlaying ? 'is-active' : ''}`}
@@ -2349,9 +2501,9 @@ export function MapStage({ startDateTime, endDateTime, appliedDatasets, onRemove
               title={isTimelinePlaying ? 'Pause' : 'Play'}
             >
               {isTimelinePlaying ? (
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M6 4h4v16H6V4zm8 0h4v16h-4V4z"/></svg>
+                <Pause size={14} fill="currentColor" />
               ) : (
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7L8 5z"/></svg>
+                <Play size={14} fill="currentColor" />
               )}
             </button>
             <button
@@ -2360,7 +2512,7 @@ export function MapStage({ startDateTime, endDateTime, appliedDatasets, onRemove
               type="button"
               title="Next"
             >
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M9 18l6-6-6-6v12z"/></svg>
+              <SkipForward size={14} fill="currentColor" />
             </button>
             <span className="map-player-date">
               {timelineUnits[timelineIndex]?.label || ''}
@@ -2383,168 +2535,258 @@ export function MapStage({ startDateTime, endDateTime, appliedDatasets, onRemove
           const device = ecowittDevices.find((d) => d.id === popupDeviceId);
           if (!device) return null;
           return (
-            <EcowittStationPopup
-              device={device}
-              data={popupData}
-              loading={popupLoading}
-              error={popupError}
-              expanded={popupExpanded}
-              dateStr={popupDate}
-              onDateChange={setPopupDate}
-              onClose={() => setPopupDeviceId(null)}
-              onExpand={() => setPopupExpanded(true)}
-              onCollapse={() => setPopupExpanded(false)}
-            />
+            <div className={`ecowitt-popup-wrapper ${isMobile ? 'ecowitt-popup-wrapper--mobile' : ''}`}>
+              <EcowittStationPopup
+                device={device}
+                data={popupData}
+                loading={popupLoading}
+                error={popupError}
+                expanded={popupExpanded}
+                dateStr={popupDate}
+                onDateChange={setPopupDate}
+                onClose={() => setPopupDeviceId(null)}
+                onExpand={() => setPopupExpanded(true)}
+                onCollapse={() => setPopupExpanded(false)}
+              />
+            </div>
           );
         })()}
 
         {/* ---- Water Quality Station Popup ---- */}
         {selectedWqStation && (
-          <div style={{
-            position: 'absolute', top: '90px', right: '10px',
-            background: '#fff', borderRadius: '12px', zIndex: 1000,
-            boxShadow: '0 4px 24px rgba(0,0,0,0.18)', width: '680px', maxHeight: '85vh', overflowY: 'auto',
-            border: `2px solid ${selectedWqStation.stationType === 'groundwater' ? '#0d6efd' : '#198754'}`,
+          <div className={`map-station-popup ${isMobile ? 'map-station-popup--mobile' : ''}`} style={{
+            width: isMobile ? '100%' : (selectedWqStation.stationType === 'surface_water' ? '720px' : '420px'), 
+            background: '#ffffff', borderRadius: '16px',
+            boxShadow: '0 10px 25px -5px rgba(0,0,0,0.1), 0 8px 10px -6px rgba(0,0,0,0.1), 0 0 0 1px rgba(0,0,0,0.05)', 
+            border: '1px solid #e2e8f0',
           }}>
             {/* Header */}
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px 16px', borderBottom: '1px solid #eee' }}>
-              <strong style={{ fontSize: '0.95rem', color: '#1a1a2e' }}>
-                📍 {selectedWqStation.stationId || 'Trạm thủ công'} — {selectedWqStation.location}
-              </strong>
+            <div style={{ 
+              display: 'flex', justifyContent: 'space-between', alignItems: 'center', 
+              padding: '14px 16px', 
+              borderBottom: '1px solid #e2e8f0',
+              background: `linear-gradient(135deg, ${selectedWqStation.stationType === 'groundwater' ? 'rgba(13, 110, 253, 0.05)' : 'rgba(25, 135, 84, 0.05)'} 0%, #ffffff 100%)`
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', minWidth: 0 }}>
+                <MapPin size={18} color={selectedWqStation.stationType === 'groundwater' ? '#0d6efd' : '#198754'} style={{ flexShrink: 0 }} />
+                <div style={{ minWidth: 0 }}>
+                  <div style={{ fontSize: '0.9rem', fontWeight: '700', color: '#0f172a', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} title={selectedWqStation.location || ''}>
+                    {selectedWqStation.location || 'Trạm đo thủ công'}
+                  </div>
+                  <div style={{ fontSize: '0.72rem', color: '#64748b', fontWeight: '600' }}>
+                    Mã: {selectedWqStation.stationId || '—'}
+                  </div>
+                </div>
+              </div>
               <button onClick={() => setSelectedWqStation(null)}
-                style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#999', padding: '4px', fontSize: '1.1rem', lineHeight: 1 }}
-              >✕</button>
+                style={{ 
+                  background: '#f1f5f9', border: '1px solid #cbd5e1', cursor: 'pointer', color: '#475569', 
+                  width: '28px', height: '28px', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  transition: 'all 0.2s'
+                }}
+                onMouseEnter={e => { e.currentTarget.style.background = '#e2e8f0'; }}
+                onMouseLeave={e => { e.currentTarget.style.background = '#f1f5f9'; }}
+              >
+                <X size={14} />
+              </button>
             </div>
 
-            {/* Body: 2 columns (only for surface_water with images) */}
+            {/* Body */}
             {selectedWqStation.stationType === 'surface_water' ? (
-              <div style={{ display: 'flex', gap: '16px', padding: '12px 16px' }}>
-                {/* LEFT: Images */}
-                <div style={{ width: '240px', flexShrink: 0, display: 'flex', flexDirection: 'column', gap: '8px' }}>
+              <div className="map-station-popup-body-wrap">
+                {/* LEFT: Large Image Display */}
+                <div className="map-station-popup-left">
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: '#0f172a', marginBottom: '2px' }}>
+                    <Image size={14} color="#10b981" />
+                    <strong style={{ fontSize: '0.82rem' }}>Ảnh hiện trường</strong>
+                  </div>
+                  
                   {wqStationImages.length > 0 ? (
-                    wqStationImages.map((url, idx) => (
-                      <img key={idx} src={url} alt={`Ảnh ${idx + 1}`}
-                        onClick={() => setWqImagePreviewUrl(url)}
-                        style={{ width: '100%', borderRadius: '8px', border: '1px solid #ddd', cursor: 'zoom-in', display: 'block' }} />
-                    ))
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', maxHeight: '430px', overflowY: 'auto' }} className="custom-scrollbar">
+                      {wqStationImages.map((url, idx) => (
+                        <img 
+                          key={idx} 
+                          src={url} 
+                          alt={`Ảnh hiện trường ${idx + 1}`}
+                          onClick={() => setWqImagePreviewUrl(url)}
+                          style={{ 
+                            width: '100%', height: '200px', borderRadius: '10px', 
+                            border: '1px solid #cbd5e1', objectFit: 'cover', cursor: 'zoom-in',
+                            boxShadow: '0 4px 12px rgba(0,0,0,0.05)', display: 'block'
+                          }} 
+                        />
+                      ))}
+                    </div>
                   ) : (
-                    <div style={{
-                      width: '100%', height: '180px', borderRadius: '8px', border: '1px dashed #ddd',
-                      background: '#f8f9fa', display: 'flex', alignItems: 'center', justifyContent: 'center',
-                      color: '#ccc', fontSize: '0.85rem'
-                    }}>🖼️ Chưa có ảnh</div>
+                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '8px', height: '200px', borderRadius: '10px', border: '1px dashed #cbd5e1', background: '#f8fafc', color: '#94a3b8', fontSize: '0.8rem' }}>
+                      <Image size={24} />
+                      Chưa có ảnh hiện trường
+                    </div>
                   )}
                 </div>
 
-                {/* RIGHT: Station Info + Data */}
-                <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: '10px' }}>
-                  {/* Station Info */}
-                  <div style={{ fontSize: '0.82rem', color: '#555', display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                    <div><strong>Loại:</strong>{' '}
-                      <span style={{ display: 'inline-block', padding: '2px 8px', borderRadius: '4px', fontSize: '0.75rem', fontWeight: '700',
-                        background: 'rgba(25,135,84,0.12)', color: '#198754' }}>
+                {/* RIGHT: Station Details + Parameters */}
+                <div className="map-station-popup-right">
+                  {/* Info grid */}
+                  <div style={{ fontSize: '0.8rem', color: '#334155', display: 'flex', flexDirection: 'column', gap: '6px', background: '#f8fafc', padding: '10px 12px', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                      <span style={{ color: '#64748b', fontWeight: '500' }}>Loại nguồn nước:</span>
+                      <span style={{ 
+                        padding: '2px 8px', borderRadius: '4px', fontSize: '0.72rem', fontWeight: '700',
+                        background: 'rgba(25, 135, 84, 0.1)', color: '#198754'
+                      }}>
                         Nước mặt
                       </span>
                     </div>
-                    {selectedWqStation.hydroChar && <div><strong>Đặc tính thủy vực:</strong> {selectedWqStation.hydroChar}</div>}
-                    <div><strong>Tọa độ:</strong> X={selectedWqStation.x?.toFixed(4)}, Y={selectedWqStation.y?.toFixed(4)}</div>
-                  </div>
-                  {/* WQ Data Panel */}
-                  <div style={{ borderTop: '1px solid #eee', paddingTop: '8px' }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
-                      <strong style={{ fontSize: '0.82rem', color: '#1a1a2e' }}>📊 Dữ liệu quan trắc</strong>
-                      {wqSamplesLoading && <span style={{ fontSize: '0.72rem', color: '#999' }}>Đang tải...</span>}
+                    {selectedWqStation.hydroChar && (
+                      <div style={{ display: 'flex', justifyContent: 'space-between', gap: '10px' }}>
+                        <span style={{ color: '#64748b', fontWeight: '500', flexShrink: 0 }}>Đặc tính thủy vực:</span>
+                        <span style={{ fontWeight: '600', color: '#0f172a', textAlign: 'right' }}>{selectedWqStation.hydroChar}</span>
+                      </div>
+                    )}
+                    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                      <span style={{ color: '#64748b', fontWeight: '500' }}>Tọa độ (X, Y):</span>
+                      <span style={{ fontFamily: 'monospace', fontWeight: '600', color: '#0f172a' }}>
+                        {selectedWqStation.x?.toFixed(4)}, {selectedWqStation.y?.toFixed(4)}
+                      </span>
                     </div>
-                    {wqStationSamples.length > 0 && (<>
-                      <div style={{ display: 'flex', gap: '8px', alignItems: 'center', marginBottom: '8px' }}>
-                        <label style={{ fontSize: '0.75rem', color: '#666', fontWeight: 600 }}>Ngày:</label>
+                  </div>
+
+                  {/* Data parameters */}
+                  <div style={{ borderTop: '1px solid #e2e8f0', paddingTop: '10px' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: '#0f172a' }}>
+                        <Activity size={14} color="var(--accent)" />
+                        <strong style={{ fontSize: '0.82rem' }}>Dữ liệu quan trắc</strong>
+                      </div>
+                      {wqSamplesLoading && <span style={{ fontSize: '0.72rem', color: '#94a3b8' }}>Đang tải...</span>}
+                    </div>
+
+                    {wqStationSamples.length > 0 ? (
+                      <>
+                        <div style={{ display: 'flex', gap: '8px', alignItems: 'center', marginBottom: '10px' }}>
+                          <label style={{ fontSize: '0.78rem', color: '#475569', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '4px' }}>
+                            <Calendar size={13} /> Ngày lấy mẫu:
+                          </label>
+                          <select value={wqStationSampleDate} onChange={e => setWqStationSampleDate(e.target.value)}
+                            style={{ flex: 1, padding: '5px 8px', fontSize: '0.78rem', border: '1px solid #cbd5e1', borderRadius: '6px', background: '#f8fafc', color: '#0f172a', cursor: 'pointer', fontWeight: '600' }}>
+                            {wqStationSamples.map(s => (<option key={s.id} value={s.sampleDate}>{s.sampleDate}</option>))}
+                          </select>
+                        </div>
+
+                        {wqStationSample && wqStationSample.parameters && wqStationSample.parameters.length > 0 ? (
+                          <div style={{ overflowX: 'auto', borderRadius: '10px', border: '1px solid #e2e8f0', maxHeight: '180px', overflowY: 'auto' }} className="custom-scrollbar">
+                            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.78rem' }}>
+                              <thead>
+                                <tr style={{ background: '#f8fafc', position: 'sticky', top: 0, zIndex: 1, borderBottom: '1px solid #cbd5e1' }}>
+                                  {['Thông số', 'Đơn vị', 'Giá trị', 'Tiêu chuẩn'].map(h => (
+                                    <th key={h} style={{ padding: '6px 10px', textAlign: 'left', fontWeight: '700', color: '#475569' }}>{h}</th>
+                                  ))}
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {wqStationSample.parameters.map((p, idx) => (
+                                  <tr key={idx} style={{ borderBottom: idx === wqStationSample.parameters!.length - 1 ? 'none' : '1px solid #f1f5f9', background: idx % 2 === 0 ? '#ffffff' : '#fcfdfe' }}>
+                                    <td style={{ padding: '6px 10px', fontWeight: '600', color: '#0f172a' }}>{p.parameterName}</td>
+                                    <td style={{ padding: '6px 10px', color: '#475569' }}>{p.unit || '—'}</td>
+                                    <td style={{ padding: '6px 10px', fontFamily: '"JetBrains Mono",monospace', color: '#0f172a', fontWeight: '600' }}>{p.valueRaw || '—'}</td>
+                                    <td style={{ padding: '6px 10px', color: '#64748b', fontSize: '0.72rem' }}>{p.referenceStandard || '—'}</td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        ) : wqSamplesLoading ? null : (
+                          <p style={{ fontSize: '0.78rem', color: '#64748b', fontStyle: 'italic', margin: '4px 0' }}>Chưa tải được chi tiết dữ liệu.</p>
+                        )}
+                      </>
+                    ) : (
+                      !wqSamplesLoading && (
+                        <p style={{ fontSize: '0.78rem', color: '#64748b', fontStyle: 'italic', margin: '4px 0' }}>Chưa có dữ liệu quan trắc cho trạm này.</p>
+                      )
+                    )}
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <div style={{ padding: '16px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                {/* Info grid */}
+                <div style={{ fontSize: '0.8rem', color: '#334155', display: 'flex', flexDirection: 'column', gap: '6px', background: '#f8fafc', padding: '10px 12px', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                    <span style={{ color: '#64748b', fontWeight: '500' }}>Loại nguồn nước:</span>
+                    <span style={{ 
+                      padding: '2px 8px', borderRadius: '4px', fontSize: '0.72rem', fontWeight: '700',
+                      background: 'rgba(13, 110, 253, 0.1)', color: '#0d6efd'
+                    }}>
+                      Nước ngầm
+                    </span>
+                  </div>
+                  {selectedWqStation.hydroChar && (
+                    <div style={{ display: 'flex', justifyContent: 'space-between', gap: '10px' }}>
+                      <span style={{ color: '#64748b', fontWeight: '500', flexShrink: 0 }}>Đặc tính thủy vực:</span>
+                      <span style={{ fontWeight: '600', color: '#0f172a', textAlign: 'right' }}>{selectedWqStation.hydroChar}</span>
+                    </div>
+                  )}
+                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                    <span style={{ color: '#64748b', fontWeight: '500' }}>Tọa độ (X, Y):</span>
+                    <span style={{ fontFamily: 'monospace', fontWeight: '600', color: '#0f172a' }}>
+                      {selectedWqStation.x?.toFixed(4)}, {selectedWqStation.y?.toFixed(4)}
+                    </span>
+                  </div>
+                </div>
+
+                {/* Data parameters */}
+                <div style={{ borderTop: '1px solid #e2e8f0', paddingTop: '10px' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: '#0f172a' }}>
+                      <Activity size={14} color="var(--accent)" />
+                      <strong style={{ fontSize: '0.82rem' }}>Dữ liệu quan trắc</strong>
+                    </div>
+                    {wqSamplesLoading && <span style={{ fontSize: '0.72rem', color: '#94a3b8' }}>Đang tải...</span>}
+                  </div>
+
+                  {wqStationSamples.length > 0 ? (
+                    <>
+                      <div style={{ display: 'flex', gap: '8px', alignItems: 'center', marginBottom: '10px' }}>
+                        <label style={{ fontSize: '0.78rem', color: '#475569', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '4px' }}>
+                          <Calendar size={13} /> Ngày lấy mẫu:
+                        </label>
                         <select value={wqStationSampleDate} onChange={e => setWqStationSampleDate(e.target.value)}
-                          style={{ flex: 1, padding: '5px 8px', fontSize: '0.78rem', border: '1px solid #ddd', borderRadius: '6px', background: '#f8f9fa', cursor: 'pointer' }}>
+                          style={{ flex: 1, padding: '5px 8px', fontSize: '0.78rem', border: '1px solid #cbd5e1', borderRadius: '6px', background: '#f8fafc', color: '#0f172a', cursor: 'pointer', fontWeight: '600' }}>
                           {wqStationSamples.map(s => (<option key={s.id} value={s.sampleDate}>{s.sampleDate}</option>))}
                         </select>
                       </div>
+
                       {wqStationSample && wqStationSample.parameters && wqStationSample.parameters.length > 0 ? (
-                        <div style={{ overflowX: 'auto', borderRadius: '8px', border: '1px solid #eee', maxHeight: '250px', overflowY: 'auto' }}>
-                          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.73rem' }}>
-                            <thead><tr style={{ background: '#f2f2f2', position: 'sticky', top: 0, zIndex: 1 }}>
-                              {['Thông số', 'Đơn vị', 'Giá trị', 'Tiêu chuẩn'].map(h => (
-                                <th key={h} style={{ padding: '5px 8px', textAlign: 'left', fontWeight: '600', borderBottom: '1px solid #ddd', whiteSpace: 'nowrap' }}>{h}</th>
-                              ))}
-                            </tr></thead>
+                        <div style={{ overflowX: 'auto', borderRadius: '10px', border: '1px solid #e2e8f0', maxHeight: '180px', overflowY: 'auto' }} className="custom-scrollbar">
+                          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.78rem' }}>
+                            <thead>
+                              <tr style={{ background: '#f8fafc', position: 'sticky', top: 0, zIndex: 1, borderBottom: '1px solid #cbd5e1' }}>
+                                {['Thông số', 'Đơn vị', 'Giá trị', 'Tiêu chuẩn'].map(h => (
+                                  <th key={h} style={{ padding: '6px 10px', textAlign: 'left', fontWeight: '700', color: '#475569' }}>{h}</th>
+                                ))}
+                              </tr>
+                            </thead>
                             <tbody>
                               {wqStationSample.parameters.map((p, idx) => (
-                                <tr key={idx} style={{ borderBottom: '1px solid #eee' }}>
-                                  <td style={{ padding: '4px 8px', fontWeight: '600', color: '#333' }}>{p.parameterName}</td>
-                                  <td style={{ padding: '4px 8px', color: '#666' }}>{p.unit || '—'}</td>
-                                  <td style={{ padding: '4px 8px', fontFamily: 'monospace', color: '#333' }}>{p.valueRaw || '—'}</td>
-                                  <td style={{ padding: '4px 8px', color: '#666', fontSize: '0.7rem' }}>{p.referenceStandard || '—'}</td>
+                                <tr key={idx} style={{ borderBottom: idx === wqStationSample.parameters!.length - 1 ? 'none' : '1px solid #f1f5f9', background: idx % 2 === 0 ? '#ffffff' : '#fcfdfe' }}>
+                                  <td style={{ padding: '6px 10px', fontWeight: '600', color: '#0f172a' }}>{p.parameterName}</td>
+                                  <td style={{ padding: '6px 10px', color: '#475569' }}>{p.unit || '—'}</td>
+                                  <td style={{ padding: '6px 10px', fontFamily: '"JetBrains Mono",monospace', color: '#0f172a', fontWeight: '600' }}>{p.valueRaw || '—'}</td>
+                                  <td style={{ padding: '6px 10px', color: '#64748b', fontSize: '0.72rem' }}>{p.referenceStandard || '—'}</td>
                                 </tr>
                               ))}
                             </tbody>
                           </table>
                         </div>
                       ) : wqSamplesLoading ? null : (
-                        <p style={{ fontSize: '0.75rem', color: '#999', fontStyle: 'italic', margin: '4px 0' }}>Chưa tải được chi tiết dữ liệu.</p>
+                        <p style={{ fontSize: '0.78rem', color: '#64748b', fontStyle: 'italic', margin: '4px 0' }}>Chưa tải được chi tiết dữ liệu.</p>
                       )}
-                    </>)}
-                    {!wqSamplesLoading && wqStationSamples.length === 0 && (
-                      <p style={{ fontSize: '0.75rem', color: '#999', fontStyle: 'italic', margin: '4px 0' }}>Chưa có dữ liệu import cho trạm này.</p>
-                    )}
-                  </div>
-                </div>
-              </div>
-            ) : (
-              /* Groundwater: No images, full-width data */
-              <div style={{ padding: '12px 16px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
-                <div style={{ fontSize: '0.82rem', color: '#555', display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                  <div><strong>Loại:</strong>{' '}
-                    <span style={{ display: 'inline-block', padding: '2px 8px', borderRadius: '4px', fontSize: '0.75rem', fontWeight: '700',
-                      background: '#0d6efd18', color: '#0d6efd' }}>
-                      Nước ngầm
-                    </span>
-                  </div>
-                  {selectedWqStation.hydroChar && <div><strong>Đặc tính thủy vực:</strong> {selectedWqStation.hydroChar}</div>}
-                  <div><strong>Tọa độ:</strong> X={selectedWqStation.x?.toFixed(4)}, Y={selectedWqStation.y?.toFixed(4)}</div>
-                </div>
-                <div style={{ borderTop: '1px solid #eee', paddingTop: '8px' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
-                    <strong style={{ fontSize: '0.82rem', color: '#1a1a2e' }}>📊 Dữ liệu quan trắc</strong>
-                    {wqSamplesLoading && <span style={{ fontSize: '0.72rem', color: '#999' }}>Đang tải...</span>}
-                  </div>
-                  {wqStationSamples.length > 0 && (<>
-                    <div style={{ display: 'flex', gap: '8px', alignItems: 'center', marginBottom: '8px' }}>
-                      <label style={{ fontSize: '0.75rem', color: '#666', fontWeight: 600 }}>Ngày:</label>
-                      <select value={wqStationSampleDate} onChange={e => setWqStationSampleDate(e.target.value)}
-                        style={{ flex: 1, padding: '5px 8px', fontSize: '0.78rem', border: '1px solid #ddd', borderRadius: '6px', background: '#f8f9fa', cursor: 'pointer' }}>
-                        {wqStationSamples.map(s => (<option key={s.id} value={s.sampleDate}>{s.sampleDate}</option>))}
-                      </select>
-                    </div>
-                    {wqStationSample && wqStationSample.parameters && wqStationSample.parameters.length > 0 ? (
-                      <div style={{ overflowX: 'auto', borderRadius: '8px', border: '1px solid #eee', maxHeight: '250px', overflowY: 'auto' }}>
-                        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.73rem' }}>
-                          <thead><tr style={{ background: '#f2f2f2', position: 'sticky', top: 0, zIndex: 1 }}>
-                            {['Thông số', 'Đơn vị', 'Giá trị', 'Tiêu chuẩn'].map(h => (
-                              <th key={h} style={{ padding: '5px 8px', textAlign: 'left', fontWeight: '600', borderBottom: '1px solid #ddd', whiteSpace: 'nowrap' }}>{h}</th>
-                            ))}
-                          </tr></thead>
-                          <tbody>
-                            {wqStationSample.parameters.map((p, idx) => (
-                              <tr key={idx} style={{ borderBottom: '1px solid #eee' }}>
-                                <td style={{ padding: '4px 8px', fontWeight: '600', color: '#333' }}>{p.parameterName}</td>
-                                <td style={{ padding: '4px 8px', color: '#666' }}>{p.unit || '—'}</td>
-                                <td style={{ padding: '4px 8px', fontFamily: 'monospace', color: '#333' }}>{p.valueRaw || '—'}</td>
-                                <td style={{ padding: '4px 8px', color: '#666', fontSize: '0.7rem' }}>{p.referenceStandard || '—'}</td>
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
-                      </div>
-                    ) : wqSamplesLoading ? null : (
-                      <p style={{ fontSize: '0.75rem', color: '#999', fontStyle: 'italic', margin: '4px 0' }}>Chưa tải được chi tiết dữ liệu.</p>
-                    )}
-                  </>)}
-                  {!wqSamplesLoading && wqStationSamples.length === 0 && (
-                    <p style={{ fontSize: '0.75rem', color: '#999', fontStyle: 'italic', margin: '4px 0' }}>Chưa có dữ liệu import cho trạm này.</p>
+                    </>
+                  ) : (
+                    !wqSamplesLoading && (
+                      <p style={{ fontSize: '0.78rem', color: '#64748b', fontStyle: 'italic', margin: '4px 0' }}>Chưa có dữ liệu quan trắc cho trạm này.</p>
+                    )
                   )}
                 </div>
               </div>
@@ -2574,7 +2816,7 @@ export function MapStage({ startDateTime, endDateTime, appliedDatasets, onRemove
         )}
 
         {Object.keys(pixelValues).length > 0 && mouseCoords !== null && (
-          <div className="geo-map-inspector">
+          <div className={`geo-map-inspector ${isMobile ? 'geo-map-inspector--mobile' : ''}`}>
             <div className="geo-map-inspector-header">
               <div className="geo-map-inspector-indicator" />
               <span>Map Inspector</span>

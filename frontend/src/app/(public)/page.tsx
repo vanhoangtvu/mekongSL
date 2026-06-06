@@ -33,6 +33,15 @@ export default function PublicHomePage() {
   const [hasExplicitRange, setHasExplicitRange] = useState(false);
   const [appliedDatasets, setAppliedDatasets] = useState<Array<{ id: string; type: string }>>([]);
   const [wqStations, setWqStations] = useState<ManualStation[]>([]);
+  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+  const [isMobile, setIsMobile] = useState(false);
+
+  useEffect(() => {
+    const check = () => setIsMobile(window.innerWidth < 768);
+    check();
+    window.addEventListener('resize', check);
+    return () => window.removeEventListener('resize', check);
+  }, []);
 
   useEffect(() => {
     const hasWq = appliedDatasets.some(ds => ds.id === "wq-surface" || ds.id === "wq-ground");
@@ -66,8 +75,11 @@ export default function PublicHomePage() {
     localStorage.setItem('homePage:activeTab', activeTab);
   }, [activeTab]);
 
+  const toggleSidebar = () => setIsSidebarOpen(prev => !prev);
+
   const handleApplyDatasets = (datasets: Array<{ id: string; type: string }>) => {
     setAppliedDatasets(datasets);
+    if (isMobile) setIsSidebarOpen(false);
   };
 
   const handleRemoveDataset = (id: string, type: string) => {
@@ -82,26 +94,36 @@ export default function PublicHomePage() {
 
   return (
     <div className="app-container public-home">
-      <AppHeader />
+      <AppHeader onToggleSidebar={toggleSidebar} isSidebarOpen={isSidebarOpen} />
       
       <main className="app-main">
         <SearchTabs activeTab={activeTab} onTabChange={setActiveTab} />
         
-        <div className="app-content">
-          <ResizablePanel defaultWidth={360} minWidth={280} maxWidth={600} side="left">
+        <div className={`app-content ${isSidebarOpen ? 'sidebar-open' : ''}`}>
+          <ResizablePanel defaultWidth={360} minWidth={280} maxWidth={600} side="left" isMobile={isMobile} isSidebarOpen={isSidebarOpen}>
             <GeoSearchSidebar
               activeTab={activeTab}
-              onTabChange={setActiveTab}
+              onTabChange={(tab) => { setActiveTab(tab); if (isMobile) setIsSidebarOpen(false); }}
               startDateTime={startDateTime}
               endDateTime={endDateTime}
               onStartDateTimeChange={handleStartDateTimeChange}
               onEndDateTimeChange={handleEndDateTimeChange}
               onApply={handleApplyDatasets}
               appliedDatasets={appliedDatasets}
+              isMobile={isMobile}
+              isSidebarOpen={isSidebarOpen}
+              onClose={() => setIsSidebarOpen(false)}
             />
           </ResizablePanel>
           <div className="geo-panel">
-            <MapStage startDateTime={startDateTime} endDateTime={endDateTime} appliedDatasets={appliedDatasets} onRemoveDataset={handleRemoveDataset} onAddDataset={handleAddDataset} hasExplicitRange={hasExplicitRange} onStartDateTimeChange={handleStartDateTimeChange} onEndDateTimeChange={handleEndDateTimeChange} waterQualityStations={wqStations} />
+            <MapStage startDateTime={startDateTime} endDateTime={endDateTime} appliedDatasets={appliedDatasets} onRemoveDataset={handleRemoveDataset} onAddDataset={handleAddDataset} hasExplicitRange={hasExplicitRange} onStartDateTimeChange={handleStartDateTimeChange} onEndDateTimeChange={handleEndDateTimeChange} waterQualityStations={wqStations} isMobile={isMobile} />
+            {isMobile && !isSidebarOpen && (
+              <button className="map-mobile-menu-btn" onClick={toggleSidebar} type="button" aria-label="Open menu">
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                  <line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/>
+                </svg>
+              </button>
+            )}
           </div>
         </div>
       </main>
