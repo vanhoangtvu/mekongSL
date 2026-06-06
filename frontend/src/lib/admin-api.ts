@@ -169,7 +169,8 @@ export async function registerLayerObject(layerId: number, s3Key: string, sizeBy
 }
 
 export async function listS3Files(prefix = '') {
-  const url = new URL(getBackendAdminUrl('/s3/list'));
+  // Use Next.js API route to bypass auth for public GIS data
+  const url = new URL('/api/s3-list', window.location.origin);
   if (prefix) {
     url.searchParams.set('prefix', prefix);
   }

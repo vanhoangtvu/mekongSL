@@ -132,8 +132,9 @@ export function useSingleLayer(
           const bestDate = lte[lte.length - 1];
           const tifsForDate = allTifs.filter(f => dateOf(f.key ?? "") === bestDate);
 
-          // Exact slot match
-          let pickedTif = tifsForDate.find(f => f.key?.includes(`/${timeSlot ?? "00-00"}/`));
+          // Match slot pattern: /HH-MM/ hoặc /HH-MM/raster/
+          const slotPattern = (slot: string) => new RegExp(`\\/${slot.replace('-', '-')}\\/(raster\\/)?[^/]+\\.tiff?$`, 'i');
+          let pickedTif = tifsForDate.find(f => slotPattern(timeSlot ?? "00-00").test(f.key ?? ""));
 
           if (!pickedTif) {
             if (isFirstApply) {

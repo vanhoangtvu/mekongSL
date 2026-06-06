@@ -59,7 +59,7 @@ export function AppHeader({ onToggleSidebar, isSidebarOpen }: AppHeaderProps) {
               </button>
             </>
           ) : (
-            <Link href="/auth">Đăng nhập</Link>
+            <Link href="/auth">Login</Link>
           )}
         </nav>
       </div>

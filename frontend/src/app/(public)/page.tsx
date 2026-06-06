@@ -115,7 +115,7 @@ export default function PublicHomePage() {
           <ResizablePanel defaultWidth={360} minWidth={280} maxWidth={600} side="left" isMobile={isMobile} isSidebarOpen={isSidebarOpen}>
             <GeoSearchSidebar
               activeTab={activeTab}
-              onTabChange={(tab) => { setActiveTab(tab); if (isMobile) setIsSidebarOpen(false); }}
+              onTabChange={(tab) => { setActiveTab(tab); }}
               onApply={handleApplyDatasets}
               appliedDatasets={appliedDatasets}
               isMobile={isMobile}

@@ -90,12 +90,24 @@ public class S3Controller {
     }
     
     /**
-     * List files in S3 (All authenticated users)
+     * List files in S3
+     * Public access allowed for gis-data/ prefix (used by map viewer).
+     * Authentication required for other prefixes.
      */
     @GetMapping("/list")
-    @PreAuthorize("isAuthenticated()")
     public ResponseEntity<Map<String, Object>> listFiles(@RequestParam(required = false, defaultValue = "") String prefix) {
         try {
+            // Public access only for gis-data/ prefix
+            if (!prefix.startsWith("gis-data/")) {
+                // For non-gis-data prefixes, require authentication
+                org.springframework.security.core.Authentication auth = 
+                    org.springframework.security.core.context.SecurityContextHolder.getContext().getAuthentication();
+                if (auth == null || !auth.isAuthenticated() || 
+                    auth instanceof org.springframework.security.authentication.AnonymousAuthenticationToken) {
+                    return ResponseEntity.status(403).body(Map.of("error", "Authentication required for this prefix"));
+                }
+            }
+            
             var files = s3Service.listFiles(prefix);
             
             Map<String, Object> response = new HashMap<>();

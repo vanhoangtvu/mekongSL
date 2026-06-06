@@ -473,6 +473,23 @@ select {
   color: #ffffff;
 }
 
+.footer-show-more {
+  background: none;
+  border: 1px solid rgba(255,255,255,0.3);
+  color: #e8f0fe;
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 0.15rem 0.6rem;
+  border-radius: 4px;
+  transition: all 120ms ease;
+}
+
+.footer-show-more:hover {
+  background: rgba(255,255,255,0.1);
+  color: #ffffff;
+}
+
 @media (max-width: 960px) {
   .app-header-content {
     padding: 0.5rem 1.25rem;
@@ -3575,7 +3592,15 @@ html[data-theme="dark"] .map-playback-btn:hover {
   }
 
   .app-slogan {
-    display: none;
+    display: block;
+    font-size: 0.55rem;
+    margin: 0;
+    color: rgba(255,255,255,0.7);
+    line-height: 1.2;
+  }
+
+  .app-brand {
+    gap: 1px;
   }
 
   .app-logo img {
@@ -3647,16 +3672,17 @@ html[data-theme="dark"] .map-playback-btn:hover {
   .map-player-dropdown {
     position: fixed !important;
     top: auto !important;
-    left: 0 !important;
-    right: 0 !important;
-    bottom: 0 !important;
-    width: 100% !important;
-    max-height: 65vh;
-    border-radius: 16px 16px 0 0 !important;
-    box-shadow: 0 -8px 32px rgba(0, 0, 0, 0.2) !important;
-    padding: 0.5rem 0.75rem 1rem !important;
+    left: 12px !important;
+    right: 12px !important;
+    bottom: 12px !important;
+    width: auto !important;
+    max-width: min(calc(100vw - 24px), 480px) !important;
+    max-height: 60vh;
+    border-radius: 16px !important;
+    box-shadow: 0 4px 24px rgba(0, 0, 0, 0.15) !important;
+    padding: 0.75rem !important;
     animation: slideUp 250ms ease;
-    z-index: 800 !important;
+    z-index: 10000 !important;
   }
 
   .map-player-dropdown-handle {
@@ -3715,7 +3741,7 @@ html[data-theme="dark"] .map-playback-btn:hover {
     bottom: 12px !important;
     width: auto !important;
     max-width: min(calc(100vw - 24px), 480px) !important;
-    max-height: 65vh !important;
+    max-height: 62vh !important;
     border-radius: 16px !important;
     z-index: 10000 !important;
     display: flex !important;
@@ -4053,31 +4079,36 @@ html[data-theme="dark"] .map-playback-btn:hover {
     font-size: 0.5rem;
   }
 
-  /* ── Footer compact, luôn ở bottom ── */
+  /* ── Footer mỏng ── */
   .app-footer {
-    padding: 0.2rem 0.5rem;
-    border-top-width: 2px;
+    padding: 2px 0.3rem;
+    border-top: none;
     flex-shrink: 0;
   }
 
   .app-footer-content {
-    gap: 0.15rem;
+    flex-direction: column;
+    gap: 0.02rem;
   }
 
   .app-footer-links {
-    gap: 0.25rem 0.5rem;
+    flex-direction: row;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 0.08rem 0.35rem;
   }
 
   .app-footer-links a {
-    font-size: 0.6rem;
-  }
-
-  .app-footer-links a:nth-child(n+4) {
-    display: none;
+    font-size: 0.5rem;
   }
 
   .app-footer-copyright {
-    font-size: 0.55rem;
+    font-size: 0.45rem;
+  }
+
+  .footer-show-more {
+    font-size: 0.5rem;
+    padding: 0.05rem 0.4rem;
   }
 
   /* ── Prevent body scroll when sidebar/popup open ── */

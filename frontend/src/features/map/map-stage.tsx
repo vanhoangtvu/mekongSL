@@ -43,12 +43,12 @@ interface EcowittPopupSensorData {
 type EcowittPopupSensorKey = keyof Omit<EcowittPopupSensorData, "time">;
 
 const ECOWITT_POPUP_SENSORS: { key: EcowittPopupSensorKey; label: string; unit: string; color: string }[] = [
-  { key: "tempf", label: "Nhiệt độ", unit: "°F", color: "#ff6b6b" },
-  { key: "humidity", label: "Độ ẩm", unit: "%", color: "#4ecdc4" },
-  { key: "wind_speed", label: "Tốc độ gió", unit: "mph", color: "#45b7d1" },
-  { key: "rain_daily", label: "Mưa ngày", unit: "in", color: "#6c5ce7" },
-  { key: "pressure_rel", label: "Áp suất", unit: "inHg", color: "#ffd93d" },
-  { key: "solar_radiation", label: "Bức xạ MT", unit: "W/m²", color: "#ff8a5c" },
+  { key: "tempf", label: "Temperature", unit: "°F", color: "#ff6b6b" },
+  { key: "humidity", label: "Humidity", unit: "%", color: "#4ecdc4" },
+  { key: "wind_speed", label: "Wind Speed", unit: "mph", color: "#45b7d1" },
+  { key: "rain_daily", label: "Daily Rain", unit: "in", color: "#6c5ce7" },
+  { key: "pressure_rel", label: "Pressure", unit: "inHg", color: "#ffd93d" },
+  { key: "solar_radiation", label: "Solar Rad.", unit: "W/m²", color: "#ff8a5c" },
   { key: "uv", label: "UV Index", unit: "", color: "#ea8685" },
 ];
 
@@ -561,8 +561,8 @@ function EcowittStationPopup({
         right: isMobile ? "12px" : "12px",
         left: isMobile ? "12px" : undefined,
         width: isMobile ? "auto" : popupW,
-        maxWidth: isMobile ? "min(calc(100vw - 24px), 380px)" : "calc(100vw - 24px)",
-        maxHeight: isMobile ? (expanded ? "55vh" : "40vh") : undefined,
+        maxWidth: isMobile ? "min(calc(100vw - 24px), 480px)" : "calc(100vw - 24px)",
+        maxHeight: isMobile ? "62vh" : undefined,
         background: isMobile ? "rgba(255,255,255,0.92)" : "#fff",
         backdropFilter: isMobile ? "blur(16px)" : undefined,
         WebkitBackdropFilter: isMobile ? "blur(16px)" : undefined,
@@ -583,63 +583,41 @@ function EcowittStationPopup({
       {/* ── Header ── */}
       <div
         style={{
-          background: "linear-gradient(135deg, #0d6efd 0%, #0dcaf0 100%)",
-          color: "#fff",
-          padding: isMobile ? "8px 14px 8px" : "10px 12px 9px",
+          display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+          padding: isMobile ? "10px 14px" : "14px 16px",
+          borderBottom: "1px solid #e2e8f0",
+          background: "linear-gradient(135deg, rgba(13,110,253,0.05) 0%, #ffffff 100%)",
           position: "relative",
           flexShrink: 0,
         }}
       >
-        <div
-          style={{
-            fontSize: isMobile ? "0.7rem" : "0.6rem",
-            opacity: 0.78,
-            fontWeight: "600",
-            letterSpacing: "0.05em",
-            textTransform: "uppercase",
-          }}
-        >
-          Trạm Ecowitt · {device.id}
-        </div>
-        <div
-          style={{
-            fontSize: isMobile ? "1rem" : "0.9rem",
-            fontWeight: "700",
-            lineHeight: 1.25,
-            paddingRight: "32px",
-            marginTop: "2px",
-          }}
-        >
-          {device.name}
-        </div>
-        {device.lat != null && (
-          <div style={{ fontSize: isMobile ? "0.7rem" : "0.63rem", opacity: 0.72, marginTop: "2px" }}>
-            {device.lat.toFixed(4)}°N, {device.lng?.toFixed(4)}°E
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', minWidth: 0 }}>
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#0d6efd" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
+            <circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/>
+          </svg>
+          <div style={{ minWidth: 0 }}>
+            <div style={{ fontSize: isMobile ? "0.7rem" : "0.65rem", color: '#64748b', fontWeight: '600' }}>
+              Weather Station · {device.id}
+            </div>
+            <div style={{ fontSize: isMobile ? "0.9rem" : "0.9rem", fontWeight: "700", color: '#0f172a', lineHeight: 1.25, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} title={device.name}>
+              {device.name}
+            </div>
+            {device.lat != null && (
+              <div style={{ fontSize: isMobile ? "0.65rem" : "0.63rem", color: '#94a3b8', marginTop: "1px" }}>
+                {device.lat.toFixed(4)}°N, {device.lng?.toFixed(4)}°E
+              </div>
+            )}
           </div>
-        )}
+        </div>
         <button
           type="button"
           onClick={onClose}
           style={{
-            position: "absolute",
-            top: isMobile ? "10px" : "8px",
-            right: isMobile ? "10px" : "8px",
-            background: "rgba(255,255,255,0.2)",
-            border: "none",
-            color: "#fff",
-            width: isMobile ? "32px" : "20px",
-            height: isMobile ? "32px" : "20px",
-            borderRadius: "50%",
-            cursor: "pointer",
-            fontSize: isMobile ? "1.3rem" : "0.95rem",
-            lineHeight: isMobile ? "32px" : "20px",
-            textAlign: "center",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            padding: 0,
+            background: '#f1f5f9', border: '1px solid #cbd5e1', cursor: 'pointer', color: '#475569',
+            width: isMobile ? "36px" : "28px", height: isMobile ? "36px" : "28px", borderRadius: "50%",
+            display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
           }}
-          title="Đóng"
+          title="Close"
         >
           ×
         </button>
@@ -722,7 +700,7 @@ function EcowittStationPopup({
               fontSize: "0.82rem",
             }}
           >
-            Đang tải dữ liệu...
+            Loading data...
           </div>
         )}
 
@@ -813,7 +791,7 @@ function EcowittStationPopup({
                     fontSize: "0.8rem",
                   }}
                 >
-                  Không có dữ liệu hôm nay
+                  No data available today
                 </div>
               )
             )}
@@ -840,7 +818,7 @@ function EcowittStationPopup({
                 minHeight: isMobile ? "44px" : undefined,
               }}
             >
-              Xem chi tiết
+              View Details
               <svg
                 width={isMobile ? 14 : 11}
                 height={isMobile ? 14 : 11}
@@ -894,7 +872,7 @@ function EcowittStationPopup({
               >
                 <polyline points="18 15 12 9 6 15" />
               </svg>
-              Thu gọn
+              Collapse
             </button>
 
             {/* Latest values table */}
@@ -910,7 +888,7 @@ function EcowittStationPopup({
                     marginBottom: "6px",
                   }}
                 >
-                  Thông số mới nhất
+                  Latest Readings
                 </div>
                 <div
                   style={{
@@ -983,7 +961,7 @@ function EcowittStationPopup({
                     marginBottom: "8px",
                   }}
                 >
-                  Biểu đồ trong ngày
+                  Today's Chart
                 </div>
                 {ECOWITT_POPUP_SENSORS.map((sensor) => (
                   <div key={sensor.key} style={{ marginBottom: "10px" }}>
@@ -1056,7 +1034,7 @@ function EcowittStationPopup({
                   fontSize: "0.8rem",
                 }}
               >
-                Không có dữ liệu hôm nay
+                No data available today
               </div>
             )}
           </div>
@@ -1664,10 +1642,14 @@ export const MapStage = React.memo(function MapStage({ startDateTime, endDateTim
           });
           return;
         }
-        // Clicking on an Ecowitt marker also works
+        // Ecowitt marker: open popup on click (mobile) / hover (desktop)
         const devId = feature.get("deviceId") as string | undefined;
-        if (devId) return; // popup already shown by hover
+        if (devId) {
+          setPopupDeviceId((prev) => (prev === devId ? null : devId));
+          return;
+        }
       }
+      setPopupDeviceId(null);
       setSelectedWqStation(null);
     });
 
@@ -2054,7 +2036,7 @@ export const MapStage = React.memo(function MapStage({ startDateTime, endDateTim
       .then((res) => res.json() as Promise<{ data?: Record<string, unknown>; error?: string }>)
       .then((result) => {
         if (!isActive) return;
-        if (!result.data?.times) throw new Error("Không có dữ liệu từ Ecowitt");
+        if (!result.data?.times) throw new Error("No data from Ecowitt");
         const parsed = parseEcowittPopupData(result.data);
         const valid = parsed.filter((d) =>
           Object.entries(d).some(([k, v]) => k !== "time" && v !== undefined && !Number.isNaN(Number(v)) && Number(v) !== 0)
@@ -2662,10 +2644,10 @@ export const MapStage = React.memo(function MapStage({ startDateTime, endDateTim
                 <MapPin size={18} color={selectedWqStation.stationType === 'groundwater' ? '#0d6efd' : '#198754'} style={{ flexShrink: 0 }} />
                 <div style={{ minWidth: 0 }}>
                   <div style={{ fontSize: '0.9rem', fontWeight: '700', color: '#0f172a', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} title={selectedWqStation.location || ''}>
-                    {selectedWqStation.location || 'Trạm đo thủ công'}
+                    {selectedWqStation.location || 'Manual Station'}
                   </div>
                   <div style={{ fontSize: '0.72rem', color: '#64748b', fontWeight: '600' }}>
-                    Mã: {selectedWqStation.stationId || '—'}
+                    ID: {selectedWqStation.stationId || '—'}
                   </div>
                 </div>
               </div>
@@ -2689,21 +2671,21 @@ export const MapStage = React.memo(function MapStage({ startDateTime, endDateTim
                 <div className="map-station-popup-left">
                   <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: '#0f172a', marginBottom: '2px' }}>
                     <Image size={14} color="#10b981" />
-                    <strong style={{ fontSize: '0.82rem' }}>Ảnh hiện trường</strong>
+                    <strong style={{ fontSize: '0.82rem' }}>Field Photos</strong>
                   </div>
                   
                   {wqStationImages.length > 0 ? (
                     isMobile ? (
                       <div style={{ display: 'flex', flexDirection: 'row', gap: '6px', overflowX: 'auto', overflowY: 'hidden', paddingBottom: '4px', WebkitOverflowScrolling: 'touch' }} className="custom-scrollbar">
                         {wqStationImages.map((url, idx) => (
-                          <img key={idx} src={url} alt={`Ảnh hiện trường ${idx + 1}`} onClick={() => setWqImagePreviewUrl(url)}
+                          <img key={idx} src={url} alt={`Field photo ${idx + 1}`} onClick={() => setWqImagePreviewUrl(url)}
                             style={{ width: '100px', height: '72px', borderRadius: '8px', border: '1px solid #cbd5e1', objectFit: 'cover', cursor: 'zoom-in', boxShadow: '0 2px 8px rgba(0,0,0,0.08)', display: 'block', flexShrink: 0 }} />
                         ))}
                       </div>
                     ) : (
                       <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', maxHeight: '430px', overflowY: 'auto' }} className="custom-scrollbar">
                         {wqStationImages.map((url, idx) => (
-                          <img key={idx} src={url} alt={`Ảnh hiện trường ${idx + 1}`} onClick={() => setWqImagePreviewUrl(url)}
+                          <img key={idx} src={url} alt={`Field photo ${idx + 1}`} onClick={() => setWqImagePreviewUrl(url)}
                             style={{ width: '100%', height: '200px', borderRadius: '10px', border: '1px solid #cbd5e1', objectFit: 'cover', cursor: 'zoom-in', boxShadow: '0 4px 12px rgba(0,0,0,0.05)', display: 'block' }} />
                         ))}
                       </div>
@@ -2711,7 +2693,7 @@ export const MapStage = React.memo(function MapStage({ startDateTime, endDateTim
                   ) : (
                     <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '8px', height: '200px', borderRadius: '10px', border: '1px dashed #cbd5e1', background: '#f8fafc', color: '#94a3b8', fontSize: '0.8rem' }}>
                       <Image size={24} />
-                      Chưa có ảnh hiện trường
+                      No field photos available
                     </div>
                   )}
                 </div>
@@ -2720,17 +2702,17 @@ export const MapStage = React.memo(function MapStage({ startDateTime, endDateTim
                 <div className="map-station-popup-right">
                   <div style={{ fontSize: '0.8rem', color: '#334155', display: 'flex', flexDirection: 'column', gap: '6px', background: '#f8fafc', padding: '10px 12px', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                      <span style={{ color: '#64748b', fontWeight: '500' }}>Loại nguồn nước:</span>
-                      <span style={{ padding: '2px 8px', borderRadius: '4px', fontSize: '0.72rem', fontWeight: '700', background: 'rgba(25, 135, 84, 0.1)', color: '#198754' }}>Nước mặt</span>
+                      <span style={{ color: '#64748b', fontWeight: '500' }}>Water type:</span>
+                      <span style={{ padding: '2px 8px', borderRadius: '4px', fontSize: '0.72rem', fontWeight: '700', background: 'rgba(25, 135, 84, 0.1)', color: '#198754' }}>Surface Water</span>
                     </div>
                     {selectedWqStation.hydroChar && (
                       <div style={{ display: 'flex', justifyContent: 'space-between', gap: '10px' }}>
-                        <span style={{ color: '#64748b', fontWeight: '500', flexShrink: 0 }}>Đặc tính thủy vực:</span>
+                        <span style={{ color: '#64748b', fontWeight: '500', flexShrink: 0 }}>Hydro characteristics:</span>
                         <span style={{ fontWeight: '600', color: '#0f172a', textAlign: 'right' }}>{selectedWqStation.hydroChar}</span>
                       </div>
                     )}
                     <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                      <span style={{ color: '#64748b', fontWeight: '500' }}>Tọa độ (X, Y):</span>
+                      <span style={{ color: '#64748b', fontWeight: '500' }}>Coordinates (X, Y):</span>
                       <span style={{ fontFamily: 'monospace', fontWeight: '600', color: '#0f172a' }}>{selectedWqStation.x?.toFixed(4)}, {selectedWqStation.y?.toFixed(4)}</span>
                     </div>
                   </div>
@@ -2739,15 +2721,15 @@ export const MapStage = React.memo(function MapStage({ startDateTime, endDateTim
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: '#0f172a' }}>
                         <Activity size={14} color="var(--accent)" />
-                        <strong style={{ fontSize: '0.82rem' }}>Dữ liệu quan trắc</strong>
+                    <strong style={{ fontSize: '0.82rem' }}>Monitoring Data</strong>
                       </div>
-                      {wqSamplesLoading && <span style={{ fontSize: '0.72rem', color: '#94a3b8' }}>Đang tải...</span>}
+{wqSamplesLoading && <span style={{ fontSize: '0.72rem', color: '#94a3b8' }}>Loading...</span>}
                     </div>
 
                     {wqStationSamples.length > 0 ? (
                       <>
                         <div style={{ display: 'flex', gap: '8px', alignItems: 'center', marginBottom: '10px' }}>
-                          <label style={{ fontSize: '0.78rem', color: '#475569', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '4px' }}><Calendar size={13} /> Ngày lấy mẫu:</label>
+                          <label style={{ fontSize: '0.78rem', color: '#475569', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '4px' }}><Calendar size={13} /> Sample date:</label>
                           <select value={wqStationSampleDate} onChange={e => setWqStationSampleDate(e.target.value)}
                             style={{ flex: 1, padding: '5px 8px', fontSize: '0.78rem', border: '1px solid #cbd5e1', borderRadius: '6px', background: '#f8fafc', color: '#0f172a', cursor: 'pointer', fontWeight: '600' }}>
                             {wqStationSamples.map(s => (<option key={s.id} value={s.sampleDate}>{s.sampleDate}</option>))}
@@ -2759,7 +2741,7 @@ export const MapStage = React.memo(function MapStage({ startDateTime, endDateTim
                             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.78rem' }}>
                               <thead>
                                 <tr style={{ background: '#f8fafc', position: 'sticky', top: 0, zIndex: 1, borderBottom: '1px solid #cbd5e1' }}>
-                                  {['Thông số', 'Đơn vị', 'Giá trị', 'Tiêu chuẩn'].map(h => (<th key={h} style={{ padding: '6px 10px', textAlign: 'left', fontWeight: '700', color: '#475569' }}>{h}</th>))}
+                                  {['Parameter', 'Unit', 'Value', 'Standard'].map(h => (<th key={h} style={{ padding: '6px 10px', textAlign: 'left', fontWeight: '700', color: '#475569' }}>{h}</th>))}
                                 </tr>
                               </thead>
                               <tbody>
@@ -2775,11 +2757,11 @@ export const MapStage = React.memo(function MapStage({ startDateTime, endDateTim
                             </table>
                           </div>
                         ) : wqSamplesLoading ? null : (
-                          <p style={{ fontSize: '0.78rem', color: '#64748b', fontStyle: 'italic', margin: '4px 0' }}>Chưa tải được chi tiết dữ liệu.</p>
+                          <p style={{ fontSize: '0.78rem', color: '#64748b', fontStyle: 'italic', margin: '4px 0' }}>Could not load data details.</p>
                         )}
                       </>
                     ) : (
-                      !wqSamplesLoading && (<p style={{ fontSize: '0.78rem', color: '#64748b', fontStyle: 'italic', margin: '4px 0' }}>Chưa có dữ liệu quan trắc cho trạm này.</p>)
+                      !wqSamplesLoading && (<p style={{ fontSize: '0.78rem', color: '#64748b', fontStyle: 'italic', margin: '4px 0' }}>No monitoring data for this station.</p>)
                     )}
                   </div>
                 </div>
@@ -2788,17 +2770,17 @@ export const MapStage = React.memo(function MapStage({ startDateTime, endDateTim
               <div style={{ padding: '16px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
                 <div style={{ fontSize: '0.8rem', color: '#334155', display: 'flex', flexDirection: 'column', gap: '6px', background: '#f8fafc', padding: '10px 12px', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                    <span style={{ color: '#64748b', fontWeight: '500' }}>Loại nguồn nước:</span>
-                    <span style={{ padding: '2px 8px', borderRadius: '4px', fontSize: '0.72rem', fontWeight: '700', background: 'rgba(13, 110, 253, 0.1)', color: '#0d6efd' }}>Nước ngầm</span>
+                    <span style={{ color: '#64748b', fontWeight: '500' }}>Water type:</span>
+                    <span style={{ padding: '2px 8px', borderRadius: '4px', fontSize: '0.72rem', fontWeight: '700', background: 'rgba(13, 110, 253, 0.1)', color: '#0d6efd' }}>Groundwater</span>
                   </div>
                   {selectedWqStation.hydroChar && (
                     <div style={{ display: 'flex', justifyContent: 'space-between', gap: '10px' }}>
-                      <span style={{ color: '#64748b', fontWeight: '500', flexShrink: 0 }}>Đặc tính thủy vực:</span>
+                      <span style={{ color: '#64748b', fontWeight: '500', flexShrink: 0 }}>Hydro characteristics:</span>
                       <span style={{ fontWeight: '600', color: '#0f172a', textAlign: 'right' }}>{selectedWqStation.hydroChar}</span>
                     </div>
                   )}
                   <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                    <span style={{ color: '#64748b', fontWeight: '500' }}>Tọa độ (X, Y):</span>
+                    <span style={{ color: '#64748b', fontWeight: '500' }}>Coordinates (X, Y):</span>
                     <span style={{ fontFamily: 'monospace', fontWeight: '600', color: '#0f172a' }}>{selectedWqStation.x?.toFixed(4)}, {selectedWqStation.y?.toFixed(4)}</span>
                   </div>
                 </div>
@@ -2806,14 +2788,14 @@ export const MapStage = React.memo(function MapStage({ startDateTime, endDateTim
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: '#0f172a' }}>
                       <Activity size={14} color="var(--accent)" />
-                      <strong style={{ fontSize: '0.82rem' }}>Dữ liệu quan trắc</strong>
+                      <strong style={{ fontSize: '0.82rem' }}>Monitoring Data</strong>
                     </div>
-                    {wqSamplesLoading && <span style={{ fontSize: '0.72rem', color: '#94a3b8' }}>Đang tải...</span>}
+                    {wqSamplesLoading && <span style={{ fontSize: '0.72rem', color: '#94a3b8' }}>Loading...</span>}
                   </div>
                   {wqStationSamples.length > 0 ? (
                     <>
                       <div style={{ display: 'flex', gap: '8px', alignItems: 'center', marginBottom: '10px' }}>
-                        <label style={{ fontSize: '0.78rem', color: '#475569', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '4px' }}><Calendar size={13} /> Ngày lấy mẫu:</label>
+                        <label style={{ fontSize: '0.78rem', color: '#475569', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '4px' }}><Calendar size={13} /> Sample date:</label>
                         <select value={wqStationSampleDate} onChange={e => setWqStationSampleDate(e.target.value)}
                           style={{ flex: 1, padding: '5px 8px', fontSize: '0.78rem', border: '1px solid #cbd5e1', borderRadius: '6px', background: '#f8fafc', color: '#0f172a', cursor: 'pointer', fontWeight: '600' }}>
                           {wqStationSamples.map(s => (<option key={s.id} value={s.sampleDate}>{s.sampleDate}</option>))}
@@ -2823,7 +2805,7 @@ export const MapStage = React.memo(function MapStage({ startDateTime, endDateTim
                         <div style={{ overflowX: 'auto', borderRadius: '10px', border: '1px solid #e2e8f0', maxHeight: isMobile ? 'none' : '180px', overflowY: 'auto' }} className="custom-scrollbar">
                           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.78rem' }}>
                             <thead><tr style={{ background: '#f8fafc', position: 'sticky', top: 0, zIndex: 1, borderBottom: '1px solid #cbd5e1' }}>
-                              {['Thông số', 'Đơn vị', 'Giá trị', 'Tiêu chuẩn'].map(h => (<th key={h} style={{ padding: '6px 10px', textAlign: 'left', fontWeight: '700', color: '#475569' }}>{h}</th>))}
+                              {['Parameter', 'Unit', 'Value', 'Standard'].map(h => (<th key={h} style={{ padding: '6px 10px', textAlign: 'left', fontWeight: '700', color: '#475569' }}>{h}</th>))}
                             </tr></thead>
                             <tbody>
                               {wqStationSample.parameters.map((p, idx) => (
@@ -2837,9 +2819,9 @@ export const MapStage = React.memo(function MapStage({ startDateTime, endDateTim
                             </tbody>
                           </table>
                         </div>
-                      ) : wqSamplesLoading ? null : (<p style={{ fontSize: '0.78rem', color: '#64748b', fontStyle: 'italic', margin: '4px 0' }}>Chưa tải được chi tiết dữ liệu.</p>)}
+                      ) : wqSamplesLoading ? null : (<p style={{ fontSize: '0.78rem', color: '#64748b', fontStyle: 'italic', margin: '4px 0' }}>Could not load data details.</p>)}
                     </>
-                  ) : (!wqSamplesLoading && <p style={{ fontSize: '0.78rem', color: '#64748b', fontStyle: 'italic', margin: '4px 0' }}>Chưa có dữ liệu quan trắc cho trạm này.</p>)}
+                  ) : (!wqSamplesLoading && <p style={{ fontSize: '0.78rem', color: '#64748b', fontStyle: 'italic', margin: '4px 0' }}>No monitoring data for this station.</p>)}
                 </div>
               </div>
             )}
@@ -2898,12 +2880,18 @@ export const MapStage = React.memo(function MapStage({ startDateTime, endDateTim
       d.type === nextProps.appliedDatasets?.[i]?.type
     ) ?? false);
   
+  const wqEqual: boolean = 
+    prevProps.waterQualityStations?.length === nextProps.waterQualityStations?.length &&
+    (prevProps.waterQualityStations?.every((s, i) => 
+      s.id === nextProps.waterQualityStations?.[i]?.id
+    ) ?? false);
+  
   return (
     prevProps.startDateTime === nextProps.startDateTime &&
     prevProps.endDateTime === nextProps.endDateTime &&
     datasetsEqual &&
+    wqEqual &&
     prevProps.isMobile === nextProps.isMobile &&
-    prevProps.waterQualityStations === nextProps.waterQualityStations &&
     prevProps.onRemoveDataset === nextProps.onRemoveDataset &&
     prevProps.onAddDataset === nextProps.onAddDataset &&
     prevProps.onStartDateTimeChange === nextProps.onStartDateTimeChange &&
