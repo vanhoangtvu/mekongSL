@@ -15,7 +15,7 @@ public interface WaterQualitySampleRepository extends JpaRepository<WaterQuality
     List<WaterQualitySample> findByStationIdOrderBySampleDateDesc(@Param("stationId") Long stationId);
 
     @Query("SELECT s FROM WaterQualitySample s JOIN FETCH s.station WHERE s.station.id = :stationId AND s.sampleDate = :sampleDate")
-    Optional<WaterQualitySample> findByStationIdAndSampleDate(@Param("stationId") Long stationId, @Param("sampleDate") LocalDate sampleDate);
+    List<WaterQualitySample> findByStationIdAndSampleDate(@Param("stationId") Long stationId, @Param("sampleDate") LocalDate sampleDate);
 
     @Query("SELECT COUNT(s) > 0 FROM WaterQualitySample s WHERE s.station.id = :stationId AND s.sampleDate = :sampleDate")
     boolean existsByStationIdAndSampleDate(@Param("stationId") Long stationId, @Param("sampleDate") LocalDate sampleDate);
@@ -28,4 +28,7 @@ public interface WaterQualitySampleRepository extends JpaRepository<WaterQuality
 
     @Query(value = "SELECT station_db_id FROM water_quality_sample ORDER BY id DESC LIMIT 1", nativeQuery = true)
     Long findLatestStationDbId();
+
+    @Query("SELECT s FROM WaterQualitySample s JOIN FETCH s.station ORDER BY s.importedAt DESC, s.id DESC")
+    List<WaterQualitySample> findAllOrderByImportedAtDesc();
 }

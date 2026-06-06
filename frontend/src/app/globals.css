@@ -196,15 +196,15 @@ select {
 .app-brand {
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 4px;
 }
 
 .app-slogan {
   margin: 0;
-  font-size: 0.7rem;
+  font-size: 0.78rem;
   font-style: italic;
   font-weight: 400;
-  color: rgba(200, 220, 255, 0.75);
+  color: #ffffff;
   letter-spacing: 0.04em;
   line-height: 1;
   font-family: Georgia, "Times New Roman", serif;
@@ -1412,7 +1412,7 @@ html[data-theme="light"] .geo-settings-panel {
 /* Layer type column + picker buttons + badge */
 .geo-layer-type-col {
   flex-shrink: 0;
-  min-width: 100px;
+  min-width: 0;
   text-align: right;
   margin-left: auto;
 }
@@ -1424,8 +1424,8 @@ html[data-theme="light"] .geo-settings-panel {
   background: var(--surface);
 }
 .geo-layer-type-opt {
-  font-size: 0.72rem;
-  padding: 2px 8px;
+  font-size: 0.68rem;
+  padding: 2px 5px;
   border: none;
   background: transparent;
   color: var(--text-secondary, #94a3b8);

@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation';
 import { authService } from '../../../lib/auth';
 import { DATA_SOURCE_OPTIONS, DEFAULT_DATA_SOURCE, type DataSourceKey } from '../../../lib/constants/data-sources';
 import { collectRecordKeys, formatRecordValue, truncatePath, getParentPath, type DataRecord } from '../../../lib/utils/record-utils';
-import { loadDataDevices, loadDataRows, loadDataTimeframes, uploadS3File, listS3Files, deleteS3File, downloadS3File, renameS3File, createS3Folder, listManualStations, createManualStation, updateManualStation, deleteManualStation, importManualStations, previewWaterQualityExcel, importWaterQuality, listWaterQualitySamples, getWaterQualitySample, getBackendAdminUrl, deleteWaterQualitySample, type ManualStation, type WaterQualityPreviewResult, type WaterQualitySampleDto } from '../../../lib/admin-api';
+import { loadDataDevices, loadDataRows, loadDataTimeframes, uploadS3File, listS3Files, deleteS3File, downloadS3File, renameS3File, createS3Folder, listManualStations, createManualStation, updateManualStation, deleteManualStation, importManualStations, previewWaterQualityExcel, importWaterQuality, listWaterQualitySamples, listRecentWaterQualitySamples, getWaterQualitySample, getBackendAdminUrl, deleteWaterQualitySample, type ManualStation, type WaterQualityPreviewResult, type WaterQualitySampleDto } from '../../../lib/admin-api';
 import DataExportModal from '../../../components/DataExportModal';
 import S3Explorer from '../../../components/S3Explorer';
 import Map from 'ol/Map';
@@ -18,7 +18,7 @@ import VectorSource from 'ol/source/Vector';
 import GeoTIFF from 'ol/source/GeoTIFF';
 import GeoJSON from 'ol/format/GeoJSON';
 import KML from 'ol/format/KML';
-import { fromLonLat, transformExtent, transform } from 'ol/proj';
+import { fromLonLat, toLonLat, transformExtent, transform } from 'ol/proj';
 import { Style, Stroke, Fill, Circle as CircleStyle } from 'ol/style';
 import Feature from 'ol/Feature';
 import Point from 'ol/geom/Point';
@@ -319,6 +319,9 @@ function FilePreviewModal({ fileKey, onClose }: FilePreviewModalProps) {
   
   const mapElement = useRef<HTMLDivElement>(null);
   const mapRef = useRef<Map | null>(null);
+  const rasterLayerRef = useRef<WebGLTileLayer | null>(null);
+  const [hoverValue, setHoverValue] = useState<number | null>(null);
+  const [hoverCoords, setHoverCoords] = useState<[number, number] | null>(null);
 
   const ext = fileKey.substring(fileKey.lastIndexOf('.')).toLowerCase();
   const isCSV = ext === '.csv';
@@ -536,21 +539,23 @@ function FilePreviewModal({ fileKey, onClose }: FilePreviewModalProps) {
             ]
           };
         } else {
-          // Salinity and others: blue-to-red gradient
+          // Salinity and others: blue-to-red gradient — same as map render
           layerStyle = {
             color: [
               'case',
+              ['<=', ['band', 1], -9999], [0, 0, 0, 0],
               ['<=', ['band', 1], 0], [0, 0, 0, 0],
+              ['<', ['band', 1], 0.06], [0, 0, 0, 0],
               [
                 'interpolate',
                 ['linear'],
                 ['band', 1],
-                0.01, [0, 0, 255, 0.8],
-                4,    [0, 255, 255, 0.8],
-                8,    [0, 255, 0, 0.8],
-                15,   [255, 255, 0, 0.8],
-                22,   [255, 165, 0, 0.8],
-                30,   [255, 0, 0, 0.8]
+                0.06, [0, 0, 255, 1],
+                5,    [0, 255, 255, 1],
+                10,   [0, 255, 0, 1],
+                15,   [255, 255, 0, 1],
+                20,   [255, 165, 0, 1],
+                21,   [255, 0, 0, 1],
               ]
             ]
           };
@@ -559,11 +564,25 @@ function FilePreviewModal({ fileKey, onClose }: FilePreviewModalProps) {
 
       const rasterLayer = new WebGLTileLayer({
         source: geoTiffSource,
-        opacity: 0.85,
+        opacity: 0.7,
         style: layerStyle
       });
 
       map.addLayer(rasterLayer);
+      rasterLayerRef.current = rasterLayer;
+
+      map.on("pointermove", (evt) => {
+        try {
+          const buf = rasterLayer.getData(evt.pixel);
+          if (buf && !(buf instanceof DataView) && buf.length > 0 && buf[0] > 0) {
+            setHoverValue(buf[0]);
+          } else {
+            setHoverValue(null);
+          }
+        } catch { setHoverValue(null); }
+        const lonlat = toLonLat(evt.coordinate);
+        setHoverCoords([lonlat[1], lonlat[0]]);
+      });
 
       geoTiffSource.getView().then((viewOptions) => {
         if (viewOptions.extent && viewOptions.projection) {
@@ -959,6 +978,23 @@ function FilePreviewModal({ fileKey, onClose }: FilePreviewModalProps) {
                   }}>
                     🖱 Scroll để zoom · Kéo để di chuyển
                   </div>
+                  {isRaster && hoverCoords && (
+                    <div style={{
+                      position: 'absolute', top: '12px', left: '12px',
+                      background: 'rgba(6,8,16,0.88)', backdropFilter: 'blur(8px)',
+                      border: '1px solid rgba(255,255,255,0.12)', borderRadius: '8px',
+                      padding: '7px 12px', fontSize: '0.75rem', color: '#f1f5f9',
+                      zIndex: 10, display: 'flex', flexDirection: 'column', gap: '3px'
+                    }}>
+                      {hoverValue !== null
+                        ? <span style={{ fontWeight: '700', color: '#38bdf8' }}>Giá trị: <b>{hoverValue.toFixed(3)}</b></span>
+                        : <span style={{ color: 'rgba(148,163,184,0.5)' }}>—</span>
+                      }
+                      <span style={{ color: 'rgba(148,163,184,0.6)', fontSize: '0.68rem' }}>
+                        {hoverCoords[0].toFixed(5)}°N, {hoverCoords[1].toFixed(5)}°E
+                      </span>
+                    </div>
+                  )}
                 </div>
               )}
 
@@ -1619,6 +1655,29 @@ export default function DataPage() {
   const [wqHistorySample, setWqHistorySample] = useState<WaterQualitySampleDto | null>(null);
   const [wqHistoryLoading, setWqHistoryLoading] = useState(false);
   const [wqHistoryRefresh, setWqHistoryRefresh] = useState(0);
+
+  // Global Recent Samples States
+  const [recentSamples, setRecentSamples] = useState<WaterQualitySampleDto[]>([]);
+  const [recentLoading, setRecentLoading] = useState(false);
+
+  const fetchRecentSamples = useCallback(async () => {
+    setRecentLoading(true);
+    try {
+      const data = await listRecentWaterQualitySamples();
+      setRecentSamples(data || []);
+    } catch (err) {
+      console.error("Failed to load recent water quality samples:", err);
+    } finally {
+      setRecentLoading(false);
+    }
+  }, []);
+
+  // Fetch recent samples when view loads or updates
+  useEffect(() => {
+    if (activeTab === 'upload' && uploadGroup === 'station') {
+      void fetchRecentSamples();
+    }
+  }, [activeTab, uploadGroup, wqHistoryRefresh, fetchRecentSamples]);
 
   // Reset WQ import states when switching to station tab
   useEffect(() => {
@@ -3494,15 +3553,21 @@ function ScheduleConfig({ source }: { source: string }) {
                     {/* Import Form */}
                     {wqImportStationId && wqSampleDate !== '' && !wqPreview && !wqImportSuccess && (
                       <div style={{ background: 'var(--background-soft)', border: '1px solid var(--border)', borderRadius: '12px', padding: '20px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
-                        <h5 style={{ margin: 0, fontSize: '0.9rem', fontWeight: '700', color: 'var(--text)' }}>📤 Import dữ liệu từ file Excel</h5>
+                        <h5 style={{ margin: 0, fontSize: '0.9rem', fontWeight: '700', color: 'var(--text)', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                          <UploadCloud size={16} color="var(--accent)" /> Import dữ liệu từ file Excel
+                        </h5>
                         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
                           <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                            <label style={{ fontSize: '0.82rem', fontWeight: '600', color: 'var(--text-muted)' }}>📅 Ngày lấy mẫu <span style={{ color: '#dc3545' }}>*</span></label>
+                            <label style={{ fontSize: '0.82rem', fontWeight: '600', color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                              <Calendar size={14} color="var(--text-muted)" /> Ngày lấy mẫu <span style={{ color: '#dc3545' }}>*</span>
+                            </label>
                             <input type="date" value={wqSampleDate} onChange={e => setWqSampleDate(e.target.value)}
                               style={{ padding: '8px 12px', background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: '8px', color: 'var(--text)', fontSize: '0.85rem' }} />
                           </div>
                           <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                            <label style={{ fontSize: '0.82rem', fontWeight: '600', color: 'var(--text-muted)' }}>📝 Ghi chú (tuỳ chọn)</label>
+                            <label style={{ fontSize: '0.82rem', fontWeight: '600', color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                              <Pencil size={14} color="var(--text-muted)" /> Ghi chú (tuỳ chọn)
+                            </label>
                             <input type="text" value={wqNotes} onChange={e => setWqNotes(e.target.value)}
                               placeholder="Ví dụ: Đợt lấy mẫu tháng 6..."
                               style={{ padding: '8px 12px', background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: '8px', color: 'var(--text)', fontSize: '0.85rem' }} />
@@ -3520,7 +3585,9 @@ function ScheduleConfig({ source }: { source: string }) {
                           }}
                         >
                           {wqFile ? (
-                            <p style={{ margin: 0, fontWeight: '600', color: 'var(--accent)', fontSize: '0.85rem' }}>✅ {wqFile.name}</p>
+                            <p style={{ margin: 0, fontWeight: '600', color: 'var(--accent)', fontSize: '0.85rem', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}>
+                              <Check size={16} color="#198754" /> {wqFile.name}
+                            </p>
                           ) : (
                             <p style={{ margin: 0, color: 'var(--text-muted)', fontSize: '0.85rem' }}>
                               <FileSpreadsheet size={20} style={{ marginBottom: '4px', display: 'block', margin: '0 auto 6px' }} />
@@ -3529,8 +3596,8 @@ function ScheduleConfig({ source }: { source: string }) {
                           )}
                         </div>
                         {wqPreviewError && (
-                          <div style={{ padding: '10px 14px', background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.2)', borderRadius: '8px', color: '#ef4444', fontSize: '0.83rem' }}>
-                            ⚠️ {wqPreviewError}
+                          <div style={{ padding: '10px 14px', background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.2)', borderRadius: '8px', color: '#ef4444', fontSize: '0.83rem', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                            <AlertCircle size={14} color="#ef4444" /> {wqPreviewError}
                           </div>
                         )}
                         <div style={{ display: 'flex', gap: '10px' }}>
@@ -3553,8 +3620,16 @@ function ScheduleConfig({ source }: { source: string }) {
                               } catch { setWqPreviewError('Lỗi kết nối máy chủ. Vui lòng thử lại.'); }
                               finally { setWqPreviewing(false); }
                             }}
-                            style={{ flex: 1, padding: '9px 18px', background: 'var(--accent)', color: '#fff', border: 'none', borderRadius: '8px', fontWeight: '700', fontSize: '0.85rem', cursor: (!wqFile || !wqSampleDate || wqPreviewing) ? 'not-allowed' : 'pointer', opacity: (!wqFile || !wqSampleDate || wqPreviewing) ? 0.5 : 1 }}>
-                            {wqPreviewing ? '⏳ Đang phân tích...' : '🔍 Xem trước dữ liệu'}
+                            style={{ flex: 1, padding: '9px 18px', background: 'var(--accent)', color: '#fff', border: 'none', borderRadius: '8px', fontWeight: '700', fontSize: '0.85rem', cursor: (!wqFile || !wqSampleDate || wqPreviewing) ? 'not-allowed' : 'pointer', opacity: (!wqFile || !wqSampleDate || wqPreviewing) ? 0.5 : 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}>
+                            {wqPreviewing ? (
+                              <>
+                                <RefreshCw size={14} className="animate-spin" style={{ animation: 'spin 1s linear infinite' }} /> Đang phân tích...
+                              </>
+                            ) : (
+                              <>
+                                <Search size={14} /> Xem trước dữ liệu
+                              </>
+                            )}
                           </button>
                           <button type="button" onClick={() => { setWqSampleDate(''); setWqFile(null); }} style={{ padding: '9px 14px', background: 'var(--surface-strong)', border: '1px solid var(--border)', color: 'var(--text-muted)', borderRadius: '8px', cursor: 'pointer' }}>Hủy</button>
                         </div>
@@ -3566,7 +3641,9 @@ function ScheduleConfig({ source }: { source: string }) {
                       <div style={{ background: 'var(--background-soft)', border: '1px solid var(--border)', borderRadius: '12px', padding: '20px', display: 'flex', flexDirection: 'column', gap: '16px', animation: 'modalPanelIn 0.3s ease' }}>
                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '8px' }}>
                           <div>
-                            <h5 style={{ margin: 0, fontSize: '0.9rem', fontWeight: '700', color: 'var(--text)' }}>📋 Xem trước dữ liệu nhập</h5>
+                            <h5 style={{ margin: 0, fontSize: '0.9rem', fontWeight: '700', color: 'var(--text)', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                              <FileSpreadsheet size={16} color="var(--accent)" /> Xem trước dữ liệu nhập
+                            </h5>
                             <p style={{ margin: '4px 0 0 0', fontSize: '0.8rem', color: 'var(--text-muted)' }}>
                               Trạm nhận diện: <strong style={{ color: 'var(--accent)' }}>{wqPreview.recognizedStationId}</strong>
                               {wqPreview.stationLocation && ` — ${wqPreview.stationLocation}`}
@@ -3575,9 +3652,11 @@ function ScheduleConfig({ source }: { source: string }) {
                             </p>
                           </div>
                           {wqPreview.duplicateExists && !wqDuplicateAction && (
-                            <div style={{ padding: '8px 14px', background: 'rgba(255,165,0,0.12)', border: '1px solid rgba(255,165,0,0.3)', borderRadius: '8px', fontSize: '0.8rem', color: '#c67c00' }}>
-                              ⚠️ Đã có dữ liệu cho ngày <strong>{wqSampleDate}</strong>. Chọn:
-                              <div style={{ display: 'flex', gap: '8px', marginTop: '6px' }}>
+                            <div style={{ padding: '8px 14px', background: 'rgba(255,165,0,0.12)', border: '1px solid rgba(255,165,0,0.3)', borderRadius: '8px', fontSize: '0.8rem', color: '#c67c00', display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                <AlertCircle size={14} color="#c67c00" /> Đã có dữ liệu cho ngày <strong>{wqSampleDate}</strong>. Chọn:
+                              </div>
+                              <div style={{ display: 'flex', gap: '8px', marginTop: '2px' }}>
                                 <button onClick={() => setWqDuplicateAction('overwrite')} style={{ padding: '4px 10px', background: '#ef4444', color: '#fff', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: '600', fontSize: '0.78rem' }}>Ghi đè</button>
                                 <button onClick={() => setWqDuplicateAction('add')} style={{ padding: '4px 10px', background: 'var(--accent)', color: '#fff', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: '600', fontSize: '0.78rem' }}>Thêm mới</button>
                               </div>
@@ -3613,14 +3692,22 @@ function ScheduleConfig({ source }: { source: string }) {
                               try {
                                 const overwrite = wqDuplicateAction === 'overwrite';
                                 await importWaterQuality(wqFile, wqSampleDate, overwrite, wqNotes || undefined, undefined, wqImportStationId ?? undefined);
-                                setWqImportSuccess(`✅ Đã import thành công ${wqPreview.parameters?.length || 0} thông số cho trạm ${wqPreview.recognizedStationId}.`);
+                                setWqImportSuccess(`Đã import thành công ${wqPreview.parameters?.length || 0} thông số cho trạm ${wqPreview.recognizedStationId}.`);
                                 setWqPreview(null);
                                 setWqHistoryRefresh(prev => prev + 1);
                               } catch { setWqPreviewError('Lỗi khi import. Vui lòng thử lại.'); }
                               finally { setWqImporting(false); }
                             }}
-                            style={{ flex: 1, padding: '9px 18px', background: '#198754', color: '#fff', border: 'none', borderRadius: '8px', fontWeight: '700', fontSize: '0.85rem', cursor: (wqImporting || (wqPreview.duplicateExists && !wqDuplicateAction)) ? 'not-allowed' : 'pointer', opacity: (wqImporting || (wqPreview.duplicateExists && !wqDuplicateAction)) ? 0.5 : 1 }}>
-                            {wqImporting ? '⏳ Đang lưu...' : '✅ Xác nhận Import'}
+                            style={{ flex: 1, padding: '9px 18px', background: '#198754', color: '#fff', border: 'none', borderRadius: '8px', fontWeight: '700', fontSize: '0.85rem', cursor: (wqImporting || (wqPreview.duplicateExists && !wqDuplicateAction)) ? 'not-allowed' : 'pointer', opacity: (wqImporting || (wqPreview.duplicateExists && !wqDuplicateAction)) ? 0.5 : 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}>
+                            {wqImporting ? (
+                              <>
+                                <RefreshCw size={14} className="animate-spin" style={{ animation: 'spin 1s linear infinite' }} /> Đang lưu...
+                              </>
+                            ) : (
+                              <>
+                                <Check size={16} /> Xác nhận Import
+                              </>
+                            )}
                           </button>
                           <button type="button" onClick={() => { setWqPreview(null); setWqDuplicateAction(null); }} style={{ padding: '9px 14px', background: 'var(--surface-strong)', border: '1px solid var(--border)', color: 'var(--text-muted)', borderRadius: '8px', cursor: 'pointer' }}>Quay lại</button>
                         </div>
@@ -3630,7 +3717,10 @@ function ScheduleConfig({ source }: { source: string }) {
                     {/* Success Message */}
                     {wqImportSuccess && (
                       <div style={{ padding: '12px 16px', background: 'rgba(25,135,84,0.1)', border: '1px solid rgba(25,135,84,0.25)', borderRadius: '8px', color: '#198754', fontWeight: '600', fontSize: '0.85rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                        {wqImportSuccess}
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                          <CheckCircle2 size={16} color="#198754" />
+                          <span>{wqImportSuccess}</span>
+                        </div>
                         <button onClick={() => { setWqImportSuccess(''); setWqSampleDate(new Date().toISOString().slice(0, 10)); setWqFile(null); setWqNotes(''); }} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#198754', fontWeight: '700' }}>Nhập thêm</button>
                       </div>
                     )}
@@ -3638,11 +3728,11 @@ function ScheduleConfig({ source }: { source: string }) {
                 )}
 
                 {/* ─── Lịch sử dữ liệu đã import ─── */}
-                {wqImportStationId && (
+                {wqImportStationId ? (
                   <div style={{ borderTop: '2px solid var(--border)', paddingTop: '20px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                       <BarChart3 size={16} color="var(--accent)" />
-                      <strong style={{ fontSize: '0.9rem', color: 'var(--text)' }}>📊 Lịch sử dữ liệu đã import</strong>
+                      <strong style={{ fontSize: '0.9rem', color: 'var(--text)' }}>Lịch sử dữ liệu đã import</strong>
                       {wqHistoryLoading && <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>Đang tải...</span>}
                     </div>
 
@@ -3682,6 +3772,95 @@ function ScheduleConfig({ source }: { source: string }) {
                                 <td style={{ padding: '7px 12px', color: 'var(--text-muted)' }}>{p.unit || '—'}</td>
                                 <td style={{ padding: '7px 12px', fontFamily: 'monospace', color: 'var(--text)' }}>{p.valueRaw || '—'}</td>
                                 <td style={{ padding: '7px 12px', color: 'var(--text-muted)', fontSize: '0.78rem' }}>{p.referenceStandard || '—'}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <div style={{ borderTop: '2px solid var(--border)', paddingTop: '20px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <BarChart3 size={16} color="var(--accent)" />
+                        <strong style={{ fontSize: '0.9rem', color: 'var(--text)' }}>Các đợt nhập dữ liệu gần đây nhất (Hệ thống)</strong>
+                        {recentLoading && <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>Đang tải...</span>}
+                      </div>
+                      <button 
+                        onClick={() => void fetchRecentSamples()} 
+                        type="button"
+                        style={{ padding: '6px 12px', background: 'var(--surface-strong)', border: '1px solid var(--border)', borderRadius: '8px', color: 'var(--text)', fontSize: '0.78rem', fontWeight: '600', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '6px' }}
+                      >
+                        <RefreshCw size={12} /> Làm mới
+                      </button>
+                    </div>
+
+                    {!recentLoading && recentSamples.length === 0 && (
+                      <p style={{ fontSize: '0.82rem', color: 'var(--text-muted)', fontStyle: 'italic', margin: '0' }}>Chưa có dữ liệu nào được import gần đây.</p>
+                    )}
+
+                    {recentSamples.length > 0 && (
+                      <div style={{ overflowX: 'auto', borderRadius: '8px', border: '1px solid var(--border)' }}>
+                        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.82rem' }}>
+                          <thead>
+                            <tr style={{ background: 'var(--surface-strong)' }}>
+                              {['Trạm đo', 'Loại nguồn nước', 'Ngày lấy mẫu', 'Số thông số', 'Thời gian import', 'Ghi chú', 'Thao tác'].map(h => (
+                                <th key={h} style={{ padding: '8px 12px', textAlign: 'left', color: 'var(--text-muted)', fontWeight: '600', borderBottom: '1px solid var(--border)' }}>{h}</th>
+                              ))}
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {recentSamples.slice(0, 15).map((s, idx) => (
+                              <tr key={s.id || idx} style={{ borderBottom: '1px solid var(--border)' }}>
+                                <td style={{ padding: '8px 12px', fontWeight: '600', color: 'var(--text)' }}>
+                                  {s.stationId ? <span style={{ background: 'rgba(13, 110, 253, 0.1)', color: '#0d6efd', padding: '2px 6px', borderRadius: '4px', marginRight: '6px', fontSize: '0.75rem' }}>{s.stationId}</span> : null}
+                                  {s.stationLocation || '—'}
+                                </td>
+                                <td style={{ padding: '8px 12px' }}>
+                                  <span style={{
+                                    padding: '2px 6px',
+                                    borderRadius: '4px',
+                                    fontSize: '0.75rem',
+                                    fontWeight: '600',
+                                    background: s.stationType === 'groundwater' ? 'rgba(111, 66, 193, 0.1)' : 'rgba(13, 202, 240, 0.1)',
+                                    color: s.stationType === 'groundwater' ? '#6f42c1' : '#0dcaf0'
+                                  }}>
+                                    {s.stationType === 'groundwater' ? 'Nước ngầm' : 'Nước mặt'}
+                                  </span>
+                                </td>
+                                <td style={{ padding: '8px 12px', fontWeight: '700', color: 'var(--text)' }}>{s.sampleDate}</td>
+                                <td style={{ padding: '8px 12px', fontWeight: '600' }}>{s.parameterCount}</td>
+                                <td style={{ padding: '8px 12px', color: 'var(--text-muted)' }}>
+                                  {s.importedAt ? new Date(s.importedAt).toLocaleString('vi-VN', { hour: '2-digit', minute: '2-digit', day: '2-digit', month: '2-digit' }) : '—'}
+                                </td>
+                                <td style={{ padding: '8px 12px', fontStyle: 'italic', color: 'var(--text-muted)' }}>{s.notes || '—'}</td>
+                                <td style={{ padding: '8px 12px' }}>
+                                  <button
+                                    type="button"
+                                    onClick={async () => {
+                                      try {
+                                        const detail = await getWaterQualitySample(s.id);
+                                        setSelectedSampleDetail(detail);
+                                      } catch { /* ignore */ }
+                                    }}
+                                    style={{
+                                      padding: '4px 10px',
+                                      background: 'var(--accent)',
+                                      color: '#fff',
+                                      border: 'none',
+                                      borderRadius: '8px',
+                                      fontSize: '0.78rem',
+                                      fontWeight: '600',
+                                      cursor: 'pointer',
+                                      display: 'flex',
+                                      alignItems: 'center',
+                                      gap: '4px'
+                                    }}
+                                  >
+                                    <Search size={12} /> Xem chi tiết
+                                  </button>
+                                </td>
                               </tr>
                             ))}
                           </tbody>

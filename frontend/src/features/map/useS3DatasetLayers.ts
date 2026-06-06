@@ -11,7 +11,10 @@ import KML from "ol/format/KML";
 import GeoTIFF from "ol/source/GeoTIFF";
 import { Style, Fill, Stroke, Circle as CircleStyle } from "ol/style";
 import WKT from "ol/format/WKT";
-import { transformExtent } from "ol/proj";
+import { transformExtent, transform } from "ol/proj";
+import OLPoint from "ol/geom/Point";
+import OLLineString from "ol/geom/LineString";
+import OLPolygon from "ol/geom/Polygon";
 import { getDatasetSlug, getParentDataset, getDatasetById } from "../../lib/constants/datasets";
 import { listS3Files } from "../../lib/admin-api";
 import { showNotification } from "../../lib/notification";
@@ -43,6 +46,101 @@ const defaultVectorStyle = new Style({
 });
 
 const FADE_MS = 350;
+
+// ── IDRISI VCT binary parser ──────────────────────────────────────────────
+// Format (little-endian):
+//   byte 0      : geometry type  1=Point  2=LineString  3=Polygon
+//   bytes 1-4   : uint32  total features
+//   offset 0x105: feature records start
+//
+// Point record   : f64 id, f64 x, f64 y
+// Line record    : f64 id, f64 minX, f64 maxX, f64 minY, f64 maxY,
+//                  u32 nNodes, then nNodes×(f64 x, f64 y)
+// Polygon record : f64 id, f64 minX, f64 maxX, f64 minY, f64 maxY,
+//                  u32 nParts, u32 nTotalNodes,
+//                  if nParts>1: nParts×u32 nodeCounts,
+//                  then nTotalNodes×(f64 x, f64 y)
+function parseVCT(buf: ArrayBuffer, vdcText: string): Feature[] {
+  const v = new DataView(buf);
+  const geomType = v.getUint8(0); // 1=point 2=line 3=polygon
+  if (geomType < 1 || geomType > 3) return [];
+
+  // Detect CRS from VDC companion text
+  let srcProj = "EPSG:4326";
+  if (vdcText) {
+    const refSys = (vdcText.match(/ref\.\s*system\s*[: ]+(\S+)/i)?.[1] ?? "").toLowerCase();
+    const refUnits = (vdcText.match(/ref\.\s*units\s*[: ]+(\S+)/i)?.[1] ?? "").toLowerCase();
+    if (refSys.startsWith("utm-")) {
+      const zone = refSys.match(/utm-(\d+)/)?.[1];
+      srcProj = zone ? `EPSG:326${zone.padStart(2, "0")}` : "EPSG:32648";
+    } else if (refUnits === "m" || refSys === "plane") {
+      srcProj = "EPSG:32648"; // assume UTM48N for ĐBSCL
+    }
+  }
+
+  const toWeb = (x: number, y: number): [number, number] =>
+    transform([x, y], srcProj, "EPSG:3857") as [number, number];
+
+  const features: Feature[] = [];
+  let offset = 0x105; // 261 — data records start here
+
+  try {
+    while (offset < buf.byteLength) {
+      if (geomType === 1) {
+        if (offset + 24 > buf.byteLength) break;
+        const x = v.getFloat64(offset + 8, true);
+        const y = v.getFloat64(offset + 16, true);
+        offset += 24;
+        features.push(new Feature({ geometry: new OLPoint(toWeb(x, y)) }));
+
+      } else if (geomType === 2) {
+        if (offset + 44 > buf.byteLength) break;
+        offset += 40; // skip id + bbox (5×f64)
+        const nNodes = v.getUint32(offset, true);
+        offset += 4;
+        if (nNodes === 0 || offset + nNodes * 16 > buf.byteLength) { offset += nNodes * 16; continue; }
+        const coords: [number, number][] = [];
+        for (let i = 0; i < nNodes; i++) {
+          coords.push(toWeb(v.getFloat64(offset, true), v.getFloat64(offset + 8, true)));
+          offset += 16;
+        }
+        features.push(new Feature({ geometry: new OLLineString(coords) }));
+
+      } else {
+        if (offset + 48 > buf.byteLength) break;
+        offset += 40; // skip id + bbox
+        const nParts = v.getUint32(offset, true);
+        const nTotalNodes = v.getUint32(offset + 4, true);
+        offset += 8;
+        if (nParts === 0 || nTotalNodes === 0 || nParts > 100000 || nTotalNodes > 10_000_000) break;
+
+        const nodeCounts: number[] = [];
+        if (nParts > 1) {
+          if (offset + nParts * 4 > buf.byteLength) break;
+          for (let i = 0; i < nParts; i++) { nodeCounts.push(v.getUint32(offset, true)); offset += 4; }
+        } else {
+          if (offset + 4 > buf.byteLength) break;
+          nodeCounts.push(v.getUint32(offset, true));
+          offset += 4;
+        }
+
+        if (offset + nTotalNodes * 16 > buf.byteLength) break;
+        const rings: [number, number][][] = [];
+        for (let p = 0; p < nParts; p++) {
+          const ring: [number, number][] = [];
+          for (let i = 0; i < nodeCounts[p]; i++) {
+            ring.push(toWeb(v.getFloat64(offset, true), v.getFloat64(offset + 8, true)));
+            offset += 16;
+          }
+          rings.push(ring);
+        }
+        features.push(new Feature({ geometry: new OLPolygon(rings) }));
+      }
+    }
+  } catch { /* truncated file — return what we have */ }
+
+  return features;
+}
 
 function animateLayer(
   layer: WebGLTileLayer | VectorLayer,
@@ -196,12 +294,30 @@ export function useS3DatasetLayers(
         for (const key of toRemove) delete nextMap[key];
         return nextMap;
       });
+      // Clear cache + prebuilt OL layers for removed datasets so re-apply fetches fresh
+      for (const removedPrefix of toRemove.map(getPrefix)) {
+        for (const dateCache of Object.values(layersCacheRef.current)) {
+          for (const k of Object.keys(dateCache)) {
+            if (getPrefix(k) === removedPrefix) delete dateCache[k];
+          }
+        }
+        for (const dateLayers of Object.values(prebuiltLayersRef.current)) {
+          for (const k of Object.keys(dateLayers)) {
+            if (getPrefix(k) === removedPrefix) delete dateLayers[k];
+          }
+        }
+      }
       if (![...next].some(key => !prev.has(key))) return;
     }
 
     const toAdd = dateChanged
       ? [...next]
-      : [...next].filter((key) => !prev.has(key));
+      : [...next].filter((key) => {
+          // Skip if already rendered OR already loading (has an OL layer in map)
+          if (prev.has(key)) return false;
+          const hasLiveLayer = Object.keys(layerRefs.current).some(k => getPrefix(k) === key);
+          return !hasLiveLayer;
+        });
 
     let isActive = true;
     if (toAdd.length === 0) return;
@@ -757,7 +873,7 @@ export function useS3DatasetLayers(
             } else if (isWKT) {
               features = [wktFormat.readFeature(fullText, { dataProjection: "EPSG:4326", featureProjection: "EPSG:3857" })].filter(Boolean) as Feature[];
             } else if (isIDRISI) {
-              features = [];
+              features = parseVCT(buf, vdcTextFull);
             } else { features = []; }
 
             if (!isActive) return;

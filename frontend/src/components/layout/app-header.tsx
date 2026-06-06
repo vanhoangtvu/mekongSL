@@ -30,9 +30,9 @@ export function AppHeader() {
           <div className="app-brand">
             <Link href="/" className="app-logo">
               <Image src="/logo.png" alt="Mekong Salt Lab" width={158} height={30} style={{ objectFit: "contain" }} />
-              Environment Data For Mekong
+              Environmental Data For Mekong
             </Link>
-            <p className="app-slogan">Bring optimum water solutions for people</p>
+             <p className="app-slogan">Empowering Sustainable Water Management Through Data</p>
           </div>
         </div>
         <nav className="app-header-nav">

@@ -9,7 +9,12 @@ import lombok.NoArgsConstructor;
  * Represents one measurement parameter (e.g., pH, EC, Coliform) within a water quality sample.
  */
 @Entity
-@Table(name = "water_quality_parameter")
+@Table(
+    name = "water_quality_parameter",
+    indexes = {
+        @Index(name = "idx_wq_param_sample_sort", columnList = "sample_id, sort_order")
+    }
+)
 @Data
 @NoArgsConstructor
 @AllArgsConstructor

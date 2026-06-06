@@ -572,6 +572,12 @@ export async function listWaterQualitySamples(stationDbId: number): Promise<Wate
   );
 }
 
+export async function listRecentWaterQualitySamples(): Promise<WaterQualitySampleDto[]> {
+  return requestJson<WaterQualitySampleDto[]>(
+    getBackendAdminUrl('/gis/water-quality/recent')
+  );
+}
+
 export async function getWaterQualitySample(sampleId: number): Promise<WaterQualitySampleDto> {
   return requestJson<WaterQualitySampleDto>(
     getBackendAdminUrl(`/gis/water-quality/sample/${sampleId}`)

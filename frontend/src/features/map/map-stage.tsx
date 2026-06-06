@@ -1150,10 +1150,14 @@ export function MapStage({ startDateTime, endDateTime, appliedDatasets, onRemove
   useEffect(() => {
     const selectedLookup = new Set((appliedDatasets ?? []).map((ds) => ds.id));
     const selected: PlayerLayer[] = [];
+    const seenKeys = new Set<string>();
     const unselected: PlayerLayer[] = [];
     // First build selected in reverse click order (last clicked = top)
     const reversed = [...(appliedDatasets ?? [])].reverse();
     for (const ds of reversed) {
+      const layerKey = `${ds.id}-${ds.type}`;
+      if (seenKeys.has(layerKey)) continue; // deduplicate
+      seenKeys.add(layerKey);
       const child = ALL_AVAILABLE_LAYERS.find((l) => l.id === ds.id);
       if (child) {
         selected.push({ ...child, added: true, type: ds.type });
@@ -1174,10 +1178,11 @@ export function MapStage({ startDateTime, endDateTime, appliedDatasets, onRemove
     // Then append unselected in original ALL_AVAILABLE_LAYERS order
     for (const al of ALL_AVAILABLE_LAYERS) {
       if (!selectedLookup.has(al.id)) {
-        unselected.push({ ...al, added: false });
+        unselected.push({ ...al, added: false, type: undefined });
       }
     }
     setPlayerLayers([...selected, ...unselected]);
+    setPendingLayerId(null); // close any open popover when list rebuilds
   }, [appliedDatasets]);
 
   // Sync map layer z-order, visibility and opacity with playerLayers
@@ -1342,7 +1347,8 @@ export function MapStage({ startDateTime, endDateTime, appliedDatasets, onRemove
   };
 
   const removeLayer = (key: string) => {
-    setPlayerLayers(prev => prev.map(l => getLayerKey(l) === key ? { ...l, added: false } : l));
+    setPlayerLayers(prev => prev.map(l => getLayerKey(l) === key ? { ...l, added: false, type: undefined } : l));
+    setPendingLayerId(prev => prev === key ? null : prev);
     // Sync ngược lên appliedDatasets
     const [id, type] = key.split(/-(?=[^-]*$)/); // split at last dash
     onRemoveDataset?.(id, type ?? "raster");

@@ -14,7 +14,12 @@ import java.util.List;
  * Each sample can have multiple parameters (pH, EC, Salinity, etc.)
  */
 @Entity
-@Table(name = "water_quality_sample")
+@Table(
+    name = "water_quality_sample",
+    indexes = {
+        @Index(name = "idx_wq_sample_station_date", columnList = "station_db_id, sample_date")
+    }
+)
 @Data
 @NoArgsConstructor
 @AllArgsConstructor

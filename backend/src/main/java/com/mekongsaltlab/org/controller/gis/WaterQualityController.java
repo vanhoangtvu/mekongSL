@@ -183,8 +183,10 @@ public class WaterQualityController {
 
             // Xử lý trùng lặp
             if (overwrite) {
-                sampleRepo.findByStationIdAndSampleDate(station.getId(), date)
-                    .ifPresent(existing -> sampleRepo.delete(existing));
+                List<WaterQualitySample> existingSamples = sampleRepo.findByStationIdAndSampleDate(station.getId(), date);
+                if (!existingSamples.isEmpty()) {
+                    sampleRepo.deleteAll(existingSamples);
+                }
             }
 
             // Tạo sample
@@ -224,6 +226,16 @@ public class WaterQualityController {
         } catch (Exception e) {
             return ResponseEntity.internalServerError().build();
         }
+    }
+
+    @GetMapping("/recent")
+    public ResponseEntity<List<SampleDto>> listRecent() {
+        log.info("=== listRecent samples ===");
+        List<WaterQualitySample> samples = sampleRepo.findAllOrderByImportedAtDesc();
+        List<SampleDto> result = samples.stream()
+            .map(s -> toSampleDto(s, null))
+            .toList();
+        return ResponseEntity.ok(result);
     }
 
     // ─── List samples of a station ───────────────────────────────────────────
@@ -288,13 +300,20 @@ public class WaterQualityController {
      * Row 2+: data rows
      */
     private ParsedExcel parseSheet(Sheet sheet) {
-        // Dòng 0: tiêu đề
+        // Dòng 0: tiêu đề - Tìm ô đầu tiên có chữ
         Row headerRow = sheet.getRow(0);
-        String rawHeader = getCellStringFull(headerRow, 0);
-        if (rawHeader.isEmpty()) rawHeader = getCellStringFull(headerRow, 1);
+        String rawHeader = "";
+        if (headerRow != null) {
+            for (int c = 0; c < headerRow.getLastCellNum(); c++) {
+                String val = getCellStringFull(headerRow, c);
+                if (!val.isBlank()) {
+                    rawHeader = val;
+                    break;
+                }
+            }
+        }
 
         // Nhận diện mã trạm: lấy phần trước dấu : hoặc space đầu tiên
-        // Ví dụ: "SL7:" → "SL7", "SL9 SURFACE" → "SL9"
         String stationId = extractStationId(rawHeader);
 
         // Nhận diện vùng (ZONE)
@@ -303,11 +322,33 @@ public class WaterQualityController {
         // Nhận diện tiêu chuẩn QCVN từ dòng tiêu đề cột (Row 1 hoặc Row 2)
         String qcvnStandard = extractQcvn(sheet);
 
-        // Tìm dòng tiêu đề cột (có chữ PARAMETRS hoặc PARAMETERS)
-        int dataStartRow = findDataStartRow(sheet);
+        // Tìm dòng tiêu đề cột (có chữ PARAMETRS hoặc PARAMETERS) và các chỉ số cột tương ứng
+        int headerRowIndex = findHeaderRowIndex(sheet);
+        int colParam = 0;
+        int colUnit = 1;
+        int colValue = 2;
+        int colRef = 3;
+
+        if (headerRowIndex != -1) {
+            Row hr = sheet.getRow(headerRowIndex);
+            for (int c = 0; c < hr.getLastCellNum(); c++) {
+                String val = getCellStringFull(hr, c).toUpperCase().trim();
+                if (val.contains("PARAMETR")) {
+                    colParam = c;
+                } else if (val.contains("UNIT")) {
+                    colUnit = c;
+                } else if (val.contains("VALUE")) {
+                    colValue = c;
+                } else if (val.contains("REF")) {
+                    colRef = c;
+                }
+            }
+        }
+
+        int dataStartRow = headerRowIndex != -1 ? headerRowIndex + 1 : 2;
 
         // Parse thông số
-        List<ParameterDto> parameters = parseParameters(sheet, dataStartRow);
+        List<ParameterDto> parameters = parseParameters(sheet, dataStartRow, colParam, colUnit, colValue, colRef);
 
         return new ParsedExcel(stationId, zone, qcvnStandard, rawHeader, parameters);
     }
@@ -353,23 +394,23 @@ public class WaterQualityController {
         return null;
     }
 
-    /** Tìm row index bắt đầu dữ liệu thực sự (sau dòng PARAMETRS) */
-    private int findDataStartRow(Sheet sheet) {
+    /** Tìm row index của dòng tiêu đề (chứa PARAMETR) */
+    private int findHeaderRowIndex(Sheet sheet) {
         for (int r = 0; r <= 5; r++) {
             Row row = sheet.getRow(r);
             if (row == null) continue;
             for (int c = 0; c < row.getLastCellNum(); c++) {
                 String val = getCellStringFull(row, c).toUpperCase();
                 if (val.contains("PARAMETR")) {
-                    return r + 1; // dòng dữ liệu bắt đầu ngay sau
+                    return r;
                 }
             }
         }
-        return 2; // fallback
+        return -1;
     }
 
     /** Parse tất cả dòng thông số bắt đầu từ dataStartRow */
-    private List<ParameterDto> parseParameters(Sheet sheet, int dataStartRow) {
+    private List<ParameterDto> parseParameters(Sheet sheet, int dataStartRow, int colParam, int colUnit, int colValue, int colRef) {
         List<ParameterDto> result = new ArrayList<>();
         int sortOrder = 0;
 
@@ -377,14 +418,13 @@ public class WaterQualityController {
             Row row = sheet.getRow(r);
             if (row == null) continue;
 
-            // Tên thông số ở cột A (index 0)
-            String paramName = getCellStringFull(row, 0);
+            String paramName = getCellStringFull(row, colParam);
             if (paramName.isBlank()) continue; // dòng trống
 
-            String unit = getCellStringFull(row, 1);
-            String valueRaw = getCellStringFull(row, 2);
+            String unit = getCellStringFull(row, colUnit);
+            String valueRaw = getCellStringFull(row, colValue);
             if (valueRaw.isBlank()) continue; // dòng không có giá trị → bỏ qua
-            String refStd = getCellStringFull(row, 3);
+            String refStd = getCellStringFull(row, colRef);
 
             // Parse giá trị số
             Double valueNumeric = parseNumeric(valueRaw);
