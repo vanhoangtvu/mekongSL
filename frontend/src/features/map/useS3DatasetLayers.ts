@@ -89,21 +89,55 @@ export function useS3DatasetLayers(
       }
     }
 
-    // Slot/date changed → check cache for exact slot match (only for non-firstApply datasets)
+    // Slot/date changed → check cache for closest slot match for each dataset
     if (dateChanged || (timeSlot && prevKeys.length > 0)) {
       const cached = layersCacheRef.current[dateStr];
       if (cached) {
         activeDateRef.current = dateStr;
         const exact: Record<string, RenderedLayer> = {};
-        for (const [k, v] of Object.entries(cached)) {
-          if ((!timeSlot || k.endsWith(`__${timeSlot}`)) && next.has(k.split("__")[0])) {
-            exact[k] = v;
+        const dsPrefixes = [...next];
+        
+        for (const prefix of dsPrefixes) {
+          // 1. Try exact match first
+          const exactKey = timeSlot ? `${prefix}__${dateStr}__${timeSlot}` : null;
+          if (exactKey && cached[exactKey]) {
+            exact[exactKey] = cached[exactKey];
+            continue;
+          }
+          
+          // 2. Fallback to closest slot in the same day
+          const availKeys = Object.keys(cached).filter(k => k.startsWith(`${prefix}__`));
+          if (availKeys.length > 0) {
+            if (!timeSlot) {
+              // No timeSlot, just take the first one (usually 00-00)
+              exact[availKeys[0]] = cached[availKeys[0]];
+            } else {
+              const targetMinutes = parseInt(timeSlot.split("-")[0]) * 60 + parseInt(timeSlot.split("-")[1]);
+              let bestKey = availKeys[0];
+              let minDiff = Infinity;
+              
+              for (const k of availKeys) {
+                const slotMatch = k.match(/__(\d{2}-\d{2})$/);
+                if (slotMatch) {
+                  const [hh, mm] = slotMatch[1].split("-").map(Number);
+                  const diff = Math.abs((hh * 60 + mm) - targetMinutes);
+                  if (diff < minDiff) {
+                    minDiff = diff;
+                    bestKey = k;
+                  }
+                }
+              }
+              exact[bestKey] = cached[bestKey];
+            }
           }
         }
-        const cachedPrefixes = new Set(Object.keys(exact).map(k => k.split("__")[0]));
-        const allInCache = [...next].every(key => cachedPrefixes.has(key));
-        if (allInCache) { setRenderedLayers(exact); return; }
-        if (Object.keys(exact).length > 0) setRenderedLayers(exact);
+
+        if (Object.keys(exact).length > 0) {
+          setRenderedLayers(exact);
+          // If we have all requested datasets represented, we can skip fetching
+          const foundPrefixes = new Set(Object.keys(exact).map(k => k.split("__")[0]));
+          if (dsPrefixes.every(p => foundPrefixes.has(p))) return;
+        }
       }
     }
 
@@ -252,29 +286,68 @@ export function useS3DatasetLayers(
                 const bestDate = lte[lte.length - 1];
                 const tifsForDate = allTifs.filter(f => dateOf(f.key ?? "") === bestDate);
 
-                // Get all available slots for this date (not just the current timeSlot)
+                // Get all available slots for this date
                 const allSlotsForDate = [...new Set(tifsForDate.map(f => {
                   const m = f.key?.match(/\/(\d{2}-\d{2})\//);
                   return m ? m[1] : "00-00";
                 }))].sort();
 
-                // Load ALL slots available for this date (for timelapse playback)
+                // Load ALL slots into cache for timelapse playback
+                let firstSlotKey: string | null = null;
                 for (const slot of allSlotsForDate) {
                   const pickedTif = tifsForDate.find(f => f.key?.includes(`/${slot}/`));
                   if (pickedTif) {
                     const frameKey = `${dsKey}__${bestDate.replace(/\//g, "-")}__${slot}`;
-                    if (!additions[frameKey]) {
-                      additions[frameKey] = {
-                        name: parent ? `${parent.name} - ${catName} (${slot})` : `${catName} (${slot})`,
-                        proxyUrl: `/api/tif?key=${encodeURIComponent(pickedTif.key!)}`,
-                        type: "raster",
-                        bbox: [594885, 1052655, 688485, 1117455],
-                        nodata: -9999,
-                      };
+                    // Add to layersCacheRef directly
+                    if (!layersCacheRef.current[bestDate.replace(/\//g, "-")]) {
+                      layersCacheRef.current[bestDate.replace(/\//g, "-")] = {};
+                    }
+                    layersCacheRef.current[bestDate.replace(/\//g, "-")][frameKey] = {
+                      name: parent ? `${parent.name} - ${catName} (${slot})` : `${catName} (${slot})`,
+                      proxyUrl: `/api/tif?key=${encodeURIComponent(pickedTif.key!)}`,
+                      type: "raster",
+                      bbox: [594885, 1052655, 688485, 1117455],
+                      nodata: -9999,
+                    };
+                    
+                    if (!firstSlotKey) {
+                      firstSlotKey = frameKey;
                       rasterFound = true;
+                      // Only add ONE slot to additions (the initial visible layer)
+                      // If timeSlot is specified, find the closest one instead of the first one later.
+                      additions[frameKey] = layersCacheRef.current[bestDate.replace(/\//g, "-")][frameKey];
                     }
                   }
                 }
+                
+                // If a specific timeSlot was requested, make sure we show the closest one initially instead of just the first one
+                if (firstSlotKey && timeSlot) {
+                  const targetMinutes = parseInt(timeSlot.split("-")[0]) * 60 + parseInt(timeSlot.split("-")[1]);
+                  let bestKey = firstSlotKey;
+                  let minDiff = Infinity;
+                  
+                  const cacheForDate = layersCacheRef.current[bestDate.replace(/\//g, "-")];
+                  const availKeys = Object.keys(cacheForDate).filter(k => k.startsWith(`${dsKey}__`));
+                  
+                  for (const k of availKeys) {
+                    const slotMatch = k.match(/__(\d{2}-\d{2})$/);
+                    if (slotMatch) {
+                      const [hh, mm] = slotMatch[1].split("-").map(Number);
+                      const diff = Math.abs((hh * 60 + mm) - targetMinutes);
+                      if (diff < minDiff) {
+                        minDiff = diff;
+                        bestKey = k;
+                      }
+                    }
+                  }
+                  
+                  // If closest is not the first one, swap it
+                  if (bestKey !== firstSlotKey) {
+                    delete additions[firstSlotKey];
+                    additions[bestKey] = cacheForDate[bestKey];
+                  }
+                }
+                
                 break;
               }
             }

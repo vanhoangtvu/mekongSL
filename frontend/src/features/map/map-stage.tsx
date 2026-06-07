@@ -15,12 +15,12 @@ import Point from "ol/geom/Point";
 import { Style, Circle, Fill, Stroke, Text } from "ol/style";
 import proj4 from "proj4";
 import { register } from "ol/proj/proj4";
-import { DATASETS, getRootDataset } from "../../lib/constants/datasets";
+import { DATASETS, getRootDataset, getDatasetSlug, getParentDataset, getDatasetById } from "../../lib/constants/datasets";
 import { ECOWITT_DEVICES, type EcowittDevice } from "../../lib/constants/data-sources";
 import { useS3DatasetLayers } from "./useS3DatasetLayers";
 import { useTimelapseLayer } from "./useTimelapseLayer";
 import type { ManualStation } from "../../lib/admin-api";
-import { listWaterQualitySamples, getWaterQualitySample, getBackendAdminUrl, type WaterQualitySampleDto } from "../../lib/admin-api";
+import { listWaterQualitySamples, getWaterQualitySample, getBackendAdminUrl, listS3Files, type WaterQualitySampleDto } from "../../lib/admin-api";
 import { MapPin, Activity, Image, Calendar, X, Play, Pause, SkipForward, SkipBack, Layers, Plus, Clock } from "lucide-react";
 
 // Register UTM 48N projection
@@ -1013,7 +1013,7 @@ export const MapStage = React.memo(function MapStage({ startDateTime, endDateTim
   useEffect(() => { isTimelinePlayingRef.current = isTimelinePlaying; }, [isTimelinePlaying]);
   const [pbLoading, setPbLoading] = useState(false);
   const [pbProgressText, setPbProgressText] = useState("");
-  const [playbackQueue, setPlaybackQueue] = useState<{ label: string; layers: Record<string, RenderedLayer> }[]>([]);
+  const [playbackQueue, setPlaybackQueue] = useState<{ label: string; layers: Record<string, import("./useS3DatasetLayers").RenderedLayer> }[]>([]);
   const [playbackIndex, setPlaybackIndex] = useState(0);
 
   const onActualSlot = (actualDate: string, actualSlot: string) => {
@@ -1023,6 +1023,16 @@ export const MapStage = React.memo(function MapStage({ startDateTime, endDateTim
     const idx = timelineUnits.findIndex(u => u.value === targetValue);
     if (idx >= 0) setTimelineIndex(idx);
   };
+
+  // Only Hydrology datasets support timeline/timelapse (hydro-salinity, hydro-temp, hydro-ph)
+  // Water Quality and Weather are static/separate and shouldn't block the timeline UI
+  const HYDROLOGY_IDS = new Set(["hydro-salinity", "hydro-temp", "hydro-ph"]);
+  const IGNORE_TIMELAPSE_BLOCKERS = new Set(["wq-surface", "wq-ground", "weather"]);
+  
+  const hasAppliedDatasets = (appliedDatasets?.length ?? 0) > 0;
+  const timelapseSupported = !hasAppliedDatasets || (appliedDatasets ?? []).every(d => 
+    HYDROLOGY_IDS.has(d.id) || IGNORE_TIMELAPSE_BLOCKERS.has(d.id)
+  );
 
   // Use useS3DatasetLayers for all applied datasets to support overlapping multiple layers
   const s3Result = useS3DatasetLayers(
@@ -1154,168 +1164,156 @@ export const MapStage = React.memo(function MapStage({ startDateTime, endDateTim
     const start = new Date(pbStartDate);
     const end = new Date(pbEndDate);
     const diffDays = Math.ceil((end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24));
-    
+
     if (diffDays < 0 || diffDays > 7) {
       setPbError("Please select a range between 0 and 7 days.");
       return;
     }
 
-    setShowPlaybackPicker(false); // Auto-close picker immediately
+    setShowPlaybackPicker(false);
     setPbLoading(true);
-    setPbProgressText("Listing files from S3...");
     setPbError("");
 
     try {
-      const activeDs = (appliedDatasets ?? []).filter(d => d.type === "raster" || d.type === "vector");
-      if (activeDs.length === 0) throw new Error("No active datasets selected.");
+      const activeDs = (appliedDatasets ?? []).filter(d => d.type === "raster");
+      if (activeDs.length === 0) throw new Error("No active raster datasets selected.");
 
-      const activeKeys = new Set(activeDs.map(ds => `${ds.id}-${ds.type}`));
-      const activeNames = activeDs.map(d => d.id.replace("hydro-", "").toUpperCase()).join(", ");
-
-      // --- Memory Cleanup: Purge caches for inactive datasets ---
-      setPbProgressText("Cleaning up memory...");
-      
-      // 1. Clear Source Cache (heavy GeoTIFF objects)
-      for (const key of Array.from(sourceCacheRef.current.keys())) {
-        const prefix = key.split("__")[0];
-        if (!activeKeys.has(prefix)) {
-          sourceCacheRef.current.delete(key);
-        }
+      // Build all dates in range
+      const dates: string[] = [];
+      const cur = new Date(pbStartDate);
+      while (cur <= end) {
+        const y = cur.getFullYear();
+        const m = String(cur.getMonth() + 1).padStart(2, "0");
+        const d = String(cur.getDate()).padStart(2, "0");
+        dates.push(`${y}-${m}-${d}`);
+        cur.setDate(cur.getDate() + 1);
       }
-      
-      // 2. Clear Metadata Cache
-      for (const dateStr of Object.keys(layersCacheRef.current)) {
-        const dayCache = layersCacheRef.current[dateStr];
-        for (const key of Object.keys(dayCache)) {
-          const prefix = key.split("__")[0];
-          if (!activeKeys.has(prefix)) {
-            delete dayCache[key];
+
+      // frameMap: dateSlot → { dsKey → RenderedLayer }
+      type RLayer = import("./useS3DatasetLayers").RenderedLayer;
+      const frameMap: Record<string, Record<string, RLayer>> = {};
+
+      const dateOf = (k: string) => {
+        const mm = k.match(/\/(\d{4})\/(\d{2})\/(\d{2})\//);
+        return mm ? `${mm[1]}/${mm[2]}/${mm[3]}` : "";
+      };
+
+      // Group dates by month for bulk listing
+      const monthGroups: Record<string, string[]> = {};
+      for (const d of dates) {
+        const mk = d.slice(0, 7); // "YYYY-MM"
+        if (!monthGroups[mk]) monthGroups[mk] = [];
+        monthGroups[mk].push(d);
+      }
+
+      for (const ds of activeDs) {
+        const dsKey = `${ds.id}-${ds.type}`;
+        const parent = getParentDataset(ds.id);
+        const dsInfo = getDatasetById(ds.id);
+        const root = getRootDataset(ds.id);
+        const catName = dsInfo?.name || ds.id;
+
+        let datasetSlug: string, categorySlug: string;
+        if (root && root.id !== ds.id) {
+          datasetSlug = getDatasetSlug(root.id) || root.id;
+          const rel = ds.id.startsWith(root.id + "/") ? ds.id.slice(root.id.length + 1) : ds.id;
+          categorySlug = getDatasetSlug(ds.id) || rel;
+        } else if (parent) {
+          datasetSlug = getDatasetSlug(parent.id) || parent.id;
+          const rel = ds.id.startsWith(parent.id + "/") ? ds.id.slice(parent.id.length + 1) : ds.id;
+          categorySlug = getDatasetSlug(ds.id) || rel;
+        } else {
+          datasetSlug = getDatasetSlug(ds.id) || ds.id;
+          categorySlug = "default";
+        }
+
+        const basePrefix = `gis-data/${datasetSlug}/${categorySlug}/`;
+
+        for (const [ym, ymDates] of Object.entries(monthGroups)) {
+          const [y, m] = ym.split("-");
+          const monthPrefix = `${basePrefix}${y}/${m}/`;
+          setPbProgressText(`Fetching ${catName} ${ym}…`);
+
+          let result;
+          try { result = await listS3Files(monthPrefix); } catch { continue; }
+          if (result._error) continue;
+
+          const tifs = result.files.filter(f => f.key?.match(/\.tiff?$/i));
+          const allDatesSet = new Set(ymDates);
+
+          for (const tif of tifs) {
+            const dPath = dateOf(tif.key!);
+            if (!dPath) continue;
+            const dateKey = dPath.replace(/\//g, "-");
+            if (!allDatesSet.has(dateKey)) continue;
+            const sm = tif.key!.match(/\/(\d{2}-\d{2})\//);
+            const slot = sm ? sm[1] : "00-00";
+            const frameKey = `${dateKey}__${slot}`;
+            if (!frameMap[frameKey]) frameMap[frameKey] = {};
+            const layerKey = `${dsKey}__${dateKey}__${slot}`;
+            frameMap[frameKey][layerKey] = {
+              name: parent ? `${parent.name} - ${catName} (${slot})` : `${catName} (${slot})`,
+              proxyUrl: `/api/tif?key=${encodeURIComponent(tif.key!)}`,
+              type: "raster",
+              bbox: [594885, 1052655, 688485, 1117455],
+              nodata: -9999,
+            };
+            // Also populate layersCacheRef for timeline use
+            layersCacheRef.current[dateKey] = layersCacheRef.current[dateKey] ?? {};
+            layersCacheRef.current[dateKey][layerKey] = frameMap[frameKey][layerKey];
           }
         }
       }
 
-      // Step 1: Ensure timeline covers the range
-      const firstInTimeline = timelineUnits.length > 0 ? timelineUnits[0].value.slice(0, 10) : null;
-      const lastInTimeline = timelineUnits.length > 0 ? timelineUnits[timelineUnits.length - 1].value.slice(0, 10) : null;
-      const rangeCoversPlayback = firstInTimeline && lastInTimeline &&
-        firstInTimeline <= pbStartDate && lastInTimeline >= pbEndDate;
-
-      if (!rangeCoversPlayback) {
-        if (onStartDateTimeChange) onStartDateTimeChange(pbStartDate + "T00:00");
-        if (onEndDateTimeChange) onEndDateTimeChange(pbEndDate + "T23:59");
-        setPbProgressText("Expanding timeline...");
-        await new Promise(r => setTimeout(r, 2000));
-      }
-
-      const frames = timelineUnits.filter(u => {
-        const d = u.value.slice(0, 10);
-        return d >= pbStartDate && d <= pbEndDate;
-      });
-
-      console.log("[Playback] frames count:", frames.length, "timelineUnits:", timelineUnits.length, "pbStartDate:", pbStartDate, "pbEndDate:", pbEndDate, "activeDs:", activeDs);
-      if (frames.length === 0) throw new Error("No data frames in the selected range.");
-
-      const queue: { label: string; layers: Record<string, RenderedLayer> }[] = [];
-      
-      // We wait for metadata to appear in cache for ALL selected datasets
-      for (let attempt = 0; attempt < 15; attempt++) {
-        queue.length = 0;
-        let missingTotal = 0;
-        let missingNames = new Set<string>();
-
-        for (const f of frames) {
-          const dateStr = f.value.slice(0, 10);
-          const slot = f.value.slice(11, 16).replace(":", "-");
-          const frameLayers: Record<string, RenderedLayer> = {};
-          
-          const cachedDay = layersCacheRef.current[dateStr];
-          console.log("[Playback] checking date:", dateStr, "cached:", !!cachedDay, "cacheKeys:", cachedDay ? Object.keys(cachedDay).length : 0);
-          let foundAnyForThisFrame = false;
-
-          for (const ds of activeDs) {
-            const dsKey = `${ds.id}-${ds.type}`;
-            const exactKey = `${dsKey}__${dateStr}__${slot}`;
-            
-            let datasetFound = false;
-            console.log("[Playback] dsKey:", dsKey, "exactKey:", exactKey, "hasCachedDay:", !!cachedDay);
-            if (cachedDay && cachedDay[exactKey]) {
-              frameLayers[exactKey] = cachedDay[exactKey];
-              datasetFound = true;
-            } else if (cachedDay) {
-              const nearestKey = Object.keys(cachedDay).find(k => k.startsWith(dsKey + "__"));
-              if (nearestKey) {
-                frameLayers[nearestKey] = cachedDay[nearestKey];
-                datasetFound = true;
-              }
-            }
-            
-            if (datasetFound) {
-              foundAnyForThisFrame = true;
-            } else {
-              missingTotal++;
-              missingNames.add(ds.id.replace("hydro-", "").toUpperCase());
-            }
-          }
-
-          if (foundAnyForThisFrame) {
-            queue.push({ label: f.label, layers: frameLayers });
+      // Build ordered queue from OBS_HOURS order
+      const queue: { label: string; layers: Record<string, RLayer> }[] = [];
+      for (const date of dates) {
+        for (const h of OBS_HOURS) {
+          const slot = `${String(h).padStart(2, "0")}-00`;
+          const frameKey = `${date}__${slot}`;
+          const layers = frameMap[frameKey];
+          if (layers && Object.keys(layers).length > 0) {
+            const hh = String(h).padStart(2, "0");
+            const [, mm, dd] = date.split("-");
+            queue.push({ label: `${Number(dd)}/${Number(mm)} ${hh}:00`, layers });
           }
         }
-
-        // If we found everything or we've tried for 15s and found at least something
-        if (missingTotal === 0 && queue.length === frames.length) break;
-        if (attempt === 14 && queue.length > 0) break; // Final attempt
-        
-        const missingStr = Array.from(missingNames).join(", ");
-        setPbProgressText(`Syncing ${activeNames}... (Waiting for: ${missingStr})`);
-        await new Promise(r => setTimeout(r, 1000));
       }
 
-      if (queue.length === 0) throw new Error("No data ready. Ensure S3 has files for the selected range.");
+      if (queue.length === 0) throw new Error("No data found in S3 for the selected range.");
 
-      // Step 4: Real Data Pre-loading (Fetch TIFF Headers)
-      setPbProgressText(`Warming up ${queue.length} frames...`);
-      const totalFrames = queue.length;
-      let loadedFrames = 0;
-
+      // Preload GeoTIFF sources
+      setPbProgressText(`Preloading ${queue.length} frames…`);
+      let loaded = 0;
       for (const item of queue) {
-        const frameEntries = Object.entries(item.layers);
-        await Promise.all(frameEntries.map(async ([frameKey, info]) => {
-          if (info.type !== "raster") return;
+        await Promise.all(Object.entries(item.layers).map(async ([frameKey, info]) => {
           if (sourceCacheRef.current.get(frameKey)?.ready) return;
-
           try {
             const url = info.proxyUrl.startsWith("http") ? info.proxyUrl : `${window.location.origin}${info.proxyUrl}`;
-            const source = new (await import("ol/source/GeoTIFF")).default({
-              sources: [{ url, nodata: info.nodata }],
-              convertToRGB: false, normalize: false, interpolate: false,
-              projection: "EPSG:32648",
-            });
+            const GeoTIFF = (await import("ol/source/GeoTIFF")).default;
+            const source = new GeoTIFF({ sources: [{ url, nodata: (info as { nodata?: number }).nodata ?? -9999 }], convertToRGB: false, normalize: false, interpolate: false, projection: "EPSG:32648" });
             await source.getView();
             sourceCacheRef.current.set(frameKey, { source, ready: true });
-          } catch (e) { console.warn("[playback-preload] failed for", frameKey, e); }
+          } catch { /* skip bad frame */ }
         }));
-        loadedFrames++;
-        setPbProgressText(`Loading pixels (${loadedFrames}/${totalFrames})...`);
+        loaded++;
+        setPbProgressText(`Loading pixels (${loaded}/${queue.length})…`);
       }
 
       setPlaybackQueue(queue);
       setPlaybackIndex(0);
       setIsTimelinePlaying(true);
-    } catch (err: any) {
-      setPbError(err.message || "Failed to start playback.");
+    } catch (err: unknown) {
+      setPbError(err instanceof Error ? err.message : "Failed to start playback.");
     } finally {
       setPbLoading(false);
     }
   };
 
   const confirmAddLayer = (key: string, layerType: "raster" | "vector") => {
-    console.log("[MapStage] confirmAddLayer", { key, layerType });
     setPlayerLayers(prev => prev.map(l => getLayerKey(l) === key ? { ...l, added: true, type: layerType } : l));
     setPendingLayerId(null);
-    // Sync lên appliedDatasets — lấy id từ key (bỏ suffix -raster/-vector nếu có)
     const id = key.replace(/-(?:raster|vector)$/, "");
-    console.log("[MapStage] calling onAddDataset", { id, layerType });
     onAddDataset?.(id, layerType);
   };
 
@@ -1650,7 +1648,7 @@ export const MapStage = React.memo(function MapStage({ startDateTime, endDateTim
                 const info = renderedLayersRef.current[key];
                 
                 // Only collect if value is NOT background (0) or NoData
-                if (val !== 0 && val !== info.nodata) {
+                if (val !== 0 && val !== (info as { nodata?: number }).nodata) {
                   collected[key] = val;
                   if (firstValue === null) firstValue = val;
                 }
@@ -1707,7 +1705,7 @@ export const MapStage = React.memo(function MapStage({ startDateTime, endDateTim
                 const info = renderedLayersRef.current[key];
                 
                 // Only collect if value is NOT background (0) or NoData
-                if (val !== 0 && val !== info.nodata) {
+                if (val !== 0 && val !== (info as { nodata?: number }).nodata) {
                   collected[key] = val;
                   if (firstValue === null) firstValue = val;
                 }
@@ -2469,6 +2467,7 @@ export const MapStage = React.memo(function MapStage({ startDateTime, endDateTim
                 data-unit-mode={timelineData.mode} 
                 title="Timeline control"
                 onMouseLeave={() => setHoverTime(null)}
+                style={!timelapseSupported ? { opacity: 0.45, pointerEvents: "none" } : undefined}
               >
                 {hoverTime && (
                   <div 
@@ -2578,17 +2577,35 @@ export const MapStage = React.memo(function MapStage({ startDateTime, endDateTim
             )}
 
             {/* Time-Lapse Button & Dropdown Control */}
-            <div className="map-playback-control">
+            <div className="map-playback-control" style={{ position: "relative" }}>
               <button
                 className="map-playback-btn"
-                onClick={handleOpenPlayback}
+                onClick={timelapseSupported ? handleOpenPlayback : undefined}
                 type="button"
-                title="Time-lapse map animation"
+                title={timelapseSupported ? "Time-lapse map animation" : "Timeline only applies to Hydrology data (Salinity, Tidal, pH)"}
+                style={!timelapseSupported ? { opacity: 0.45, cursor: "not-allowed" } : undefined}
               >
                 <Play size={14} fill="currentColor" />
                 <span>Time-Lapse</span>
               </button>
-
+              {!timelapseSupported && hasAppliedDatasets && (
+                <div style={{
+                  position: "absolute",
+                  bottom: "calc(100% + 6px)",
+                  right: 0,
+                  background: "#1e293b",
+                  color: "#f8fafc",
+                  fontSize: "0.72rem",
+                  borderRadius: "6px",
+                  padding: "5px 9px",
+                  whiteSpace: "nowrap",
+                  pointerEvents: "none",
+                  boxShadow: "0 2px 8px rgba(0,0,0,0.25)",
+                  zIndex: 600,
+                }}>
+                  ⚠ Timeline không áp dụng cho layer này
+                </div>
+              )}
             </div>
           </div>
 

@@ -244,13 +244,16 @@ export function useTimelapseLayer(
             if (!tifs.length) continue;
 
             // Build date→slot→tif map from the single month listing
+            // Use allTimelineDates for filtering, not just current month dates
+            const allDatesSet = new Set(allTimelineDates);
             const dateSlotMap = new Map<string, Map<string, typeof tifs[0]>>();
             for (const t of tifs) {
               const d = dateOf(t.key!);
               if (!d) continue;
+              const dateKey = d.replace(/\//g, "-");
+              if (!allDatesSet.has(dateKey)) continue;
               const sm = t.key!.match(/\/(\d{2}-\d{2})\//);
               const slot = sm ? sm[1] : "00-00";
-              if (!dates.includes(d.replace(/\//g, "-"))) continue;
               if (!dateSlotMap.has(d)) dateSlotMap.set(d, new Map());
               dateSlotMap.get(d)!.set(slot, t);
             }

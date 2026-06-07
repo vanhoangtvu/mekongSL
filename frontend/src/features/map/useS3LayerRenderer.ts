@@ -198,7 +198,7 @@ export function useS3LayerRenderer(
     for (const id of Object.keys(currentLayers)) {
       if (renderedIds.has(id)) continue;
       const prefix = getPrefix(id);
-      if (newByPrefix[prefix]) {
+      if (newByPrefix[prefix] && !pendingReplace[prefix]) {
         pendingReplace[prefix] = { oldId: id, done: false };
       } else {
         const layer = currentLayers[id];
@@ -370,6 +370,12 @@ export function useS3LayerRenderer(
 
         const onSourceReady = () => {
           if (source.getState() !== "ready" || !isActive) return;
+          
+          // Populate source cache for future reuse
+          if (sourceCacheRef && !sourceCacheRef.current.has(id)) {
+            sourceCacheRef.current.set(id, { source, ready: true });
+          }
+
           const targetOp = 0.7;
           
           if (pending && !pending.done && currentLayers[pending.oldId]) {
