@@ -2977,7 +2977,7 @@ html[data-theme="dark"] .map-playback-btn:hover {
 /* Responsive Water Quality Popup styling */
 .map-station-popup {
   position: absolute;
-  top: 72px;
+  top: 110px;
   right: 12px;
   max-width: calc(100vw - 24px);
   max-height: 82vh;
@@ -4418,4 +4418,127 @@ html[data-theme="dark"] .map-playback-btn:hover {
     grid-template-columns: 1fr;
     gap: 1.5rem;
   }
+}
+
+/* Ultra-Compact Video-style Time-Lapse Player */
+.map-video-mini-player {
+  position: absolute;
+  bottom: 24px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(800px, 95vw);
+  background: rgba(15, 23, 42, 0.75);
+  backdrop-filter: blur(10px);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 40px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 6px 16px;
+}
+
+.map-video-date-wrap {
+  min-width: 130px;
+  white-space: nowrap;
+}
+
+.map-video-date {
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: #ffffff;
+}
+
+.map-video-seeker-container {
+  flex: 1; /* Take up remaining space */
+  height: 4px;
+  background: rgba(255, 255, 255, 0.2);
+  position: relative;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  border-radius: 2px;
+}
+
+.map-video-seeker-container:hover {
+  height: 6px;
+}
+
+.map-video-seeker-fill {
+  position: absolute;
+  height: 100%;
+  background: #3b82f6;
+  border-radius: 2px;
+}
+
+.map-video-seeker-handle {
+  position: absolute;
+  top: 50%;
+  width: 12px;
+  height: 12px;
+  background: #ffffff;
+  border-radius: 50%;
+  transform: translate(-50%, -50%);
+  opacity: 0;
+  transition: opacity 0.2s ease;
+  box-shadow: 0 0 6px rgba(0, 0, 0, 0.5);
+}
+
+.map-video-seeker-container:hover .map-video-seeker-handle {
+  opacity: 1;
+}
+
+.map-video-mini-right {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.map-video-counter {
+  font-size: 0.75rem;
+  color: #94a3b8;
+  min-width: 45px;
+  text-align: center;
+}
+
+.map-video-btn {
+  background: none;
+  border: none;
+  color: #f8fafc;
+  cursor: pointer;
+  padding: 6px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s ease;
+  flex-shrink: 0;
+}
+
+.map-video-btn:hover {
+  background: rgba(255, 255, 255, 0.15);
+}
+
+.map-video-close {
+  background: none;
+  border: none;
+  color: rgba(255, 255, 255, 0.5);
+  cursor: pointer;
+  padding: 4px;
+  border-radius: 50%;
+  transition: all 0.2s ease;
+}
+
+.map-video-close:hover {
+  background: rgba(239, 68, 68, 0.2);
+  color: #ef4444;
+}
+
+.map-video-spinner {
+  width: 16px;
+  height: 16px;
+  border: 2px solid rgba(59, 130, 246, 0.3);
+  border-top-color: #3b82f6;
+  border-radius: 50%;
+  animation: map-video-spin 0.8s linear infinite;
 }

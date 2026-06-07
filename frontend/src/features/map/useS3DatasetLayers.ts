@@ -127,7 +127,7 @@ export function useS3DatasetLayers(
         const dsInfoCheck = getDatasetById(dsId);
         const parentCheck = getParentDataset(dsId);
         if (dsInfoCheck?.gisData === false || parentCheck?.gisData === false) continue;
-        if (dsId === "wq-surface" || dsId === "wq-ground") continue;
+        if (dsId === "wq-surface" || dsId === "wq-ground" || dsId === "weather") continue;
 
         const parent = getParentDataset(dsId);
         const dsInfo = getDatasetById(dsId);
@@ -284,7 +284,7 @@ export function useS3DatasetLayers(
     void (async () => {
       for (const dateStr of uniqueDates) {
         if (cancelled) break;
-        if (layersCacheRef.current[dateStr]) continue;
+        // Don't skip the entire day, only individual datasets inside the loop
 
         const [y, m, d] = dateStr.split("-").map(Number);
         const md = String(m).padStart(2, "0");
@@ -293,7 +293,14 @@ export function useS3DatasetLayers(
         for (const ds of appliedDatasets) {
           if (cancelled) break;
           const dsKey = `${ds.id}-${ds.type}`;
-          if (layersCacheRef.current[dateStr]?.[dsKey]) continue;
+          
+          if (ds.id === "weather") continue; // Skip weather S3 preloading
+
+          // Check if this specific dataset for this specific day is already cached
+          if (layersCacheRef.current[dateStr] && 
+              Object.keys(layersCacheRef.current[dateStr]).some(k => k.startsWith(dsKey + "__"))) {
+            continue;
+          }
 
           const dsInfo = getDatasetById(ds.id);
           const parent = getParentDataset(ds.id);

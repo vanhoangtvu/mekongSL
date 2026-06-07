@@ -520,29 +520,23 @@ function EcowittStationPopup({
   data,
   loading,
   error,
-  expanded,
   dateStr,
   onDateChange,
   onClose,
-  onExpand,
-  onCollapse,
   isMobile,
 }: {
   device: { id: string; name: string; lat?: number; lng?: number };
   data: EcowittPopupSensorData[];
   loading: boolean;
   error: string;
-  expanded: boolean;
   dateStr: string;
   onDateChange: (d: string) => void;
   onClose: () => void;
-  onExpand: () => void;
-  onCollapse: () => void;
   isMobile?: boolean;
 }) {
   const [hoveredIdx, setHoveredIdx] = useState<number | null>(null);
   const latestData = data.length > 0 ? data[data.length - 1] : null;
-  const popupW = expanded ? "340px" : "290px";
+  const popupW = "420px";
 
   const getLatest = (key: EcowittPopupSensorKey): string => {
     const v = latestData?.[key];
@@ -553,13 +547,13 @@ function EcowittStationPopup({
     <div
       style={{
         position: "absolute",
-        top: isMobile ? "auto" : "72px",
-        bottom: isMobile ? "12px" : expanded ? "110px" : undefined,
+        top: isMobile ? "auto" : "110px",
+        bottom: isMobile ? "12px" : undefined,
         right: isMobile ? "12px" : "12px",
         left: isMobile ? "12px" : undefined,
         width: isMobile ? "auto" : popupW,
         maxWidth: isMobile ? "min(calc(100vw - 24px), 480px)" : "calc(100vw - 24px)",
-        maxHeight: isMobile ? "62vh" : undefined,
+        maxHeight: isMobile ? "62vh" : "82vh",
         background: isMobile ? "rgba(255,255,255,0.92)" : "#fff",
         backdropFilter: isMobile ? "blur(16px)" : undefined,
         WebkitBackdropFilter: isMobile ? "blur(16px)" : undefined,
@@ -682,7 +676,7 @@ function EcowittStationPopup({
       <div
         style={{
           flex: 1,
-          overflowY: isMobile ? "auto" : (expanded ? "auto" : "hidden"),
+          overflowY: "auto",
           minHeight: 0,
           WebkitOverflowScrolling: "touch",
         }}
@@ -718,163 +712,12 @@ function EcowittStationPopup({
           </div>
         )}
 
-        {/* ═══ COMPACT VIEW ═══ */}
-        {!loading && !error && !expanded && (
+        {/* ═══ ALL SENSORS ═══ */}
+        {!loading && !error && (
           <div style={{ padding: "10px" }}>
             {latestData ? (
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "6px" }}>
-                {ECOWITT_POPUP_SENSORS.slice(0, 4).map((sensor) => {
-                  const display = getLatest(sensor.key);
-                  return (
-                    <div
-                      key={sensor.key}
-                      style={{
-                        borderRadius: "10px",
-                        background: `${sensor.color}0e`,
-                        border: `1px solid ${sensor.color}28`,
-                        overflow: "hidden",
-                        padding: isMobile ? "10px 10px 0" : "8px 9px 0",
-                      }}
-                    >
-                      <div
-                        style={{
-                          fontSize: isMobile ? "0.72rem" : "0.6rem",
-                          color: "#64748b",
-                          fontWeight: "600",
-                          textTransform: "uppercase",
-                          letterSpacing: "0.04em",
-                        }}
-                      >
-                        {sensor.label}
-                      </div>
-                      <div
-                        style={{
-                          fontSize: isMobile ? "1.25rem" : "1.1rem",
-                          fontWeight: "800",
-                          color: sensor.color,
-                          marginTop: "1px",
-                        }}
-                      >
-                        {display}
-                        <span
-                          style={{
-                            fontSize: isMobile ? "0.72rem" : "0.62rem",
-                            fontWeight: "500",
-                            color: "#94a3b8",
-                            marginLeft: "2px",
-                          }}
-                        >
-                          {sensor.unit}
-                        </span>
-                      </div>
-                      <SensorChart
-                        data={data}
-                        sensor={sensor}
-                        hoveredIdx={hoveredIdx}
-                        onHover={setHoveredIdx}
-                        chartH={isMobile ? 52 : 40}
-                      />
-                    </div>
-                  );
-                })}
-              </div>
-            ) : (
-              !loading && (
-                <div
-                  style={{
-                    textAlign: "center",
-                    padding: "16px 0",
-                    color: "#94a3b8",
-                    fontSize: "0.8rem",
-                  }}
-                >
-                  No data available today
-                </div>
-              )
-            )}
-
-            {/* Expand button */}
-            <button
-              type="button"
-              onClick={onExpand}
-              style={{
-                width: "100%",
-                marginTop: "8px",
-                padding: isMobile ? "12px 0" : "6px 0",
-                background: "linear-gradient(135deg,rgba(13,110,253,0.07),rgba(13,202,240,0.07))",
-                border: "1px solid rgba(13,110,253,0.18)",
-                borderRadius: "8px",
-                color: "#0d6efd",
-                fontSize: isMobile ? "0.85rem" : "0.72rem",
-                fontWeight: "700",
-                cursor: "pointer",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                gap: "4px",
-                minHeight: isMobile ? "44px" : undefined,
-              }}
-            >
-              View Details
-              <svg
-                width={isMobile ? 14 : 11}
-                height={isMobile ? 14 : 11}
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2.5"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              >
-                <polyline points="6 9 12 15 18 9" />
-              </svg>
-            </button>
-          </div>
-        )}
-
-        {/* ═══ EXPANDED VIEW ═══ */}
-        {!loading && !error && expanded && (
-          <div style={{ padding: "10px" }}>
-            {/* Collapse button */}
-            <button
-              type="button"
-              onClick={onCollapse}
-              style={{
-                width: "100%",
-                marginBottom: "9px",
-                padding: isMobile ? "12px 0" : "5px 0",
-                background: "#f8fafc",
-                border: "1px solid #e2e8f0",
-                borderRadius: "7px",
-                color: "#64748b",
-                fontSize: isMobile ? "0.82rem" : "0.68rem",
-                fontWeight: "700",
-                cursor: "pointer",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                gap: "4px",
-                minHeight: isMobile ? "44px" : undefined,
-              }}
-            >
-              <svg
-                width={isMobile ? 14 : 10}
-                height={isMobile ? 14 : 10}
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2.5"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              >
-                <polyline points="18 15 12 9 6 15" />
-              </svg>
-              Collapse
-            </button>
-
-            {/* Latest values table */}
-            {latestData && (
               <>
+                {/* Latest values table */}
                 <div
                   style={{
                     fontSize: isMobile ? "0.72rem" : "0.6rem",
@@ -907,26 +750,26 @@ function EcowittStationPopup({
                           borderLeft: `2.5px solid ${sensor.color}`,
                         }}
                       >
-                          <div
-                            style={{
-                              fontSize: isMobile ? "0.72rem" : "0.59rem",
-                              color: "#64748b",
-                              fontWeight: "600",
-                              textTransform: "uppercase",
-                              letterSpacing: "0.03em",
-                            }}
-                          >
-                            {sensor.label}
-                          </div>
-                          <div
-                            style={{
-                              fontSize: isMobile ? "1.1rem" : "0.95rem",
-                              fontWeight: "800",
-                              color: sensor.color,
-                              marginTop: "1px",
-                            }}
-                          >
-                            {display}
+                        <div
+                          style={{
+                            fontSize: isMobile ? "0.72rem" : "0.59rem",
+                            color: "#64748b",
+                            fontWeight: "600",
+                            textTransform: "uppercase",
+                            letterSpacing: "0.03em",
+                          }}
+                        >
+                          {sensor.label}
+                        </div>
+                        <div
+                          style={{
+                            fontSize: isMobile ? "1.1rem" : "0.95rem",
+                            fontWeight: "800",
+                            color: sensor.color,
+                            marginTop: "1px",
+                          }}
+                        >
+                          {display}
                           <span
                             style={{
                               fontSize: "0.6rem",
@@ -942,87 +785,84 @@ function EcowittStationPopup({
                     );
                   })}
                 </div>
-              </>
-            )}
 
-            {/* Charts for all 7 sensors */}
-            {data.length > 0 && (
-              <>
-                <div
-                  style={{
-                    fontSize: isMobile ? "0.72rem" : "0.6rem",
-                    fontWeight: "700",
-                    color: "#94a3b8",
-                    textTransform: "uppercase",
-                    letterSpacing: "0.07em",
-                    marginBottom: "8px",
-                  }}
-                >
-                  {"Today's Chart"}
-                </div>
-                {ECOWITT_POPUP_SENSORS.map((sensor) => (
-                  <div key={sensor.key} style={{ marginBottom: "10px" }}>
+                {/* Charts for all sensors */}
+                {data.length > 0 && (
+                  <>
                     <div
                       style={{
-                        display: "flex",
-                        justifyContent: "space-between",
-                        alignItems: "baseline",
-                        marginBottom: "2px",
+                        fontSize: isMobile ? "0.72rem" : "0.6rem",
+                        fontWeight: "700",
+                        color: "#94a3b8",
+                        textTransform: "uppercase",
+                        letterSpacing: "0.07em",
+                        marginBottom: "8px",
                       }}
                     >
-                      <span
-                        style={{
-                          fontSize: isMobile ? "0.8rem" : "0.67rem",
-                          color: "#475569",
-                          fontWeight: "600",
-                        }}
-                      >
-                        {sensor.label}
-                        {sensor.unit && (
+                      {"Today's Chart"}
+                    </div>
+                    {ECOWITT_POPUP_SENSORS.map((sensor) => (
+                      <div key={sensor.key} style={{ marginBottom: "10px" }}>
+                        <div
+                          style={{
+                            display: "flex",
+                            justifyContent: "space-between",
+                            alignItems: "baseline",
+                            marginBottom: "2px",
+                          }}
+                        >
                           <span
                             style={{
-                              color: "#94a3b8",
-                              fontWeight: "400",
-                              marginLeft: "2px",
+                              fontSize: isMobile ? "0.8rem" : "0.67rem",
+                              color: "#475569",
+                              fontWeight: "600",
                             }}
                           >
-                            ({sensor.unit})
+                            {sensor.label}
+                            {sensor.unit && (
+                              <span
+                                style={{
+                                  color: "#94a3b8",
+                                  fontWeight: "400",
+                                  marginLeft: "2px",
+                                }}
+                              >
+                                ({sensor.unit})
+                              </span>
+                            )}
                           </span>
-                        )}
-                      </span>
-                      <span
-                        style={{
-                          fontSize: isMobile ? "0.85rem" : "0.7rem",
-                          color: sensor.color,
-                          fontWeight: "700",
-                        }}
-                      >
-                        {getLatest(sensor.key)}
-                      </span>
-                    </div>
-                    <div
-                      style={{
-                        background: "#f8fafc",
-                        borderRadius: "5px",
-                        overflow: "hidden",
-                        padding: "2px 2px 0",
-                      }}
-                    >
-                      <SensorChart
-                        data={data}
-                        sensor={sensor}
-                        hoveredIdx={hoveredIdx}
-                        onHover={setHoveredIdx}
-                        chartH={isMobile ? 72 : 56}
-                      />
-                    </div>
-                  </div>
-                ))}
+                          <span
+                            style={{
+                              fontSize: isMobile ? "0.85rem" : "0.7rem",
+                              color: sensor.color,
+                              fontWeight: "700",
+                            }}
+                          >
+                            {getLatest(sensor.key)}
+                          </span>
+                        </div>
+                        <div
+                          style={{
+                            background: "#f8fafc",
+                            borderRadius: "5px",
+                            overflow: "hidden",
+                            padding: "2px 2px 0",
+                          }}
+                        >
+                          <SensorChart
+                            data={data}
+                            sensor={sensor}
+                            hoveredIdx={hoveredIdx}
+                            onHover={setHoveredIdx}
+                            chartH={isMobile ? 72 : 56}
+                          />
+                        </div>
+                      </div>
+                    ))}
+                  </>
+                )}
               </>
-            )}
-
-            {/* No data */}
-            {data.length === 0 && (
+            ) : (
               <div
                 style={{
                   textAlign: "center",
@@ -1065,6 +905,31 @@ export const MapStage = React.memo(function MapStage({ startDateTime, endDateTim
   const [flashCoords, setFlashCoords] = useState<[number, number] | null>(null);
   const pendingStationRef = useRef<{ type: 'wq'; id: number; st: ManualStation } | { type: 'ecowitt'; id: string } | null>(null);
   const skipZoomRef = useRef(false);
+  const overlayVisibilityRef = useRef<Record<string, boolean> | null>(null);
+
+  const hideOverlays = useCallback(() => {
+    if (overlayVisibilityRef.current) return; // already saved
+    const layers = layerRefs.current;
+    if (!layers) return;
+    const saved: Record<string, boolean> = {};
+    for (const [key, layer] of Object.entries(layers)) {
+      saved[key] = layer.getVisible();
+      layer.setVisible(false);
+    }
+    overlayVisibilityRef.current = saved;
+  }, []);
+
+  const restoreOverlays = useCallback(() => {
+    const saved = overlayVisibilityRef.current;
+    if (!saved) return;
+    const layers = layerRefs.current;
+    if (!layers) return;
+    for (const [key, visible] of Object.entries(saved)) {
+      const layer = layers[key];
+      if (layer) layer.setVisible(visible);
+    }
+    overlayVisibilityRef.current = null;
+  }, []);
 
   const [timelineUnitMode, setTimelineUnitMode] = useState<TimelineUnitMode>("auto");
 
@@ -1295,6 +1160,7 @@ export const MapStage = React.memo(function MapStage({ startDateTime, endDateTim
       return;
     }
 
+    setShowPlaybackPicker(false); // Auto-close picker immediately
     setPbLoading(true);
     setPbProgressText("Listing files from S3...");
     setPbError("");
@@ -1303,7 +1169,30 @@ export const MapStage = React.memo(function MapStage({ startDateTime, endDateTim
       const activeDs = (appliedDatasets ?? []).filter(d => d.type === "raster" || d.type === "vector");
       if (activeDs.length === 0) throw new Error("No active datasets selected.");
 
+      const activeKeys = new Set(activeDs.map(ds => `${ds.id}-${ds.type}`));
       const activeNames = activeDs.map(d => d.id.replace("hydro-", "").toUpperCase()).join(", ");
+
+      // --- Memory Cleanup: Purge caches for inactive datasets ---
+      setPbProgressText("Cleaning up memory...");
+      
+      // 1. Clear Source Cache (heavy GeoTIFF objects)
+      for (const key of Array.from(sourceCacheRef.current.keys())) {
+        const prefix = key.split("__")[0];
+        if (!activeKeys.has(prefix)) {
+          sourceCacheRef.current.delete(key);
+        }
+      }
+      
+      // 2. Clear Metadata Cache
+      for (const dateStr of Object.keys(layersCacheRef.current)) {
+        const dayCache = layersCacheRef.current[dateStr];
+        for (const key of Object.keys(dayCache)) {
+          const prefix = key.split("__")[0];
+          if (!activeKeys.has(prefix)) {
+            delete dayCache[key];
+          }
+        }
+      }
 
       // Step 1: Ensure timeline covers the range
       const firstInTimeline = timelineUnits.length > 0 ? timelineUnits[0].value.slice(0, 10) : null;
@@ -1410,7 +1299,6 @@ export const MapStage = React.memo(function MapStage({ startDateTime, endDateTim
       setPlaybackQueue(queue);
       setPlaybackIndex(0);
       setIsTimelinePlaying(true);
-      setShowPlaybackPicker(false);
     } catch (err: any) {
       setPbError(err.message || "Failed to start playback.");
     } finally {
@@ -1444,7 +1332,6 @@ export const MapStage = React.memo(function MapStage({ startDateTime, endDateTim
   const [popupData, setPopupData] = useState<EcowittPopupSensorData[]>([]);
   const [popupLoading, setPopupLoading] = useState(false);
   const [popupError, setPopupError] = useState("");
-  const [popupExpanded, setPopupExpanded] = useState(false);
   const [popupDate, setPopupDate] = useState(() => {
     const d = new Date();
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
@@ -1684,6 +1571,8 @@ export const MapStage = React.memo(function MapStage({ startDateTime, endDateTim
               // Clear pixel inspector before flash
               setMouseCoords(null);
               setPixelValues({});
+              // Hide overlays so map is clear
+              hideOverlays();
               // Flash then open popup
               const st = wqStationsRef.current?.find(s => s.id === wqId);
               if (st && st.x != null && st.y != null) {
@@ -1696,6 +1585,7 @@ export const MapStage = React.memo(function MapStage({ startDateTime, endDateTim
               }
             }
           } else {
+            if (selectedWqStation?.id !== wqId) setPopupDeviceId(null);
             setSelectedWqStation((prev) => {
               if (prev?.id === wqId) return null;
               const st = wqStationsRef.current?.find(s => s.id === wqId);
@@ -1715,6 +1605,8 @@ export const MapStage = React.memo(function MapStage({ startDateTime, endDateTim
               // Clear pixel inspector before flash
               setMouseCoords(null);
               setPixelValues({});
+              // Hide overlays so map is clear
+              hideOverlays();
               // Flash then open popup
               const device = ecowittDevices.find(d => d.id === devId);
               if (device && device.lat != null && device.lng != null) {
@@ -1724,6 +1616,7 @@ export const MapStage = React.memo(function MapStage({ startDateTime, endDateTim
               }
             }
           } else {
+            if (popupDeviceId !== devId) setSelectedWqStation(null);
             setPopupDeviceId((prev) => (prev === devId ? null : devId));
           }
           handled = true;
@@ -1750,8 +1643,14 @@ export const MapStage = React.memo(function MapStage({ startDateTime, endDateTim
               if (!renderedLayersRef.current[key]) continue;
               const buf = (layer as import("ol/layer/WebGLTile").default).getData(evt.pixel);
               if (buf && !(buf instanceof DataView) && buf.length > 0) {
-                collected[key] = buf[0];
-                if (firstValue === null) firstValue = buf[0];
+                const val = buf[0];
+                const info = renderedLayersRef.current[key];
+                
+                // Only collect if value is NOT background (0) or NoData
+                if (val !== 0 && val !== info.nodata) {
+                  collected[key] = val;
+                  if (firstValue === null) firstValue = val;
+                }
               }
             } catch { /* skip layer */ }
           }
@@ -1801,8 +1700,14 @@ export const MapStage = React.memo(function MapStage({ startDateTime, endDateTim
               if (!renderedLayersRef.current[key]) continue;
               const buf = (layer as import("ol/layer/WebGLTile").default).getData(evt.pixel);
               if (buf && !(buf instanceof DataView) && buf.length > 0) {
-                collected[key] = buf[0];
-                if (firstValue === null) firstValue = buf[0];
+                const val = buf[0];
+                const info = renderedLayersRef.current[key];
+                
+                // Only collect if value is NOT background (0) or NoData
+                if (val !== 0 && val !== info.nodata) {
+                  collected[key] = val;
+                  if (firstValue === null) firstValue = val;
+                }
               }
             } catch { /* skip layer */ }
           }
@@ -1933,6 +1838,7 @@ export const MapStage = React.memo(function MapStage({ startDateTime, endDateTim
         }
       }
     } else {
+      restoreOverlays();
       if (previousMapViewStateRef.current) {
         const saved = previousMapViewStateRef.current;
         previousMapViewStateRef.current = null; // Clear first to prevent loop
@@ -2248,7 +2154,6 @@ export const MapStage = React.memo(function MapStage({ startDateTime, endDateTim
     if (!popupDeviceId) {
       setPopupData([]);
       setPopupError("");
-      setPopupExpanded(false);
       return;
     }
 
@@ -2460,6 +2365,9 @@ export const MapStage = React.memo(function MapStage({ startDateTime, endDateTim
                             min={0} max={1} step={0.05}
                             value={layer.opacity ?? 0.7}
                             title={`Opacity: ${Math.round((layer.opacity ?? 0.7) * 100)}%`}
+                            draggable={false}
+                            onMouseDown={(e) => e.stopPropagation()}
+                            onPointerDown={(e) => e.stopPropagation()}
                             onClick={(e) => e.stopPropagation()}
                             onChange={(e) => {
                               const val = parseFloat(e.target.value);
@@ -2716,60 +2624,103 @@ export const MapStage = React.memo(function MapStage({ startDateTime, endDateTim
 
 
 
-        {/* Timeline Player Controls */}
-        {isTimelinePlaying && (
-          <div className="map-player-controls">
+        {/* Ultra-Compact Video-style Time-Lapse Player */}
+        {(isTimelinePlaying || playbackQueue.length > 0) && (
+          <div className="map-video-mini-player">
             <button
-              className="map-player-btn"
-              onClick={() => { 
-                if (isTimelinePlaying && playbackQueue.length > 0) {
-                  setPlaybackIndex(p => Math.max(0, p - 1));
-                } else {
-                  setTimelineIndex((p) => Math.max(0, p - 1)); 
-                }
-              }}
+              className="map-video-btn"
+              onClick={() => setPlaybackIndex(p => Math.max(0, p - 1))}
               type="button"
               title="Previous"
             >
-              <SkipBack size={14} fill="currentColor" />
+              <SkipBack size={16} fill="currentColor" />
             </button>
+            
             <button
-              className={`map-player-btn ${isTimelinePlaying ? 'is-active' : ''}`}
-              onClick={() => setIsTimelinePlaying(!isTimelinePlaying)}
-              type="button"
-              title={pbLoading ? 'Loading...' : isTimelinePlaying ? 'Pause' : 'Play'}
-              disabled={pbLoading}
-            >
-              {isTimelinePlaying ? (
-                <Pause size={14} fill="currentColor" />
-              ) : (
-                <Play size={14} fill="currentColor" />
-              )}
-            </button>
-            <button
-              className="map-player-btn"
-              onClick={() => { 
-                if (isTimelinePlaying && playbackQueue.length > 0) {
-                  setPlaybackIndex(p => Math.min(playbackQueue.length - 1, p + 1));
+              className={`map-video-btn ${isTimelinePlaying ? 'is-active' : ''}`}
+              onClick={() => {
+                if (!isTimelinePlaying && playbackIndex >= playbackQueue.length - 1) {
+                  setPlaybackIndex(0);
+                  setIsTimelinePlaying(true);
                 } else {
-                  setTimelineIndex((p) => Math.min(timelineUnits.length - 1, p + 1)); 
+                  setIsTimelinePlaying(!isTimelinePlaying);
                 }
               }}
               type="button"
+              title={pbLoading ? 'Loading...' : isTimelinePlaying ? 'Pause' : playbackIndex >= playbackQueue.length - 1 ? 'Replay' : 'Play'}
+              disabled={pbLoading}
+            >
+              {isTimelinePlaying ? (
+                <Pause size={18} fill="currentColor" />
+              ) : (
+                playbackIndex >= playbackQueue.length - 1 ? (
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/>
+                  </svg>
+                ) : (
+                  <Play size={18} fill="currentColor" />
+                )
+              )}
+            </button>
+
+            <button
+              className="map-video-btn"
+              onClick={() => setPlaybackIndex(p => Math.min(playbackQueue.length - 1, p + 1))}
+              type="button"
               title="Next"
             >
-              <SkipForward size={14} fill="currentColor" />
+              <SkipForward size={16} fill="currentColor" />
             </button>
-            <span className="map-player-date">
-              {isTimelinePlaying && playbackQueue.length > 0 
-                ? playbackQueue[playbackIndex]?.label 
-                : (timelineUnits[timelineIndex]?.label || '')}
-            </span>
-            {pbLoading && (
-              <span className="map-player-loading">
-                {pbProgressText || "Loading frames…"}
+
+            <div className="map-video-date-wrap">
+              <span className="map-video-date">
+                {playbackQueue[playbackIndex]?.label || 'Loading...'}
               </span>
-            )}
+            </div>
+
+            {/* Seeker Bar in middle */}
+            <div 
+              className="map-video-seeker-container"
+              onClick={(e) => {
+                const rect = e.currentTarget.getBoundingClientRect();
+                const x = e.clientX - rect.left;
+                const percent = x / rect.width;
+                const newIdx = Math.floor(percent * playbackQueue.length);
+                setPlaybackIndex(Math.min(playbackQueue.length - 1, Math.max(0, newIdx)));
+              }}
+            >
+              <div className="map-video-seeker-bg" />
+              <div 
+                className="map-video-seeker-fill"
+                style={{ width: `${((playbackIndex + 1) / playbackQueue.length) * 100}%` }}
+              />
+              <div 
+                className="map-video-seeker-handle"
+                style={{ left: `${((playbackIndex + 1) / playbackQueue.length) * 100}%` }}
+              />
+            </div>
+            
+            <div className="map-video-mini-right">
+              <span className="map-video-counter">
+                {playbackIndex + 1}/{playbackQueue.length}
+              </span>
+              
+              {pbLoading ? (
+                <div className="map-video-spinner" />
+              ) : (
+                <button 
+                  className="map-video-close"
+                  onClick={() => {
+                    setPlaybackQueue([]);
+                    setPlaybackIndex(0);
+                    setIsTimelinePlaying(false);
+                  }}
+                  title="Exit"
+                >
+                  <X size={18} />
+                </button>
+              )}
+            </div>
           </div>
         )}
 
@@ -2869,12 +2820,9 @@ export const MapStage = React.memo(function MapStage({ startDateTime, endDateTim
               data={popupData}
               loading={popupLoading}
               error={popupError}
-              expanded={popupExpanded}
               dateStr={popupDate}
               onDateChange={setPopupDate}
               onClose={() => setPopupDeviceId(null)}
-              onExpand={() => setPopupExpanded(true)}
-              onCollapse={() => setPopupExpanded(false)}
               isMobile={isMobile}
             />
           );
@@ -2884,7 +2832,7 @@ export const MapStage = React.memo(function MapStage({ startDateTime, endDateTim
         {selectedWqStation && (
           <div className={`map-station-popup ${isMobile ? 'map-station-popup--mobile' : ''}`} onClick={(e) => e.stopPropagation()} style={{
             position: isMobile ? 'fixed' : 'absolute',
-            top: isMobile ? 'auto' : '72px',
+            top: isMobile ? 'auto' : '110px',
             right: isMobile ? '12px' : '12px',
             bottom: isMobile ? '12px' : 'auto',
             left: isMobile ? '12px' : 'auto',
@@ -3001,7 +2949,7 @@ export const MapStage = React.memo(function MapStage({ startDateTime, endDateTim
                         </div>
 
                         {wqStationSample && wqStationSample.parameters && wqStationSample.parameters.length > 0 ? (
-                          <div style={{ overflowX: 'auto', borderRadius: '10px', border: '1px solid #e2e8f0', maxHeight: isMobile ? 'none' : '180px', overflowY: 'auto' }} className="custom-scrollbar">
+                          <div style={{ overflowX: 'auto', borderRadius: '10px', border: '1px solid #e2e8f0', maxHeight: '300px', overflowY: 'auto' }} className="custom-scrollbar">
                             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.78rem' }}>
                               <thead>
                                 <tr style={{ background: '#f8fafc', position: 'sticky', top: 0, zIndex: 1, borderBottom: '1px solid #cbd5e1' }}>
@@ -3066,7 +3014,7 @@ export const MapStage = React.memo(function MapStage({ startDateTime, endDateTim
                         </select>
                       </div>
                       {wqStationSample && wqStationSample.parameters && wqStationSample.parameters.length > 0 ? (
-                        <div style={{ overflowX: 'auto', borderRadius: '10px', border: '1px solid #e2e8f0', maxHeight: isMobile ? 'none' : '180px', overflowY: 'auto' }} className="custom-scrollbar">
+                        <div style={{ overflowX: 'auto', borderRadius: '10px', border: '1px solid #e2e8f0', maxHeight: '300px', overflowY: 'auto' }} className="custom-scrollbar">
                           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.78rem' }}>
                             <thead><tr style={{ background: '#f8fafc', position: 'sticky', top: 0, zIndex: 1, borderBottom: '1px solid #cbd5e1' }}>
                               {['Parameter', 'Unit', 'Value', 'Standard'].map(h => (<th key={h} style={{ padding: '6px 10px', textAlign: 'left', fontWeight: '700', color: '#475569' }}>{h}</th>))}
