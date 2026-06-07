@@ -26,10 +26,11 @@ public class LayerObjectController {
         @PathVariable Long layerId,
         @RequestParam(required = false) Long folderId,
         @RequestParam(required = false) String category,
-        @RequestParam("file") MultipartFile file
+        @RequestParam("file") MultipartFile file,
+        @RequestParam(required = false, defaultValue = "false") boolean overwrite
     ) {
         try {
-            LayerObjectResponse response = layerObjectService.uploadFile(layerId, folderId, category, file);
+            LayerObjectResponse response = layerObjectService.uploadFile(layerId, folderId, category, file, overwrite);
             return ResponseEntity.ok(response);
         } catch (IllegalArgumentException e) {
             return ResponseEntity.badRequest().body(e.getMessage());

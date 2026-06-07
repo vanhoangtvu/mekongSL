@@ -29,7 +29,7 @@ import software.amazon.awssdk.services.s3.model.S3Object;
 public class S3Controller {
 
     private static final List<String> ALLOWED_S3_PREFIXES = List.of(
-        "gis-data/", "station-data/", "monitoring-data/"
+        "gis-data/", "station-data/", "monitoring-data/", "news-images/"
     );
     
     private final S3Service s3Service;
@@ -42,7 +42,8 @@ public class S3Controller {
     @PreAuthorize("hasAnyRole('ADMIN', 'DATA_MANAGER')")
     public ResponseEntity<Map<String, Object>> uploadFile(
         @RequestParam("file") MultipartFile file,
-        @RequestParam(value = "key", required = false) String key
+        @RequestParam(value = "key", required = false) String key,
+        @RequestParam(value = "overwrite", required = false, defaultValue = "false") boolean overwrite
     ) throws Exception {
         // Validate key prefix when custom key is provided
         if (key != null && !key.isBlank()) {
@@ -56,7 +57,7 @@ public class S3Controller {
         }
 
         String uploadedKey = key != null && !key.isBlank()
-                ? s3Service.uploadFile(key.trim(), file)
+                ? s3Service.uploadFile(key.trim(), file, overwrite)
                 : s3Service.uploadFile(file);
 
         Map<String, Object> response = new HashMap<>();
@@ -355,6 +356,15 @@ public class S3Controller {
             e.printStackTrace();
             return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
         }
+    }
+
+    /**
+     * Get real storage statistics (Total size, file count, category breakdown)
+     */
+    @GetMapping("/stats")
+    @PreAuthorize("hasAnyRole('ADMIN', 'DATA_MANAGER')")
+    public ResponseEntity<Map<String, Object>> getStorageStats() {
+        return ResponseEntity.ok(s3Service.getStorageStats());
     }
 
     /**

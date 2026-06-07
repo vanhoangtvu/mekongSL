@@ -42,6 +42,10 @@ public class LayerObjectService {
     private String bucketName;
 
     public LayerObjectResponse uploadFile(Long layerId, Long folderId, String category, MultipartFile file) throws IOException {
+        return uploadFile(layerId, folderId, category, file, false);
+    }
+
+    public LayerObjectResponse uploadFile(Long layerId, Long folderId, String category, MultipartFile file, boolean overwrite) throws IOException {
         Layer layer = layerRepository.findById(layerId).orElse(null);
         if (layer == null || Boolean.TRUE.equals(layer.getIsDeleted())) {
             throw new IllegalArgumentException("Layer not found");
@@ -63,7 +67,7 @@ public class LayerObjectService {
 
         String s3Key = storagePathService.buildGisPath(layer, safeFilename);
 
-        s3Service.uploadFile(s3Key, file);
+        s3Service.uploadFile(s3Key, file, overwrite);
 
         S3Object s3Object = s3ObjectRepository
             .findByBucketAndS3Key(bucketName, s3Key)

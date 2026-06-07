@@ -132,24 +132,27 @@ export function useS3DatasetLayers(
         const parent = getParentDataset(dsId);
         const dsInfo = getDatasetById(dsId);
         const root = getRootDataset(dsId);
-        let datasetId: string, categorySlug: string;
+        
+        // Root is the top-level dataset (e.g. 'baseline-environment')
+        // Parent is the immediate parent (e.g. 'landuse-classification')
+        // dsId is the current selection (e.g. 'landuse-classification/rice-shrimp')
+        
+        let datasetSlug: string, categorySlug: string;
+        
         if (root && root.id !== dsId) {
-          datasetId = root.id;
+          datasetSlug = getDatasetSlug(root.id) || root.id;
+          // If we have a nested category, get the relative slug from the root
           categorySlug = getDatasetSlug(dsId) || dsId;
         } else if (parent) {
-          datasetId = parent.id;
+          datasetSlug = getDatasetSlug(parent.id) || parent.id;
           categorySlug = getDatasetSlug(dsId) || dsId;
-        } else if (dsInfo?.children?.length) {
-          datasetId = dsId;
-          categorySlug = getDatasetSlug(dsInfo.children[0].id) || dsInfo.children[0].id;
         } else {
-          datasetId = dsId;
+          datasetSlug = getDatasetSlug(dsId) || dsId;
           categorySlug = "default";
         }
 
-        const dsSlug = getDatasetSlug(datasetId) || datasetId;
         const catName = dsInfo?.name || dsId;
-        const basePrefix = `gis-data/${dsSlug}/${categorySlug}/`;
+        const basePrefix = `gis-data/${datasetSlug}/${categorySlug}/`;
         const prefixes = timelineDate
           ? [`${basePrefix}${y}/${md}/${dd}/`, `${basePrefix}${y}/${md}/`, `${basePrefix}${y}/`, basePrefix]
           : [basePrefix];
@@ -304,19 +307,22 @@ export function useS3DatasetLayers(
 
           const dsInfo = getDatasetById(ds.id);
           const parent = getParentDataset(ds.id);
+          const root = getRootDataset(ds.id);
           if (dsInfo?.gisData === false || parent?.gisData === false) continue;
 
-          let datasetId: string, categorySlug: string;
-          if (parent) {
-            datasetId = parent.id; categorySlug = getDatasetSlug(ds.id) || ds.id;
-          } else if (dsInfo?.children?.length) {
-            datasetId = ds.id; categorySlug = getDatasetSlug(dsInfo.children[0].id) || dsInfo.children[0].id;
+          let datasetSlug: string, categorySlug: string;
+          if (root && root.id !== ds.id) {
+            datasetSlug = getDatasetSlug(root.id) || root.id;
+            categorySlug = getDatasetSlug(ds.id) || ds.id;
+          } else if (parent) {
+            datasetSlug = getDatasetSlug(parent.id) || parent.id;
+            categorySlug = getDatasetSlug(ds.id) || ds.id;
           } else {
-            datasetId = ds.id; categorySlug = "default";
+            datasetSlug = getDatasetSlug(ds.id) || ds.id;
+            categorySlug = "default";
           }
 
-          const dsSlug = getDatasetSlug(datasetId) || datasetId;
-          const basePrefix = `gis-data/${dsSlug}/${categorySlug}/`;
+          const basePrefix = `gis-data/${datasetSlug}/${categorySlug}/`;
 
           for (const prefix of [`${basePrefix}${y}/${md}/${dd}/`, `${basePrefix}${y}/${md}/`]) {
             if (cancelled) break;

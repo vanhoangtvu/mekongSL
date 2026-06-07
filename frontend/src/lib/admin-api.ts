@@ -193,14 +193,19 @@ export async function listS3Files(prefix = ''): Promise<S3ListResult> {
   }
 }
 
-export async function uploadS3File(file: File, key?: string) {
+export async function uploadS3File(file: File, key?: string, overwrite: boolean = false) {
   const formData = new FormData();
   formData.set('file', file);
   if (key?.trim()) {
     formData.set('key', key.trim());
   }
 
-  return requestJson<{ key: string; url: string; message: string }>(getBackendAdminUrl('/s3/upload'), {
+  const url = new URL(getBackendAdminUrl('/s3/upload'));
+  if (overwrite) {
+    url.searchParams.set('overwrite', 'true');
+  }
+
+  return requestJson<{ key: string; url: string; message: string }>(url, {
     method: 'POST',
     body: formData,
   });
@@ -262,6 +267,16 @@ export async function renameS3Folder(oldPrefix: string, newPrefix: string) {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ oldPrefix, newPrefix }),
   });
+}
+
+export interface S3StorageStats {
+  totalSize: number;
+  fileCount: number;
+  byCategory: Record<string, number>;
+}
+
+export async function getS3StorageStats() {
+  return requestJson<S3StorageStats>(getBackendAdminUrl('/s3/stats'));
 }
 
 export async function getS3SignedUrl(key: string, expires: number = 3600) {
@@ -601,6 +616,98 @@ export async function deleteWaterQualitySample(sampleId: number): Promise<void> 
   await fetch(getBackendAdminUrl(`/gis/water-quality/sample/${sampleId}`), {
     method: 'DELETE',
     headers: getHeaders(),
+  });
+}
+
+// ─── News / Articles ──────────────────────────────────────────
+
+export interface NewsArticle {
+  id: number;
+  title: string;
+  slug: string;
+  excerpt: string;
+  content: string;
+  category: string;
+  imageUrl: string;
+  images: string[];
+  tags: string;
+  published: boolean;
+  featured: boolean;
+  authorName: string;
+  authorId: number;
+  createdAt: string;
+  updatedAt: string | null;
+}
+
+export interface NewsArticleForm {
+  title: string;
+  slug: string;
+  excerpt: string;
+  content: string;
+  category: string;
+  imageUrl: string;
+  images: string[];
+  tags: string;
+  published: boolean;
+  featured: boolean;
+}
+
+export interface PaginatedResponse<T> {
+  content: T[];
+  number: number;
+  size: number;
+  totalElements: number;
+  totalPages: number;
+}
+
+interface SpringPage<T> {
+  content: T[];
+  page: {
+    number: number;
+    size: number;
+    totalElements: number;
+    totalPages: number;
+  };
+}
+
+function unwrapPage<T>(springPage: SpringPage<T>): PaginatedResponse<T> {
+  return {
+    content: springPage.content,
+    number: springPage.page.number,
+    size: springPage.page.size,
+    totalElements: springPage.page.totalElements,
+    totalPages: springPage.page.totalPages,
+  };
+}
+
+export async function listNewsArticles(page = 0, size = 20): Promise<PaginatedResponse<NewsArticle>> {
+  const result = await requestJson<SpringPage<NewsArticle>>(getBackendAdminUrl(`/articles?page=${page}&size=${size}`));
+  return unwrapPage(result);
+}
+
+export async function getNewsArticle(id: number): Promise<NewsArticle> {
+  return requestJson<NewsArticle>(getBackendAdminUrl(`/articles/${id}`));
+}
+
+export async function createNewsArticle(form: NewsArticleForm): Promise<NewsArticle> {
+  return requestJson<NewsArticle>(getBackendAdminUrl('/articles'), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(form),
+  });
+}
+
+export async function updateNewsArticle(id: number, form: NewsArticleForm): Promise<NewsArticle> {
+  return requestJson<NewsArticle>(getBackendAdminUrl(`/articles/${id}`), {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(form),
+  });
+}
+
+export async function deleteNewsArticle(id: number): Promise<{ message: string }> {
+  return requestJson<{ message: string }>(getBackendAdminUrl(`/articles/${id}`), {
+    method: 'DELETE',
   });
 }
 

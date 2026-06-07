@@ -8,59 +8,79 @@ export const metadata: Metadata = {
   description: "Cập nhật các tin tức, sự kiện và thông báo mới nhất từ hệ thống WebGIS.",
 };
 
-// Mock data cho tin tức
-const MOCK_NEWS = [
-  {
-    id: "1",
-    title: "Phát hành phiên bản hệ thống giám sát thủy văn 2.0",
-    excerpt: "Hệ thống giám sát thủy văn Mekong chính thức cập nhật phiên bản 2.0 với nhiều tính năng mới, bao gồm cải thiện độ chính xác dữ liệu và tối ưu hóa giao diện hiển thị.",
-    date: "2026-06-05",
-    category: "Cập nhật hệ thống",
-    imageUrl: "https://images.unsplash.com/photo-1558449028-b53a39d100fc?auto=format&fit=crop&q=80&w=600&h=400",
-  },
-  {
-    id: "2",
-    title: "Công bố dữ liệu thời tiết tháng 5/2026",
-    excerpt: "Báo cáo tổng hợp dữ liệu thời tiết khu vực đồng bằng sông Cửu Long tháng 5 đã được cập nhật lên hệ thống. Người dùng có thể tải xuống trong mục Data Ops.",
-    date: "2026-06-02",
-    category: "Dữ liệu",
-    imageUrl: "https://images.unsplash.com/photo-1504608524841-42fe6f032b4b?auto=format&fit=crop&q=80&w=600&h=400",
-  },
-  {
-    id: "3",
-    title: "Bảo trì định kỳ cụm máy chủ khu vực miền Nam",
-    excerpt: "Thông báo bảo trì định kỳ cụm máy chủ dữ liệu vào cuối tuần này. Một số dịch vụ có thể gián đoạn trong khoảng thời gian từ 00:00 đến 04:00 Chủ Nhật.",
-    date: "2026-05-28",
-    category: "Thông báo",
-    imageUrl: "https://images.unsplash.com/photo-1558494949-ef010cbdcc31?auto=format&fit=crop&q=80&w=600&h=400",
-  },
-  {
-    id: "4",
-    title: "Hội thảo: Ứng dụng WebGIS trong quản lý tài nguyên nước",
-    excerpt: "Kính mời quý đối tác và người dùng tham dự hội thảo trực tuyến về việc ứng dụng công nghệ WebGIS hiện đại trong việc quản lý và phân tích tài nguyên nước bền vững.",
-    date: "2026-05-20",
-    category: "Sự kiện",
-    imageUrl: "https://images.unsplash.com/photo-1540575467063-178a50c2df87?auto=format&fit=crop&q=80&w=600&h=400",
-  },
-  {
-    id: "5",
-    title: "Tích hợp bản đồ vệ tinh độ phân giải cao mới",
-    excerpt: "Hệ thống vừa tích hợp thêm lớp bản đồ vệ tinh độ phân giải cao, hỗ trợ phân tích biến động sử dụng đất chính xác hơn theo thời gian thực.",
-    date: "2026-05-15",
-    category: "Tính năng mới",
-    imageUrl: "https://images.unsplash.com/photo-1524661135-423995f22d0b?auto=format&fit=crop&q=80&w=600&h=400",
-  },
-  {
-    id: "6",
-    title: "Hướng dẫn xuất dữ liệu theo chuẩn định dạng mới",
-    excerpt: "Tài liệu hướng dẫn chi tiết các bước xuất dữ liệu từ trạm Ecowitt và các trạm thủy văn Mekong theo định dạng chuẩn quốc tế vừa được ban hành.",
-    date: "2026-05-10",
-    category: "Hướng dẫn",
-    imageUrl: "https://images.unsplash.com/photo-1454165804606-c3d57bc86b40?auto=format&fit=crop&q=80&w=600&h=400",
-  },
-];
+const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://14.227.143.142:8084/api";
 
-export default function NewsPage() {
+interface NewsArticle {
+  id: number;
+  title: string;
+  slug: string;
+  excerpt: string;
+  content: string;
+  category: string;
+  imageUrl: string;
+  tags: string;
+  published: boolean;
+  featured: boolean;
+  authorName: string;
+  createdAt: string;
+  updatedAt: string | null;
+}
+
+interface NewsPage {
+  content: NewsArticle[];
+  totalElements: number;
+  totalPages: number;
+  number: number;
+  size: number;
+}
+
+interface SpringPageData {
+  content: NewsArticle[];
+  page: { number: number; size: number; totalElements: number; totalPages: number };
+}
+
+async function getNews(category?: string, page = 0): Promise<NewsPage> {
+  const url = new URL(`${API_URL}/articles/public`);
+  if (category) url.searchParams.set("category", category);
+  url.searchParams.set("page", String(page));
+  url.searchParams.set("size", "9");
+
+  try {
+    const res = await fetch(url.toString(), { cache: "no-store" });
+    if (!res.ok) return { content: [], totalElements: 0, totalPages: 0, number: 0, size: 9 };
+    const springPage: SpringPageData = await res.json();
+    return {
+      content: springPage.content,
+      number: springPage.page.number,
+      size: springPage.page.size,
+      totalElements: springPage.page.totalElements,
+      totalPages: springPage.page.totalPages,
+    };
+  } catch {
+    return { content: [], totalElements: 0, totalPages: 0, number: 0, size: 9 };
+  }
+}
+
+const CATEGORIES = ["Tất cả", "Cập nhật hệ thống", "Dữ liệu", "Thông báo", "Sự kiện", "Tính năng mới", "Hướng dẫn"];
+
+function formatDate(dateStr: string) {
+  return new Date(dateStr).toLocaleDateString("vi-VN", {
+    year: "numeric",
+    month: "long",
+    day: "numeric",
+  });
+}
+
+export default async function NewsPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ category?: string; page?: string }>;
+}) {
+  const params = await searchParams;
+  const activeCategory = params.category || "";
+  const currentPage = Math.max(0, parseInt(params.page || "0", 10) || 0);
+  const { content: articles, totalPages, number: pageNum } = await getNews(activeCategory || undefined, currentPage);
+
   return (
     <div className="app-container public-home">
       <AppHeader />
@@ -73,52 +93,98 @@ export default function NewsPage() {
         </div>
 
         <div className="news-filters">
-          <button className="news-filter-btn is-active">Tất cả</button>
-          <button className="news-filter-btn">Hệ thống</button>
-          <button className="news-filter-btn">Dữ liệu</button>
-          <button className="news-filter-btn">Sự kiện</button>
+          {CATEGORIES.map((cat) => {
+            const isActive = cat === "Tất cả" ? !activeCategory : activeCategory === cat;
+            const href = cat === "Tất cả" ? "/news" : `/news?category=${encodeURIComponent(cat)}`;
+            return (
+              <Link
+                key={cat}
+                href={href}
+                className={`news-filter-btn${isActive ? " is-active" : ""}`}
+              >
+                {cat}
+              </Link>
+            );
+          })}
         </div>
 
         <div className="news-grid">
-          {MOCK_NEWS.map((news) => (
-            <article key={news.id} className="news-card">
-              <div className="news-card-image">
-                <img src={news.imageUrl} alt={news.title} loading="lazy" />
-                <span className="news-card-category">{news.category}</span>
-              </div>
-              <div className="news-card-content">
-                <time dateTime={news.date} className="news-card-date">
-                  {new Date(news.date).toLocaleDateString("vi-VN", {
-                    year: "numeric",
-                    month: "long",
-                    day: "numeric",
-                  })}
-                </time>
-                <h2 className="news-card-title">
-                  <Link href={`/news/${news.id}`}>{news.title}</Link>
-                </h2>
-                <p className="news-card-excerpt">{news.excerpt}</p>
-                <Link href={`/news/${news.id}`} className="news-card-readmore">
-                  Đọc tiếp
-                  <svg
-                    xmlns="http://www.w3.org/2000/svg"
-                    width="16"
-                    height="16"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="2"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                  >
-                    <line x1="5" y1="12" x2="19" y2="12"></line>
-                    <polyline points="12 5 19 12 12 19"></polyline>
-                  </svg>
-                </Link>
-              </div>
-            </article>
-          ))}
+          {articles.length === 0 ? (
+            <p style={{ gridColumn: "1 / -1", textAlign: "center", color: "var(--text-muted)", padding: "3rem" }}>
+              Chưa có bài viết nào.
+            </p>
+          ) : (
+            articles.map((news) => (
+              <article key={news.id} className="news-card">
+                <div className="news-card-image">
+                  {news.imageUrl ? (
+                    <img src={news.imageUrl} alt={news.title} loading="lazy" />
+                  ) : (
+                    <div style={{
+                      position: "absolute", inset: 0,
+                      display: "flex", alignItems: "center", justifyContent: "center",
+                      background: "var(--surface)", color: "var(--text-muted)",
+                      fontSize: "3rem"
+                    }}>
+                      📰
+                    </div>
+                  )}
+                  <span className="news-card-category">{news.category}</span>
+                  {news.featured && <span className="news-card-featured">Nổi bật</span>}
+                </div>
+                <div className="news-card-content">
+                  <time dateTime={news.createdAt} className="news-card-date">
+                    {formatDate(news.createdAt)}
+                  </time>
+                  <h2 className="news-card-title">
+                    <Link href={`/news/${news.slug}`}>{news.title}</Link>
+                  </h2>
+                  <p className="news-card-excerpt">{news.excerpt}</p>
+                  {news.tags && <div className="news-card-tags">{news.tags.split(",").filter(Boolean).map((tag) => <span key={tag} className="news-tag">{tag.trim()}</span>)}</div>}
+                  <Link href={`/news/${news.slug}`} className="news-card-readmore">
+                    Đọc tiếp
+                    <svg
+                      xmlns="http://www.w3.org/2000/svg"
+                      width="16"
+                      height="16"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    >
+                      <line x1="5" y1="12" x2="19" y2="12"></line>
+                      <polyline points="12 5 19 12 12 19"></polyline>
+                    </svg>
+                  </Link>
+                </div>
+              </article>
+            ))
+          )}
         </div>
+
+        {totalPages > 1 && (
+          <div className="news-pagination">
+            {pageNum > 0 && (
+              <Link
+                href={activeCategory ? `/news?category=${encodeURIComponent(activeCategory)}&page=${pageNum - 1}` : `/news?page=${pageNum - 1}`}
+                className="news-page-btn"
+              >
+                ← Trang trước
+              </Link>
+            )}
+            <span className="news-page-info">Trang {pageNum + 1} / {totalPages}</span>
+            {pageNum < totalPages - 1 && (
+              <Link
+                href={activeCategory ? `/news?category=${encodeURIComponent(activeCategory)}&page=${pageNum + 1}` : `/news?page=${pageNum + 1}`}
+                className="news-page-btn"
+              >
+                Trang sau →
+              </Link>
+            )}
+          </div>
+        )}
       </main>
       <AppFooter />
     </div>

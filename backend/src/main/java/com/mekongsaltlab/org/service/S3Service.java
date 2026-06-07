@@ -24,7 +24,9 @@ import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.stream.Collectors;
 
@@ -48,11 +50,19 @@ public class S3Service {
      */
     @Transactional
     public String uploadFile(String key, MultipartFile file) throws IOException {
+        return uploadFile(key, file, false);
+    }
+
+    /**
+     * Upload file to S3 with validation and optional overwrite
+     */
+    @Transactional
+    public String uploadFile(String key, MultipartFile file, boolean overwrite) throws IOException {
         if (file.getSize() > maxFileSize) {
             throw new RuntimeException("File size exceeds maximum allowed: " + maxFileSize + " bytes");
         }
 
-        if (fileExists(key)) {
+        if (!overwrite && fileExists(key)) {
             throw new RuntimeException("File already exists at S3 key: " + key + ". Delete the existing file first or use a different key.");
         }
 
@@ -71,7 +81,7 @@ public class S3Service {
             // Upsert S3Object record in DB
             upsertS3Object(key, file, putResponse);
 
-            log.info("Uploaded file to S3: {}", key);
+            log.info("Uploaded file to S3: {} (overwrite={})", key, overwrite);
             return key;
         } catch (S3Exception e) {
             var err = e.awsErrorDetails();
@@ -354,6 +364,40 @@ public class S3Service {
         }
 
         log.info("Renamed S3 folder from {} to {} ({} objects)", oldPrefix, newPrefix, keysToDelete.size());
+    }
+
+    /**
+     * Get storage statistics from DB tracking
+     */
+    public Map<String, Object> getStorageStats() {
+        Long totalSize = s3ObjectRepository.getTotalSizeBytes();
+        List<Map<String, Object>> metadata = s3ObjectRepository.getAllObjectMetadata();
+        
+        Map<String, Long> byCategory = new java.util.HashMap<>();
+        for (Map<String, Object> item : metadata) {
+            String key = (String) item.get("key");
+            Long size = (Long) item.get("size");
+            String ext = "";
+            int i = key.lastIndexOf(".");
+            if (i > 0) ext = key.substring(i).toLowerCase();
+            
+            String cat = "other";
+            if (List.of(".tif", ".tiff", ".geotiff").contains(ext)) cat = "geotiff";
+            else if (List.of(".sql", ".sql.gz").contains(ext)) cat = "backup";
+            else if (List.of(".xlsx", ".xls", ".csv").contains(ext)) cat = "spreadsheet";
+            else if (List.of(".png", ".jpg", ".jpeg", ".gif", ".svg", ".webp").contains(ext)) cat = "image";
+            else if (List.of(".pdf", ".doc", ".docx", ".txt").contains(ext)) cat = "document";
+            else if (List.of(".zip", ".tar", ".gz", ".rar", ".7z").contains(ext)) cat = "archive";
+            else if (List.of(".json", ".xml", ".yaml", ".yml").contains(ext)) cat = "data";
+            
+            byCategory.put(cat, byCategory.getOrDefault(cat, 0L) + size);
+        }
+
+        Map<String, Object> stats = new java.util.HashMap<>();
+        stats.put("totalSize", totalSize != null ? totalSize : 0L);
+        stats.put("fileCount", metadata.size());
+        stats.put("byCategory", byCategory);
+        return stats;
     }
 
     /**

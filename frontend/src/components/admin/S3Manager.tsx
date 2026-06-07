@@ -50,6 +50,7 @@ import {
 import {
   listS3Folder,
   uploadS3File,
+  checkS3FileExists,
   deleteS3File,
   downloadS3File,
   createS3Folder,
@@ -57,6 +58,7 @@ import {
   renameS3Folder,
   listGisLayers,
   registerLayerObject,
+  getS3StorageStats,
   type S3FileItem,
   type GisLayer,
 } from "../../lib/admin-api";
@@ -75,6 +77,21 @@ type SortField = "name" | "size" | "date";
 type SortDir = "asc" | "desc";
 type ViewMode = "table" | "grid";
 
+import {
+  BarChart,
+  Bar,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  ResponsiveContainer,
+  Cell,
+} from "recharts";
+
+// ─── Constants ───────────────────────────────────────────────────────────────
+
+const TOTAL_CAPACITY = 1024 * 1024 * 1024 * 1024; // 1TB
+
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 function formatSize(bytes: number) {
@@ -84,7 +101,9 @@ function formatSize(bytes: number) {
   if (kb < 1024) return `${kb.toFixed(1)} KB`;
   const mb = kb / 1024;
   if (mb < 1024) return `${mb.toFixed(1)} MB`;
-  return `${(mb / 1024).toFixed(2)} GB`;
+  const gb = mb / 1024;
+  if (gb < 1024) return `${gb.toFixed(2)} GB`;
+  return `${(gb / 1024).toFixed(2)} TB`;
 }
 
 function formatDate(value: string | null | undefined) {
@@ -287,6 +306,12 @@ export default function S3Manager() {
     id: number;
   } | null>(null);
 
+  const [capacityStats, setCapacityStats] = useState({
+    totalUsed: 0,
+    totalCount: 0,
+    byCategory: {} as Record<FileCategory, number>,
+  });
+
   const fileInputRef = useRef<HTMLInputElement>(null);
   const searchRef = useRef<HTMLInputElement>(null);
   const toastId = useRef(0);
@@ -301,6 +326,19 @@ export default function S3Manager() {
     []
   );
 
+  const loadGlobalStats = useCallback(async () => {
+    try {
+      const stats = await getS3StorageStats();
+      setCapacityStats({
+        totalUsed: stats.totalSize,
+        totalCount: stats.fileCount,
+        byCategory: stats.byCategory as Record<FileCategory, number>,
+      });
+    } catch (err) {
+      console.error("Failed to load storage stats:", err);
+    }
+  }, []);
+
   // ── Load folder ───────────────────────────────────────────────────────
   const loadFolder = useCallback(async (path: string) => {
     setLoading(true);
@@ -311,6 +349,10 @@ export default function S3Manager() {
       setFolders(data.folders);
       setFiles(data.files);
       setCurrentPath(data.prefix);
+      
+      // Also refresh global stats when browsing to ensure accuracy
+      void loadGlobalStats();
+
     } catch (err) {
       const msg =
         err instanceof Error ? err.message : "Không tải được thư mục";
@@ -319,7 +361,7 @@ export default function S3Manager() {
     } finally {
       setLoading(false);
     }
-  }, [showToast]);
+  }, [showToast, loadGlobalStats]);
 
   // ── Tree ──────────────────────────────────────────────────────────────
   const loadTreeChildren = useCallback(async (nodePath: string) => {
@@ -511,7 +553,19 @@ export default function S3Manager() {
         const key = uploadKey.trim()
           ? `${uploadKey.trim()}/${file.name}`
           : currentPath + file.name;
-        await uploadS3File(file, key);
+        
+        // Check if file exists
+        const exists = await checkS3FileExists(key);
+        let overwrite = false;
+        if (exists) {
+          const confirmOverwrite = window.confirm(
+            `File "${file.name}" đã tồn tại. Bạn có muốn ghi đè không?`
+          );
+          if (!confirmOverwrite) continue; // Skip this file
+          overwrite = true;
+        }
+
+        await uploadS3File(file, key, overwrite);
       }
       showToast(
         `Đã upload ${uploadFiles.length} file thành công`,
@@ -785,7 +839,14 @@ export default function S3Manager() {
 
   // ── Render ────────────────────────────────────────────────────────────
 
-  const totalSize = files.reduce((s, f) => s + (f.size || 0), 0);
+  const totalSize = capacityStats.totalUsed;
+  const usedPercentage = (totalSize / TOTAL_CAPACITY) * 100;
+
+  const chartData = Object.entries(capacityStats.byCategory).map(([cat, size]) => ({
+    name: CATEGORY_META[cat as FileCategory].label,
+    value: size,
+    color: CATEGORY_META[cat as FileCategory].color,
+  })).sort((a, b) => b.value - a.value);
 
   return (
     <div className="s3">
@@ -796,6 +857,79 @@ export default function S3Manager() {
           <button onClick={() => setToast(null)}><X size={14} /></button>
         </div>
       )}
+
+      {/* ═══ Storage Dashboard ═══ */}
+      <div className="s3-dashboard">
+        <div className="s3-db-card s3-db-capacity">
+          <div className="s3-db-h">
+            <HardDrive size={18} />
+            <h3>Dung lượng lưu trữ</h3>
+            <button className="s3-db-refresh" onClick={() => loadFolder(currentPath)} title="Cập nhật thông số">
+              <RefreshCw size={12} className={loading ? "spin" : ""} />
+            </button>
+          </div>
+          <div className="s3-db-body">
+            <div className="s3-cap-info">
+              <span className="s3-cap-used">{formatSize(totalSize)}</span>
+              <span className="s3-cap-sep">/</span>
+              <span className="s3-cap-total">{formatSize(TOTAL_CAPACITY)}</span>
+            </div>
+            <div className="s3-cap-progress">
+              <div className="s3-cap-bar" style={{ width: `${Math.min(100, usedPercentage)}%`, background: usedPercentage > 90 ? "#ef4444" : "var(--accent)" }} />
+            </div>
+            <p className="s3-cap-hint">Đã sử dụng {usedPercentage.toFixed(1)}% tổng dung lượng cho phép</p>
+          </div>
+        </div>
+
+        <div className="s3-db-card s3-db-chart">
+          <div className="s3-db-h">
+            <FileType size={18} />
+            <h3>Phân bổ loại tệp</h3>
+          </div>
+          <div className="s3-db-body chart-wrap">
+            {chartData.length > 0 ? (
+              <ResponsiveContainer width="100%" height={100}>
+                <BarChart data={chartData} layout="vertical" margin={{ left: -20 }}>
+                  <XAxis type="number" hide />
+                  <YAxis dataKey="name" type="category" width={80} tick={{ fontSize: 10 }} />
+                  <Tooltip
+                    contentStyle={{ borderRadius: "8px", border: "none", boxShadow: "0 4px 12px rgba(0,0,0,0.1)" }}
+                    formatter={(val: number) => formatSize(val)}
+                  />
+                  <Bar dataKey="value" radius={[0, 4, 4, 0]} barSize={12}>
+                    {chartData.map((entry, index) => (
+                      <Cell key={`cell-${index}`} fill={entry.color} />
+                    ))}
+                  </Bar>
+                </BarChart>
+              </ResponsiveContainer>
+            ) : (
+              <div className="s3-empty-db">Chưa có dữ liệu phân bổ</div>
+            )}
+          </div>
+        </div>
+
+        <div className="s3-db-card s3-db-stats">
+          <div className="s3-db-h">
+            <Database size={18} />
+            <h3>Thông số toàn bucket</h3>
+          </div>
+          <div className="s3-db-body stats-grid">
+            <div className="s3-db-stat">
+              <span>Thư mục</span>
+              <strong>{folders.length}</strong>
+            </div>
+            <div className="s3-db-stat">
+              <span>Tổng tệp</span>
+              <strong>{capacityStats.totalCount}</strong>
+            </div>
+            <div className="s3-db-stat">
+              <span>Trung bình</span>
+              <strong>{capacityStats.totalCount ? formatSize(totalSize / capacityStats.totalCount) : "0"}</strong>
+            </div>
+          </div>
+        </div>
+      </div>
 
       {/* ═══ Toolbar ═══ */}
       <div className="s3-toolbar">
@@ -1466,6 +1600,45 @@ export default function S3Manager() {
 .s3-toast button:hover { opacity: 1; }
 @keyframes slideIn { from { transform: translateX(100%); opacity: 0 } to { transform: translateX(0); opacity: 1 } }
 
+/* ─── Dashboard ─── */
+.s3-dashboard {
+  display: grid; grid-template-columns: 1.2fr 1.5fr 1fr; gap: 14px;
+  padding: 14px; background: var(--surface-strong);
+  border-bottom: 1px solid var(--border);
+}
+.s3-db-card {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: 12px; padding: 12px 14px; display: flex; flex-direction: column; gap: 8px;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.02);
+}
+.s3-db-h { display: flex; align-items: center; gap: 8px; color: var(--text-muted); }
+.s3-db-h h3 { margin: 0; font-size: .75rem; text-transform: uppercase; letter-spacing: .06em; font-weight: 700; flex: 1; }
+.s3-db-refresh { background: transparent; border: none; color: var(--text-muted); cursor: pointer; padding: 4px; border-radius: 4px; display: flex; align-items: center; transition: all 0.2s; }
+.s3-db-refresh:hover { background: var(--surface-strong); color: var(--accent); }
+.s3-db-h svg { color: var(--accent); opacity: .8; }
+
+.s3-db-body { flex: 1; display: flex; flex-direction: column; justify-content: center; }
+
+/* Capacity */
+.s3-cap-info { display: flex; align-items: baseline; gap: 4px; }
+.s3-cap-used { font-size: 1.2rem; font-weight: 800; color: var(--text); }
+.s3-cap-sep { color: var(--text-muted); font-size: .9rem; opacity: .5; }
+.s3-cap-total { color: var(--text-muted); font-size: .85rem; font-weight: 500; }
+.s3-sim-label { font-size: 10px; font-weight: 700; color: #f59e0b; background: rgba(245,158,11,0.1); padding: 1px 4px; border-radius: 4px; margin-left: 6px; border: 1px solid rgba(245,158,11,0.2); }
+.s3-cap-progress { height: 6px; background: var(--surface-strong); border-radius: 3px; overflow: hidden; margin: 4px 0; }
+.s3-cap-bar { height: 100%; transition: width .4s cubic-bezier(0.4, 0, 0.2, 1); }
+.s3-cap-hint { margin: 0; font-size: .72rem; color: var(--text-muted); font-weight: 500; }
+
+/* Chart */
+.chart-wrap { min-height: 80px; }
+.s3-empty-db { font-size: .75rem; color: var(--text-muted); font-style: italic; text-align: center; padding-top: 10px; }
+
+/* Stats grid */
+.stats-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+.s3-db-stat { display: flex; flex-direction: column; gap: 2px; }
+.s3-db-stat span { font-size: .65rem; color: var(--text-muted); font-weight: 600; text-transform: uppercase; }
+.s3-db-stat strong { font-size: 1rem; font-weight: 700; color: var(--text); }
+
 /* ─── Toolbar ─── */
 .s3-toolbar {
   display: flex; align-items: center; justify-content: space-between;
@@ -1880,3 +2053,4 @@ function FileActions({
     </div>
   );
 }
+

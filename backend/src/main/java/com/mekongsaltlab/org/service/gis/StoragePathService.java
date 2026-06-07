@@ -169,7 +169,7 @@ public class StoragePathService {
     private String sanitize(String segment) {
         if (segment == null) return "default";
         return segment.trim().toLowerCase()
-            .replaceAll("[^a-z0-9_\\-]", "-")
+            .replaceAll("[^a-z0-9_\\-/]", "-")
             .replaceAll("-+", "-")
             .replaceAll("^-|-$", "");
     }

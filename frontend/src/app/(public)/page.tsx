@@ -34,12 +34,11 @@ export default function PublicHomePage() {
   const [appliedDatasets, setAppliedDatasets] = useState<Array<{ id: string; type: string }>>([]);
   const [wqStations, setWqStations] = useState<ManualStation[]>([]);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
-  const [isMobile, setIsMobile] = useState(() =>
-    typeof window !== 'undefined' ? window.innerWidth < 768 : false
-  );
+  const [isMobile, setIsMobile] = useState(false);
 
   useEffect(() => {
     const check = () => setIsMobile(window.innerWidth < 768);
+    check();
     window.addEventListener('resize', check);
     return () => window.removeEventListener('resize', check);
   }, []);
