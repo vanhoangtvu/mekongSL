@@ -214,8 +214,14 @@ const GIS_DATASETS = {
   'landsat-imagery': {
     label: 'Landsat Imagery',
     categories: [
-      { key: 'dry-season', label: 'Dry Season' },
-      { key: 'wet-season', label: 'Wet Season' }
+      { key: 'band-1', label: 'Band 1' },
+      { key: 'band-2', label: 'Band 2' },
+      { key: 'band-3', label: 'Band 3' },
+      { key: 'band-4', label: 'Band 4' },
+      { key: 'band-5', label: 'Band 5' },
+      { key: 'band-6', label: 'Band 6' },
+      { key: 'band-7', label: 'Band 7' },
+      { key: 'rgb', label: 'Composite (RGB)' }
     ]
   },
   'administration': {
@@ -246,13 +252,18 @@ const GIS_DATASETS = {
       { key: 'landuse-planning', label: 'Landuse Planning' },
       { key: 'soil-type', label: 'Soil Type' },
       { key: 'water-body', label: 'Water Body' },
-      { key: 'channel-system', label: 'Channel System' },
-      { key: 'river', label: 'Channel - River' },
-      { key: 'canal', label: 'Channel - Canal' },
-      { key: 'sluice', label: 'Channel - Sluice' },
-      { key: 'pump-station', label: 'Channel - Pump Station' },
-      { key: 'dike-embankments', label: 'Channel - Dike & Embankments' },
-      { key: 'irrigation', label: 'Channel - Irrigation' },
+      {
+        key: 'channel-system',
+        label: 'Channel System',
+        children: [
+          { key: 'river', label: 'River' },
+          { key: 'canal', label: 'Canal' },
+          { key: 'sluice', label: 'Sluice' },
+          { key: 'pump-station', label: 'Pump Station' },
+          { key: 'dike-embankments', label: 'Dike & Embankments' },
+          { key: 'irrigation', label: 'Irrigation' },
+        ],
+      },
       { key: 'ground-water-storage', label: 'Ground Water Storage' },
       { key: 'road', label: 'Road' },
       {
@@ -4017,6 +4028,40 @@ function ScheduleConfig({ source }: { source: string }) {
                           ))}
                         </select>
                         <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>({wqHistorySamples.length} lần)</span>
+                        {canManageData && wqHistorySample && (
+                          <button
+                            type="button"
+                            onClick={async () => {
+                              if (window.confirm(`Bạn có chắc chắn muốn xóa toàn bộ dữ liệu đợt nhập ngày ${wqHistorySample.sampleDate} của trạm này?`)) {
+                                try {
+                                  await deleteWaterQualitySample(wqHistorySample.id);
+                                  alert("Xóa dữ liệu đợt này thành công!");
+                                  setWqHistoryRefresh(prev => prev + 1);
+                                  void fetchRecentSamples();
+                                } catch (err: any) {
+                                  alert("Lỗi khi xóa: " + (err.message || err));
+                                }
+                              }
+                            }}
+                            style={{
+                              padding: '6px 12px',
+                              background: 'rgba(239, 68, 68, 0.1)',
+                              color: '#ef4444',
+                              border: '1px solid rgba(239, 68, 68, 0.2)',
+                              borderRadius: '8px',
+                              fontSize: '0.78rem',
+                              fontWeight: '600',
+                              cursor: 'pointer',
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: '6px',
+                              marginLeft: '8px'
+                            }}
+                            title="Xóa vĩnh viễn đợt dữ liệu này"
+                          >
+                            <Trash2 size={13} /> Xóa đợt này
+                          </button>
+                        )}
                       </div>
                     )}
 
@@ -4101,30 +4146,65 @@ function ScheduleConfig({ source }: { source: string }) {
                                 </td>
                                 <td style={{ padding: '8px 12px', fontStyle: 'italic', color: 'var(--text-muted)' }}>{s.notes || '—'}</td>
                                 <td style={{ padding: '8px 12px' }}>
-                                  <button
-                                    type="button"
-                                    onClick={async () => {
-                                      try {
-                                        const detail = await getWaterQualitySample(s.id);
-                                        setSelectedSampleDetail(detail);
-                                      } catch { /* ignore */ }
-                                    }}
-                                    style={{
-                                      padding: '4px 10px',
-                                      background: 'var(--accent)',
-                                      color: '#fff',
-                                      border: 'none',
-                                      borderRadius: '8px',
-                                      fontSize: '0.78rem',
-                                      fontWeight: '600',
-                                      cursor: 'pointer',
-                                      display: 'flex',
-                                      alignItems: 'center',
-                                      gap: '4px'
-                                    }}
-                                  >
-                                    <Search size={12} /> Xem chi tiết
-                                  </button>
+                                  <div style={{ display: 'flex', gap: '8px' }}>
+                                    <button
+                                      type="button"
+                                      onClick={async () => {
+                                        try {
+                                          const detail = await getWaterQualitySample(s.id);
+                                          setSelectedSampleDetail(detail);
+                                        } catch { /* ignore */ }
+                                      }}
+                                      style={{
+                                        padding: '4px 10px',
+                                        background: 'var(--accent)',
+                                        color: '#fff',
+                                        border: 'none',
+                                        borderRadius: '8px',
+                                        fontSize: '0.78rem',
+                                        fontWeight: '600',
+                                        cursor: 'pointer',
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        gap: '4px'
+                                      }}
+                                    >
+                                      <Search size={12} /> Xem chi tiết
+                                    </button>
+                                    {canManageData && (
+                                      <button
+                                        type="button"
+                                        onClick={async () => {
+                                          if (window.confirm(`Bạn có chắc chắn muốn xóa đợt nhập dữ liệu ngày ${s.sampleDate} của trạm ${s.stationLocation}?`)) {
+                                            try {
+                                              await deleteWaterQualitySample(s.id);
+                                              alert("Xóa dữ liệu thành công!");
+                                              void fetchRecentSamples();
+                                              if (wqImportStationId) setWqHistoryRefresh(prev => prev + 1);
+                                            } catch (err: any) {
+                                              alert("Lỗi khi xóa: " + (err.message || err));
+                                            }
+                                          }
+                                        }}
+                                        style={{
+                                          padding: '4px 10px',
+                                          background: 'rgba(239, 68, 68, 0.1)',
+                                          color: '#ef4444',
+                                          border: '1px solid rgba(239, 68, 68, 0.2)',
+                                          borderRadius: '8px',
+                                          fontSize: '0.78rem',
+                                          fontWeight: '600',
+                                          cursor: 'pointer',
+                                          display: 'flex',
+                                          alignItems: 'center',
+                                          gap: '4px'
+                                        }}
+                                        title="Xóa đợt nhập này"
+                                      >
+                                        <Trash2 size={12} /> Xóa
+                                      </button>
+                                    )}
+                                  </div>
                                 </td>
                               </tr>
                             ))}
