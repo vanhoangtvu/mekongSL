@@ -275,25 +275,83 @@ export function useS3LayerRenderer(
               projection: "EPSG:32648",
             });
 
-        const rasterLayer = new WebGLTileLayer({
-          opacity: 0,
-          source,
-          style: {
+        // --- Style Definition Logic ---
+        const dsPrefix = getPrefix(id);
+        let rasterStyle: any;
+
+        if (dsPrefix.startsWith("hydro-salinity")) {
+          // Rule for Salinity: 0.01 to 27. Exactly 0 is transparent (background).
+          rasterStyle = {
+            color: [
+              "case",
+              ["==", ["band", 1], 0], [0, 0, 0, 0], // Background is 0
+              ["==", ["band", 1], info.nodata], [0, 0, 0, 0],
+              ["<", ["band", 1], 0.01], [0, 0, 0, 0],
+              [">", ["band", 1], 27], [0, 0, 0, 0],
+              ["interpolate", ["linear"], ["band", 1],
+                0.01,  [0, 0, 0, 1],     // Black
+                6.75,  [0, 0, 255, 1],   // Blue
+                13.5,  [0, 255, 0, 1],   // Green
+                20.25, [255, 255, 0, 1], // Yellow
+                27,    [255, 0, 0, 1],   // Red
+              ],
+            ],
+          };
+        } else if (dsPrefix.startsWith("hydro-ph")) {
+          // Rule for pH: 4 to 9. Exactly 0 is transparent (background).
+          rasterStyle = {
+            color: [
+              "case",
+              ["==", ["band", 1], 0], [0, 0, 0, 0], // Background is 0
+              ["==", ["band", 1], info.nodata], [0, 0, 0, 0],
+              ["<", ["band", 1], 4], [0, 0, 0, 0],
+              [">", ["band", 1], 9], [0, 0, 0, 0],
+              ["interpolate", ["linear"], ["band", 1],
+                4,    [0, 0, 0, 1],     // Black
+                5.25, [0, 0, 255, 1],   // Blue
+                6.5,  [0, 255, 0, 1],   // Green
+                7.75, [255, 255, 0, 1], // Yellow
+                9,    [255, 0, 0, 1],   // Red
+              ],
+            ],
+          };
+        } else if (dsPrefix.startsWith("hydro-temp")) {
+          // Rule for Water Level: -20 to 20. Exactly 0 is transparent (background).
+          rasterStyle = {
+            color: [
+              "case",
+              ["==", ["band", 1], 0], [0, 0, 0, 0], // Background is 0
+              ["==", ["band", 1], info.nodata], [0, 0, 0, 0],
+              ["<", ["band", 1], -20], [0, 0, 0, 0],
+              [">", ["band", 1], 20], [0, 0, 0, 0],
+              ["interpolate", ["linear"], ["band", 1],
+                -20,   [0, 0, 0, 1],     // Black
+                -10,   [0, 0, 255, 1],   // Blue
+                0.001, [0, 255, 0, 1],   // Green (Offset slightly to avoid hitting the 0 transparent rule)
+                10,    [255, 255, 0, 1], // Yellow
+                20,    [255, 0, 0, 1],   // Red
+              ],
+            ],
+          };
+        } else {
+          // Default styling for other datasets
+          rasterStyle = {
             color: [
               "case",
               ["<=", ["band", 1], info.nodata], [0, 0, 0, 0],
               ["<=", ["band", 1], 0], [0, 0, 0, 0],
-              ["<", ["band", 1], 0.06], [0, 0, 0, 0],
               ["interpolate", ["linear"], ["band", 1],
                 0.06, [0, 0, 255, 1],
-                5,    [0, 255, 255, 1],
-                10,   [0, 255, 0, 1],
-                15,   [255, 255, 0, 1],
-                20,   [255, 165, 0, 1],
-                21,   [255, 0, 0, 1],
+                21.0, [255, 0, 0, 1],
               ],
             ],
-          },
+          };
+        }
+
+        const rasterLayer = new WebGLTileLayer({
+          opacity: 0,
+          source,
+          style: rasterStyle,
         });
 
         rasterLayer.setZIndex(100 + Object.keys(currentLayers).length);

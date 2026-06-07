@@ -444,7 +444,8 @@ select {
 
 /* Footer */
 .app-footer {
-  position: relative;
+  position: sticky;
+  bottom: 0;
   z-index: 100;
   border-top: 4px solid #1e4d7a;
   background: #2563a8;
@@ -3523,7 +3524,8 @@ html[data-theme="dark"] .map-playback-btn:hover {
 
 /* ── Sidebar Drawer Overlay ── */
 @media (max-width: 767px) {
-  /* Chỉ lock scroll trên trang map (có .geo-layout), không ảnh hưởng about/news */
+  /* Lock scroll trên trang map (public-home hoặc có .geo-layout) */
+  .app-container.public-home,
   .app-container:has(.geo-layout) {
     overflow: hidden !important;
     height: 100dvh !important;
@@ -3690,6 +3692,11 @@ html[data-theme="dark"] .map-playback-btn:hover {
   .user-info-text,
   .logout-btn-text {
     display: none;
+  }
+
+  /* ── Map Viewport: Prevent page scroll on touch ── */
+  .geo-map-viewport {
+    touch-action: none !important;
   }
 
   /* ── Mobile Sidebar Header ── */
@@ -3876,31 +3883,50 @@ html[data-theme="dark"] .map-playback-btn:hover {
     font-size: 24px;
   }
 
-  /* ── Map Inspector: Compact ── */
+  /* ── Map Inspector: Mobile ── */
   .geo-map-inspector {
-    bottom: 4.5rem !important;
+    bottom: auto !important;
+    top: 4.5rem !important;
     left: 0.75rem !important;
-    width: 160px !important;
-    font-size: 0.65rem !important;
+    right: 0.75rem !important;
+    width: auto !important;
+    min-width: 200px !important;
+    max-width: min(calc(100vw - 24px), 400px) !important;
+    max-height: 50vh !important;
+    overflow-y: auto !important;
+    font-size: 0.72rem !important;
     pointer-events: auto !important;
   }
 
   .geo-map-inspector .geo-map-inspector-body {
-    padding: 0.4rem 0.6rem !important;
-    gap: 0.25rem !important;
+    padding: 0.6rem 0.75rem !important;
+    gap: 0.35rem !important;
   }
 
   .geo-map-inspector .geo-map-inspector-header {
-    padding: 0.3rem 0.6rem !important;
-    font-size: 0.6rem !important;
-  }
-
-  .geo-map-inspector .geo-map-inspector-row {
+    padding: 0.4rem 0.75rem !important;
     font-size: 0.65rem !important;
   }
 
+  .geo-map-inspector .geo-map-inspector-row {
+    font-size: 0.72rem !important;
+  }
+
   .geo-map-inspector .geo-map-inspector-val.value-highlight {
-    font-size: 0.75rem !important;
+    font-size: 0.85rem !important;
+  }
+
+  .geo-map-inspector .geo-map-inspector-layer-name {
+    white-space: normal !important;
+    overflow: visible !important;
+    text-overflow: clip !important;
+    word-break: break-word !important;
+    font-size: 0.72rem !important;
+  }
+
+  .geo-map-inspector .geo-map-inspector-layer-btn {
+    flex-wrap: wrap !important;
+    gap: 4px !important;
   }
 
   /* ── Playback Picker: Bottom Sheet ── */

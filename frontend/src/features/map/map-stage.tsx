@@ -6,6 +6,7 @@ import VectorLayer from "ol/layer/Vector";
 import Map from "ol/Map";
 import View from "ol/View";
 import { fromLonLat, toLonLat, transform } from "ol/proj";
+import { easeOut } from "ol/easing";
 import OSM from "ol/source/OSM";
 import XYZ from "ol/source/XYZ";
 import VectorSource from "ol/source/Vector";
@@ -1052,10 +1053,18 @@ export const MapStage = React.memo(function MapStage({ startDateTime, endDateTim
   const wqStationsRef = useRef<ManualStation[]>([]);
   const baseLayerRef = useRef<TileLayer | null>(null);
   const previousMapViewStateRef = useRef<{ center: [number, number]; zoom: number } | null>(null);
+  const isMobileRef = useRef(isMobile);
+  isMobileRef.current = isMobile;
+  const inspectLayerRef = useRef<VectorLayer<VectorSource> | null>(null);
+  const inspectSourceRef = useRef<VectorSource | null>(null);
   const [pixelValue, setPixelValue] = useState<number | null>(null);
   const [pixelValues, setPixelValues] = useState<Record<string, number>>({});
   const [mouseCoords, setMouseCoords] = useState<[number, number] | null>(null);
   const [inspectorExpandedKey, setInspectorExpandedKey] = useState<string | null>(null);
+  const flashCoordsRef = useRef<[number, number] | null>(null);
+  const [flashCoords, setFlashCoords] = useState<[number, number] | null>(null);
+  const pendingStationRef = useRef<{ type: 'wq'; id: number; st: ManualStation } | { type: 'ecowitt'; id: string } | null>(null);
+  const skipZoomRef = useRef(false);
 
   const [timelineUnitMode, setTimelineUnitMode] = useState<TimelineUnitMode>("auto");
 
@@ -1321,8 +1330,8 @@ export const MapStage = React.memo(function MapStage({ startDateTime, endDateTim
       // We wait for metadata to appear in cache for ALL selected datasets
       for (let attempt = 0; attempt < 15; attempt++) {
         queue.length = 0;
-        let missingCount = 0;
-        let missingList = new Set<string>();
+        let missingTotal = 0;
+        let missingNames = new Set<string>();
 
         for (const f of frames) {
           const dateStr = f.value.slice(0, 10);
@@ -1330,7 +1339,7 @@ export const MapStage = React.memo(function MapStage({ startDateTime, endDateTim
           const frameLayers: Record<string, RenderedLayer> = {};
           
           const cachedDay = layersCacheRef.current[dateStr];
-          let allDsFoundForThisFrame = true;
+          let foundAnyForThisFrame = false;
 
           for (const ds of activeDs) {
             const dsKey = `${ds.id}-${ds.type}`;
@@ -1348,22 +1357,25 @@ export const MapStage = React.memo(function MapStage({ startDateTime, endDateTim
               }
             }
             
-            if (!datasetFound) {
-              allDsFoundForThisFrame = false;
-              missingCount++;
-              missingList.add(ds.id.replace("hydro-", "").toUpperCase());
+            if (datasetFound) {
+              foundAnyForThisFrame = true;
+            } else {
+              missingTotal++;
+              missingNames.add(ds.id.replace("hydro-", "").toUpperCase());
             }
           }
 
-          if (allDsFoundForThisFrame) {
+          if (foundAnyForThisFrame) {
             queue.push({ label: f.label, layers: frameLayers });
           }
         }
 
-        if (missingCount === 0 && queue.length === frames.length) break;
+        // If we found everything or we've tried for 15s and found at least something
+        if (missingTotal === 0 && queue.length === frames.length) break;
+        if (attempt === 14 && queue.length > 0) break; // Final attempt
         
-        const missingStr = Array.from(missingList).join(", ");
-        setPbProgressText(`Loading metadata for ${activeNames}... (Missing: ${missingStr})`);
+        const missingStr = Array.from(missingNames).join(", ");
+        setPbProgressText(`Syncing ${activeNames}... (Waiting for: ${missingStr})`);
         await new Promise(r => setTimeout(r, 1000));
       }
 
@@ -1602,28 +1614,151 @@ export const MapStage = React.memo(function MapStage({ startDateTime, endDateTim
     map.addLayer(wqLayer);
     wqLayerRef.current = wqLayer;
 
-    // Click handler: only for WQ station popup; Ecowitt popup is hover-driven
+    // Mobile inspection + flash pin layer
+    const inspectSource = new VectorSource();
+    inspectSourceRef.current = inspectSource;
+    const inspectLayer = new VectorLayer({
+      source: inspectSource,
+      style: (feature) => {
+        const pulse = feature?.get('pulse') as number | undefined;
+        if (pulse !== undefined) {
+          return [
+            new Style({
+              image: new Circle({
+                radius: 10 + pulse * 20,
+                fill: new Fill({ color: `rgba(8, 145, 178, ${0.05 + pulse * 0.15})` }),
+                stroke: new Stroke({ color: `rgba(8, 145, 178, ${0.3 + pulse * 0.7})`, width: 2 + pulse * 2 }),
+              }),
+            }),
+            new Style({
+              image: new Circle({
+                radius: 5 + pulse * 12,
+                fill: new Fill({ color: `rgba(8, 145, 178, ${0.1 + pulse * 0.5})` }),
+                stroke: new Stroke({ color: '#0891b2', width: 2 }),
+              }),
+            }),
+            new Style({
+              image: new Circle({
+                radius: 4,
+                fill: new Fill({ color: '#0891b2' }),
+                stroke: new Stroke({ color: '#fff', width: 1.5 }),
+              }),
+            }),
+          ];
+        }
+        return [
+          new Style({
+            image: new Circle({
+              radius: 18,
+              fill: new Fill({ color: 'rgba(8, 145, 178, 0.15)' }),
+              stroke: new Stroke({ color: '#0891b2', width: 2.5 }),
+            }),
+          }),
+          new Style({
+            image: new Circle({
+              radius: 5,
+              fill: new Fill({ color: '#0891b2' }),
+              stroke: new Stroke({ color: '#fff', width: 2 }),
+            }),
+          }),
+        ];
+      },
+      zIndex: 500,
+    });
+    inspectLayer.setVisible(false);
+    map.addLayer(inspectLayer);
+    inspectLayerRef.current = inspectLayer;
+
+    // Click handler: WQ station popup, Ecowitt popup, and mobile pixel inspection
     map.on("click", (evt) => {
+      let handled = false;
       const feature = map.forEachFeatureAtPixel(evt.pixel, (f) => f as Feature | undefined);
       if (feature) {
         const wqId = feature.get("wqStationId") as number | undefined;
         if (wqId) {
-          setSelectedWqStation((prev) => {
-            if (prev?.id === wqId) return null;
-            const st = wqStationsRef.current?.find(s => s.id === wqId);
-            return st || null;
-          });
-          return;
+          if (isMobileRef.current) {
+            // Mobile: if same station already selected, close it
+            if (selectedWqStation?.id === wqId) {
+              setSelectedWqStation(null);
+            } else {
+              // Clear pixel inspector before flash
+              setMouseCoords(null);
+              setPixelValues({});
+              // Flash then open popup
+              const st = wqStationsRef.current?.find(s => s.id === wqId);
+              if (st && st.x != null && st.y != null) {
+                const isWgs84 = Math.abs(st.x) <= 180 && Math.abs(st.y) <= 90;
+                const coords = isWgs84
+                  ? fromLonLat([st.x, st.y])
+                  : transform([st.x, st.y], 'EPSG:32648', 'EPSG:3857');
+                pendingStationRef.current = { type: 'wq', id: wqId, st };
+                setFlashCoords(coords as [number, number]);
+              }
+            }
+          } else {
+            setSelectedWqStation((prev) => {
+              if (prev?.id === wqId) return null;
+              const st = wqStationsRef.current?.find(s => s.id === wqId);
+              return st || null;
+            });
+          }
+          handled = true;
         }
         // Ecowitt marker: open popup on click (mobile) / hover (desktop)
         const devId = feature.get("deviceId") as string | undefined;
         if (devId) {
-          setPopupDeviceId((prev) => (prev === devId ? null : devId));
-          return;
+          if (isMobileRef.current) {
+            // Mobile: if same station already selected, close it
+            if (popupDeviceId === devId) {
+              setPopupDeviceId(null);
+            } else {
+              // Clear pixel inspector before flash
+              setMouseCoords(null);
+              setPixelValues({});
+              // Flash then open popup
+              const device = ecowittDevices.find(d => d.id === devId);
+              if (device && device.lat != null && device.lng != null) {
+                const coords = fromLonLat([device.lng, device.lat]);
+                pendingStationRef.current = { type: 'ecowitt', id: devId };
+                setFlashCoords(coords as [number, number]);
+              }
+            }
+          } else {
+            setPopupDeviceId((prev) => (prev === devId ? null : devId));
+          }
+          handled = true;
         }
       }
-      setPopupDeviceId(null);
-      setSelectedWqStation(null);
+      if (!handled) {
+        setPopupDeviceId(null);
+        setSelectedWqStation(null);
+      }
+
+      // Mobile: tap to inspect pixel values (skip if tapping a station)
+      if (isMobileRef.current && !handled) {
+        setMouseCoords(evt.coordinate as [number, number]);
+        const layers = layerRefs.current;
+        const collected: Record<string, number> = {};
+        let firstValue: number | null = null;
+        if (layers && typeof layers === 'object') {
+          const visibleLayers = Object.entries(layers)
+            .filter(([, layer]) => layer.getVisible())
+            .sort((a, b) => (b[1].getZIndex?.() ?? 0) - (a[1].getZIndex?.() ?? 0));
+          for (const [key, layer] of visibleLayers) {
+            try {
+              if (!('getData' in layer)) continue;
+              if (!renderedLayersRef.current[key]) continue;
+              const buf = (layer as import("ol/layer/WebGLTile").default).getData(evt.pixel);
+              if (buf && !(buf instanceof DataView) && buf.length > 0) {
+                collected[key] = buf[0];
+                if (firstValue === null) firstValue = buf[0];
+              }
+            } catch { /* skip layer */ }
+          }
+        }
+        setPixelValues(collected);
+        setPixelValue(firstValue);
+      }
     });
 
     // Force multiple size updates to ensure proper rendering
@@ -1638,42 +1773,43 @@ export const MapStage = React.memo(function MapStage({ startDateTime, endDateTim
 
     map.on("pointermove", (evt) => {
       const coordinate = evt.coordinate;
-      setMouseCoords(coordinate as [number, number]);
 
-      // Hover to show Ecowitt station popup
-      const hoveredFeature = map.forEachFeatureAtPixel(evt.pixel, (f) => f as Feature | undefined);
-      const hoveredDeviceId = hoveredFeature?.get("deviceId") as string | undefined;
-      if (hoveredDeviceId) {
-        map.getTargetElement().style.cursor = "pointer";
-        setPopupDeviceId(hoveredDeviceId);
-      } else {
-        map.getTargetElement().style.cursor = "";
-        setPopupDeviceId(null);
-      }
+      // Desktop: real-time pixel inspection on hover
+      if (!isMobileRef.current) {
+        setMouseCoords(coordinate as [number, number]);
 
-      const layers = layerRefs.current;
-      const collected: Record<string, number> = {};
-      let firstValue: number | null = null;
-      if (layers && typeof layers === 'object') {
-        const visibleLayers = Object.entries(layers)
-          .filter(([, layer]) => layer.getVisible())
-          .sort((a, b) => (b[1].getZIndex?.() ?? 0) - (a[1].getZIndex?.() ?? 0));
-
-        for (const [key, layer] of visibleLayers) {
-          try {
-            if (!('getData' in layer)) continue;
-            // Only read from active rendered layers, not fading-out old layers
-            if (!renderedLayersRef.current[key]) continue;
-            const buf = (layer as import("ol/layer/WebGLTile").default).getData(evt.pixel);
-            if (buf && !(buf instanceof DataView) && buf.length > 0) {
-              collected[key] = buf[0];
-              if (firstValue === null) firstValue = buf[0];
-            }
-          } catch { /* skip layer */ }
+        const hoveredFeature = map.forEachFeatureAtPixel(evt.pixel, (f) => f as Feature | undefined);
+        const hoveredDeviceId = hoveredFeature?.get("deviceId") as string | undefined;
+        if (hoveredDeviceId) {
+          map.getTargetElement().style.cursor = "pointer";
+        } else {
+          map.getTargetElement().style.cursor = "";
         }
+
+        const layers = layerRefs.current;
+        const collected: Record<string, number> = {};
+        let firstValue: number | null = null;
+        if (layers && typeof layers === 'object') {
+          const visibleLayers = Object.entries(layers)
+            .filter(([, layer]) => layer.getVisible())
+            .sort((a, b) => (b[1].getZIndex?.() ?? 0) - (a[1].getZIndex?.() ?? 0));
+
+          for (const [key, layer] of visibleLayers) {
+            try {
+              if (!('getData' in layer)) continue;
+              // Only read from active rendered layers, not fading-out old layers
+              if (!renderedLayersRef.current[key]) continue;
+              const buf = (layer as import("ol/layer/WebGLTile").default).getData(evt.pixel);
+              if (buf && !(buf instanceof DataView) && buf.length > 0) {
+                collected[key] = buf[0];
+                if (firstValue === null) firstValue = buf[0];
+              }
+            } catch { /* skip layer */ }
+          }
+        }
+        setPixelValues(collected);
+        setPixelValue(firstValue);
       }
-      setPixelValues(collected);
-      setPixelValue(firstValue);
     });
 
     return () => {
@@ -1685,6 +1821,7 @@ export const MapStage = React.memo(function MapStage({ startDateTime, endDateTim
       }
       layerRefs.current = {};
       ecowittLayerRef.current = null;
+      inspectLayerRef.current = null;
       baseLayerRef.current = null;
       map.setTarget(undefined);
       mapRef.current = null;
@@ -1754,6 +1891,27 @@ export const MapStage = React.memo(function MapStage({ startDateTime, endDateTim
     return () => cancelAnimationFrame(animId);
   }, [popupDeviceId, selectedWqStation]);
 
+  // Mobile inspection pin: show at tapped position when inspector is active
+  useEffect(() => {
+    const source = inspectSourceRef.current;
+    const layer = inspectLayerRef.current;
+    if (!source || !layer) return;
+
+    const showPin = isMobile && mouseCoords !== null && Object.keys(pixelValues).length > 0 && !flashCoords;
+
+    if (showPin) {
+      source.clear();
+      const feature = new Feature({
+        geometry: new Point(mouseCoords),
+      });
+      source.addFeature(feature);
+      layer.setVisible(true);
+    } else {
+      source.clear();
+      layer.setVisible(false);
+    }
+  }, [isMobile, mouseCoords, pixelValues, flashCoords]);
+
   // Save/Restore Map View State when selecting/deselecting stations
   useEffect(() => {
     const map = mapRef.current;
@@ -1778,10 +1936,12 @@ export const MapStage = React.memo(function MapStage({ startDateTime, endDateTim
       if (previousMapViewStateRef.current) {
         const saved = previousMapViewStateRef.current;
         previousMapViewStateRef.current = null; // Clear first to prevent loop
+        view.cancelAnimations();
         view.animate({
           center: saved.center,
           zoom: saved.zoom,
-          duration: 800
+          duration: 800,
+          easing: easeOut,
         });
       }
     }
@@ -1789,6 +1949,10 @@ export const MapStage = React.memo(function MapStage({ startDateTime, endDateTim
 
   // Zoom and pan map to selected manual station, with offset to avoid popup coverage
   useEffect(() => {
+    if (skipZoomRef.current) {
+      skipZoomRef.current = false;
+      return;
+    }
     const map = mapRef.current;
     if (!map || !selectedWqStation) return;
     const view = map.getView();
@@ -1809,19 +1973,23 @@ export const MapStage = React.memo(function MapStage({ startDateTime, endDateTim
         // Shift map UP to show marker in top 35% of screen
         const offsetPixels = -Math.round(window.innerHeight * 0.3);
         const offsetY = offsetPixels * targetResolution;
+        view.cancelAnimations();
         view.animate({
           center: [coords[0], coords[1] - offsetY],
           zoom: 11,
-          duration: 800
+          duration: 800,
+          easing: easeOut,
         });
       } else {
         // Desktop: shift map to the East so marker is left of the popup
         const offsetPixels = hasImages ? 350 : 220;
         const offsetX = offsetPixels * targetResolution;
+        view.cancelAnimations();
         view.animate({
           center: [coords[0] + offsetX, coords[1]],
           zoom: 12.5,
-          duration: 800
+          duration: 800,
+          easing: easeOut,
         });
       }
     }
@@ -1829,6 +1997,10 @@ export const MapStage = React.memo(function MapStage({ startDateTime, endDateTim
 
   // Zoom and pan map to selected Ecowitt station, with a slight offset to avoid popup coverage
   useEffect(() => {
+    if (skipZoomRef.current) {
+      skipZoomRef.current = false;
+      return;
+    }
     const map = mapRef.current;
     if (!map || !popupDeviceId) return;
     const view = map.getView();
@@ -1843,13 +2015,101 @@ export const MapStage = React.memo(function MapStage({ startDateTime, endDateTim
       const offsetX = 140 * targetResolution;
       const offsetCoords = [coords[0] + offsetX, coords[1]];
 
+      view.cancelAnimations();
       view.animate({
         center: offsetCoords,
         zoom: 12.5,
-        duration: 800
+        duration: 800,
+        easing: easeOut,
       });
     }
   }, [popupDeviceId, ecowittDevices]);
+
+  // Flash animation when tapping a station on mobile
+  useEffect(() => {
+    if (!flashCoords) return;
+
+    const map = mapRef.current;
+    const view = map?.getView();
+    const source = inspectSourceRef.current;
+    const layer = inspectLayerRef.current;
+    if (!map || !view || !source || !layer) {
+      setFlashCoords(null);
+      return;
+    }
+
+    // Save current view state before zooming (so restoring works)
+    if (!previousMapViewStateRef.current) {
+      const currCenter = view.getCenter();
+      const currZoom = view.getZoom();
+      if (currCenter && currZoom !== undefined) {
+        previousMapViewStateRef.current = {
+          center: [currCenter[0], currCenter[1]],
+          zoom: currZoom,
+        };
+      }
+    }
+
+    // Zoom to station (no offset, center on station)
+    view.cancelAnimations();
+    view.animate({
+      center: flashCoords,
+      zoom: 12.5,
+      duration: 700,
+      easing: easeOut,
+    });
+
+    // Show flash pin
+    source.clear();
+    const flashFeature = new Feature({
+      geometry: new Point(flashCoords),
+    });
+    flashFeature.set('pulse', 0);
+    source.addFeature(flashFeature);
+    layer.setVisible(true);
+
+    // Flash 2 smooth pulses using requestAnimationFrame
+    const startTime = Date.now();
+    const duration = 1400;
+    let animId: number;
+
+    function tick() {
+      const elapsed = Date.now() - startTime;
+
+      if (elapsed >= duration) {
+        source!.clear();
+        layer!.setVisible(false);
+
+        const pending = pendingStationRef.current;
+        pendingStationRef.current = null;
+        if (pending) {
+          skipZoomRef.current = true;
+          if (pending.type === 'wq') {
+            setSelectedWqStation(pending.st);
+          } else {
+            setPopupDeviceId(pending.id);
+          }
+        }
+        setFlashCoords(null);
+        return;
+      }
+
+      const t = elapsed / duration;
+      const pulse = Math.abs(Math.sin(t * Math.PI * 2));
+      flashFeature.set('pulse', pulse);
+      source!.changed();
+      animId = requestAnimationFrame(tick);
+    }
+
+    animId = requestAnimationFrame(tick);
+
+    return () => {
+      cancelAnimationFrame(animId);
+      source!.clear();
+      layer!.setVisible(false);
+      pendingStationRef.current = null;
+    };
+  }, [flashCoords]);
 
   // Update marker features when ecowittDevices changes
   useEffect(() => {
@@ -2078,8 +2338,10 @@ export const MapStage = React.memo(function MapStage({ startDateTime, endDateTim
           className="geo-map-viewport" 
           aria-label="OpenLayers Map" 
           onMouseLeave={() => {
-            setMouseCoords(null);
-            setPixelValue(null);
+            if (!isMobile) {
+              setMouseCoords(null);
+              setPixelValue(null);
+            }
           }}
         />
 
@@ -2537,6 +2799,16 @@ export const MapStage = React.memo(function MapStage({ startDateTime, endDateTim
             <div className="geo-map-inspector-header">
               <div className="geo-map-inspector-indicator" />
               <span>Map Inspector</span>
+              {isMobile && (
+                <button
+                  type="button"
+                  onClick={() => { setPixelValues({}); setMouseCoords(null); }}
+                  style={{ marginLeft: 'auto', background: 'none', border: 'none', cursor: 'pointer', color: '#64748b', padding: '2px 4px' }}
+                  aria-label="Close inspector"
+                >
+                  <X size={16} />
+                </button>
+              )}
             </div>
             <div className="geo-map-inspector-body">
               <div className="geo-map-inspector-row">
