@@ -1212,6 +1212,7 @@ export const MapStage = React.memo(function MapStage({ startDateTime, endDateTim
         return d >= pbStartDate && d <= pbEndDate;
       });
 
+      console.log("[Playback] frames count:", frames.length, "timelineUnits:", timelineUnits.length, "pbStartDate:", pbStartDate, "pbEndDate:", pbEndDate, "activeDs:", activeDs);
       if (frames.length === 0) throw new Error("No data frames in the selected range.");
 
       const queue: { label: string; layers: Record<string, RenderedLayer> }[] = [];
@@ -1228,6 +1229,7 @@ export const MapStage = React.memo(function MapStage({ startDateTime, endDateTim
           const frameLayers: Record<string, RenderedLayer> = {};
           
           const cachedDay = layersCacheRef.current[dateStr];
+          console.log("[Playback] checking date:", dateStr, "cached:", !!cachedDay, "cacheKeys:", cachedDay ? Object.keys(cachedDay).length : 0);
           let foundAnyForThisFrame = false;
 
           for (const ds of activeDs) {
@@ -1235,6 +1237,7 @@ export const MapStage = React.memo(function MapStage({ startDateTime, endDateTim
             const exactKey = `${dsKey}__${dateStr}__${slot}`;
             
             let datasetFound = false;
+            console.log("[Playback] dsKey:", dsKey, "exactKey:", exactKey, "hasCachedDay:", !!cachedDay);
             if (cachedDay && cachedDay[exactKey]) {
               frameLayers[exactKey] = cachedDay[exactKey];
               datasetFound = true;

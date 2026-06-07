@@ -1294,14 +1294,26 @@ html[data-theme="light"] .geo-settings-panel {
   gap: 6px;
 }
 
-.geo-dataset-children {
+.geo-dataset-children,
+.geo-dataset-grandchildren {
   display: flex;
   flex-direction: column;
   gap: 0.1rem;
   margin-top: 0.15rem;
-  margin-left: 2rem;
-  padding-left: 0.8rem;
-  border-left: 1px solid rgba(13, 110, 253, 0.4);
+  margin-left: 1.15rem;
+  padding-left: 0.95rem;
+  border-left: 1px solid rgba(13, 110, 253, 0.3);
+  position: relative;
+}
+
+.geo-dataset-grandchildren {
+  margin-left: 1.35rem;
+}
+
+.geo-dataset-child-wrap {
+  display: flex;
+  align-items: center;
+  gap: 6px;
   position: relative;
 }
 
@@ -1309,7 +1321,7 @@ html[data-theme="light"] .geo-settings-panel {
   display: flex;
   align-items: flex-start;
   gap: 0.55rem;
-  padding: 0.18rem 0.3rem;
+  padding: 0.22rem 0.35rem;
   border-radius: 6px;
   cursor: pointer;
   transition: background 120ms ease;
@@ -1318,14 +1330,32 @@ html[data-theme="light"] .geo-settings-panel {
   min-width: 0;
 }
 
+/* Horizontal line connector */
 .geo-dataset-child::before {
   content: "";
   position: absolute;
-  left: -0.8rem;
-  top: 0.78rem;
-  width: 0.8rem;
+  left: -0.95rem;
+  top: 0.85rem;
+  width: 0.95rem;
   height: 1px;
-  background: rgba(13, 110, 253, 0.45);
+  background: rgba(13, 110, 253, 0.35);
+}
+
+/* Vertical line fix for last child - hides the overextending border */
+.geo-dataset-child-wrap:last-child > .geo-dataset-children,
+.geo-dataset-child-wrap:last-child > .geo-dataset-grandchildren {
+  border-left-color: transparent;
+}
+
+.geo-dataset-child-wrap:last-child::after {
+  content: "";
+  position: absolute;
+  left: -0.95rem;
+  top: 0.85rem;
+  bottom: 0;
+  width: 1px;
+  background: var(--surface);
+  z-index: 1;
 }
 
 .geo-dataset-child:hover {

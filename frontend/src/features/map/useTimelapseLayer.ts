@@ -7,7 +7,7 @@ import WebGLTileLayer from "ol/layer/WebGLTile";
 import VectorLayer from "ol/layer/Vector";
 import GeoTIFF from "ol/source/GeoTIFF";
 import { transformExtent } from "ol/proj";
-import { getDatasetSlug, getParentDataset, getDatasetById } from "../../lib/constants/datasets";
+import { getDatasetSlug, getParentDataset, getDatasetById, getRootDataset } from "../../lib/constants/datasets";
 import { listS3Files } from "../../lib/admin-api";
 import type { RenderedLayer } from "./useS3DatasetLayers";
 
@@ -145,12 +145,31 @@ export function useTimelapseLayer(
   function buildDsPaths(ds: { id: string; type: string }) {
     const dsInfo = getDatasetById(ds.id);
     const parent = getParentDataset(ds.id);
+    const root = getRootDataset(ds.id);
+    
     let datasetId: string, catSlug: string;
-    if (parent) { datasetId = parent.id; catSlug = getDatasetSlug(ds.id) || ds.id; }
-    else if (dsInfo?.children?.length) { datasetId = ds.id; catSlug = getDatasetSlug(dsInfo.children[0].id) || dsInfo.children[0].id; }
-    else { datasetId = ds.id; catSlug = "default"; }
+    
+    if (root && root.id !== ds.id) {
+      datasetId = root.id;
+      const rootPrefix = root.id + "/";
+      const relativePath = ds.id.startsWith(rootPrefix) ? ds.id.slice(rootPrefix.length) : ds.id;
+      catSlug = getDatasetSlug(ds.id) || relativePath;
+    } else if (parent) {
+      datasetId = parent.id;
+      const parentPrefix = parent.id + "/";
+      const relativePath = ds.id.startsWith(parentPrefix) ? ds.id.slice(parentPrefix.length) : ds.id;
+      catSlug = getDatasetSlug(ds.id) || relativePath;
+    } else if (dsInfo?.children?.length) {
+      datasetId = ds.id;
+      catSlug = getDatasetSlug(dsInfo.children[0].id) || dsInfo.children[0].id;
+    } else {
+      datasetId = ds.id;
+      catSlug = "default";
+    }
+    
     const dsSlug = getDatasetSlug(datasetId) || datasetId;
     const catName = dsInfo?.name || ds.id;
+    
     return { parent, catName, dsSlug, catSlug, datasetId };
   }
 

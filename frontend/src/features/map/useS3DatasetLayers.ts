@@ -141,11 +141,22 @@ export function useS3DatasetLayers(
         
         if (root && root.id !== dsId) {
           datasetSlug = getDatasetSlug(root.id) || root.id;
-          // If we have a nested category, get the relative slug from the root
-          categorySlug = getDatasetSlug(dsId) || dsId;
+          // Get relative path from root
+          const rootPrefix = root.id + "/";
+          let relativePath = dsId.startsWith(rootPrefix) ? dsId.slice(rootPrefix.length) : dsId;
+          // Handle cases where child IDs don't have parent prefix (e.g., "hydro-salinity" under "hydrology")
+          if (relativePath === dsId && parent) {
+            relativePath = getDatasetSlug(dsId) || dsId;
+          }
+          categorySlug = relativePath;
         } else if (parent) {
           datasetSlug = getDatasetSlug(parent.id) || parent.id;
-          categorySlug = getDatasetSlug(dsId) || dsId;
+          const parentPrefix = parent.id + "/";
+          let relativePath = dsId.startsWith(parentPrefix) ? dsId.slice(parentPrefix.length) : dsId;
+          if (relativePath === dsId) {
+            relativePath = getDatasetSlug(dsId) || dsId;
+          }
+          categorySlug = relativePath;
         } else {
           datasetSlug = getDatasetSlug(dsId) || dsId;
           categorySlug = "default";
@@ -153,9 +164,26 @@ export function useS3DatasetLayers(
 
         const catName = dsInfo?.name || dsId;
         const basePrefix = `gis-data/${datasetSlug}/${categorySlug}/`;
-        const prefixes = timelineDate
-          ? [`${basePrefix}${y}/${md}/${dd}/`, `${basePrefix}${y}/${md}/`, `${basePrefix}${y}/`, basePrefix]
-          : [basePrefix];
+        
+        // Check if this is Landsat or Baseline (only use year, ignore month/day)
+        const rootId = root?.id ?? "";
+        const isLandsat = rootId === "landsat" || dsId.startsWith("landsat") || dsId.startsWith("band-") || dsId === "rgb";
+        const isBaseline = rootId === "baseline" || dsId.startsWith("baseline") || 
+                          dsId.startsWith("channel-") || dsId.startsWith("landuse-") ||
+                          dsId.startsWith("admin-") || dsId.startsWith("waterbody") ||
+                          dsId.startsWith("soil") || dsId.startsWith("road") ||
+                          dsId.startsWith("groundwater");
+        const yearOnly = isLandsat || isBaseline;
+        
+        // For yearOnly datasets: use year only. For others: use full date path (always use current date if no timelineDate)
+        const searchYear = timelineDate ? y : new Date().getFullYear();
+        const searchMd = String(m).padStart(2, "0");
+        const searchDd = String(d).padStart(2, "0");
+        const prefixes = yearOnly
+          ? [`${basePrefix}${searchYear}/`, basePrefix]
+          : (timelineDate
+              ? [`${basePrefix}${y}/${md}/${dd}/`, `${basePrefix}${y}/${md}/`, `${basePrefix}${y}/`, basePrefix]
+              : [`${basePrefix}${searchYear}/${searchMd}/${searchDd}/`, `${basePrefix}${searchYear}/${searchMd}/`, `${basePrefix}${searchYear}/`, basePrefix]);
 
         let foundKey: string | null = null;
         let vdcKey: string | null = null;
@@ -181,56 +209,72 @@ export function useS3DatasetLayers(
             } else {
               const allTifs = files.filter(f => f.key?.match(/\.tiff?$/i));
               if (!allTifs.length) continue;
-              const dateOf = (key: string) => { const m2 = key.match(/\/(\d{4})\/(\d{2})\/(\d{2})\//); return m2 ? `${m2[1]}/${m2[2]}/${m2[3]}` : ""; };
-              const targetDateStr = `${y}/${md}/${dd}`;
-              const uniqueDates = [...new Set(allTifs.map(f => dateOf(f.key ?? "")))].filter(Boolean).sort();
-
-              const lte = timelineDate ? uniqueDates.filter(d2 => d2 <= targetDateStr) : uniqueDates;
-              if (!lte.length) {
-                if (isActive && timelineDate) showNotification(`No raster data for "${catName}" before ${dateStr}`, "info");
-                break;
-              }
-              const bestDate = lte[lte.length - 1];
-              const tifsForDate = allTifs.filter(f => dateOf(f.key ?? "") === bestDate);
-
-              // isFirstApply: this dataset key was just added (fresh apply or re-apply after remove)
-              const isFirstApply = firstApplyKeysRef.current.has(dsKey);
-
-              let pickedTif = tifsForDate.find(f => f.key?.includes(`/${timeSlot ?? "00-00"}/`));
-
-              if (!pickedTif && isFirstApply) {
-                // First apply: fallback to nearest slot
-                const slotNum = parseInt((timeSlot ?? "00-00").replace("-", ""), 10);
-                pickedTif = tifsForDate.reduce((best, f) => {
-                  const m2 = f.key?.match(/\/(\d{2}-\d{2})\//);
-                  if (!m2) return best;
-                  const diff = Math.abs(parseInt(m2[1].replace("-", ""), 10) - slotNum);
-                  const bm = best?.key?.match(/\/(\d{2}-\d{2})\//);
-                  return diff < Math.abs(parseInt((bm?.[1] ?? "9999").replace("-", ""), 10) - slotNum) ? f : best;
-                }, tifsForDate[0]);
-              } else if (!pickedTif) {
-                // User moved timeline: exact slot required, no fallback
-                if (isActive) showNotification(`No data for "${catName}" at ${timeSlot}`, "info");
-                break;
-              }
-
-              if (pickedTif) {
-                const timeMatch = pickedTif.key!.match(/\/(\d{2}-\d{2})\//);
-                const timeLabel = timeMatch ? timeMatch[1] : "00-00";
-                const frameKey = `${dsKey}__${bestDate.replace(/\//g, "-")}__${timeLabel}`;
-                additions[frameKey] = {
-                  name: parent ? `${parent.name} - ${catName} (${timeLabel})` : `${catName} (${timeLabel})`,
-                  proxyUrl: `/api/tif?key=${encodeURIComponent(pickedTif.key!)}`,
-                  type: "raster",
-                  bbox: [594885, 1052655, 688485, 1117455],
-                  nodata: -9999,
-                };
-                // Notify actual slot loaded (for timeline sync on first apply)
-                if (isFirstApply && timeLabel !== (timeSlot ?? "00-00") && isActive) {
-                  onActualSlot?.(bestDate.replace(/\//g, "-"), timeLabel);
+              
+              // For Landsat/Baseline: extract year only. For others: extract full date
+              const yearOf = (key: string) => { const m = key.match(/\/(\d{4})\//); return m ? m[1] : ""; };
+              const dateOf = (key: string) => { const m = key.match(/\/(\d{4})\/(\d{2})\/(\d{2})\//); return m ? `${m[1]}/${m[2]}/${m[3]}` : ""; };
+              
+              if (yearOnly) {
+                // Landsat/Baseline: filter by year only
+                const targetYear = String(searchYear);
+                const uniqueYears = [...new Set(allTifs.map(f => yearOf(f.key ?? "")))].filter(Boolean).sort();
+                const lte = timelineDate ? uniqueYears.filter(y2 => y2 <= targetYear) : uniqueYears;
+                if (!lte.length) {
+                  if (isActive) showNotification(`No data for "${catName}" in year ${searchYear}`, "info");
+                  break;
                 }
-                firstApplyKeysRef.current.delete(dsKey);
-                rasterFound = true;
+                const bestYear = lte[lte.length - 1];
+                const tifsForYear = allTifs.filter(f => yearOf(f.key ?? "") === bestYear);
+                
+                const pickedTif = tifsForYear[0];
+                if (pickedTif) {
+                  const frameKey = `${dsKey}__${bestYear}__00-00`;
+                  additions[frameKey] = {
+                    name: parent ? `${parent.name} - ${catName} (${bestYear})` : `${catName} (${bestYear})`,
+                    proxyUrl: `/api/tif?key=${encodeURIComponent(pickedTif.key!)}`,
+                    type: "raster",
+                    bbox: [594885, 1052655, 688485, 1117455],
+                    nodata: -9999,
+                  };
+                  rasterFound = true;
+                  break;
+                }
+              } else {
+                // Non-Landsat: filter by full date
+                const targetDateStr = `${y}/${md}/${dd}`;
+                const uniqueDates = [...new Set(allTifs.map(f => dateOf(f.key ?? "")))].filter(Boolean).sort();
+
+                const lte = timelineDate ? uniqueDates.filter(d2 => d2 <= targetDateStr) : uniqueDates;
+                if (!lte.length) {
+                  if (isActive && timelineDate) showNotification(`No raster data for "${catName}" before ${dateStr}`, "info");
+                  break;
+                }
+                const bestDate = lte[lte.length - 1];
+                const tifsForDate = allTifs.filter(f => dateOf(f.key ?? "") === bestDate);
+
+                // Get all available slots for this date (not just the current timeSlot)
+                const allSlotsForDate = [...new Set(tifsForDate.map(f => {
+                  const m = f.key?.match(/\/(\d{2}-\d{2})\//);
+                  return m ? m[1] : "00-00";
+                }))].sort();
+
+                // Load ALL slots available for this date (for timelapse playback)
+                for (const slot of allSlotsForDate) {
+                  const pickedTif = tifsForDate.find(f => f.key?.includes(`/${slot}/`));
+                  if (pickedTif) {
+                    const frameKey = `${dsKey}__${bestDate.replace(/\//g, "-")}__${slot}`;
+                    if (!additions[frameKey]) {
+                      additions[frameKey] = {
+                        name: parent ? `${parent.name} - ${catName} (${slot})` : `${catName} (${slot})`,
+                        proxyUrl: `/api/tif?key=${encodeURIComponent(pickedTif.key!)}`,
+                        type: "raster",
+                        bbox: [594885, 1052655, 688485, 1117455],
+                        nodata: -9999,
+                      };
+                      rasterFound = true;
+                    }
+                  }
+                }
                 break;
               }
             }
@@ -310,13 +354,27 @@ export function useS3DatasetLayers(
           const root = getRootDataset(ds.id);
           if (dsInfo?.gisData === false || parent?.gisData === false) continue;
 
+          // Skip preload for Landsat and Baseline (uses year only)
+          const rootId = root?.id ?? "";
+          const isLandsat = rootId === "landsat" || ds.id.startsWith("landsat") || ds.id.startsWith("band-") || ds.id === "rgb";
+          const isBaseline = rootId === "baseline" || ds.id.startsWith("baseline") || 
+                            ds.id.startsWith("channel-") || ds.id.startsWith("landuse-") ||
+                            ds.id.startsWith("admin-") || ds.id.startsWith("waterbody") ||
+                            ds.id.startsWith("soil") || ds.id.startsWith("road") ||
+                            ds.id.startsWith("groundwater");
+          if (isLandsat || isBaseline) continue;
+
           let datasetSlug: string, categorySlug: string;
           if (root && root.id !== ds.id) {
             datasetSlug = getDatasetSlug(root.id) || root.id;
-            categorySlug = getDatasetSlug(ds.id) || ds.id;
+            const rootPrefix = root.id + "/";
+            const relativePath = ds.id.startsWith(rootPrefix) ? ds.id.slice(rootPrefix.length) : ds.id;
+            categorySlug = relativePath;
           } else if (parent) {
             datasetSlug = getDatasetSlug(parent.id) || parent.id;
-            categorySlug = getDatasetSlug(ds.id) || ds.id;
+            const parentPrefix = parent.id + "/";
+            const relativePath = ds.id.startsWith(parentPrefix) ? ds.id.slice(parentPrefix.length) : ds.id;
+            categorySlug = relativePath;
           } else {
             datasetSlug = getDatasetSlug(ds.id) || ds.id;
             categorySlug = "default";

@@ -98,7 +98,7 @@ export function GeoSearchSidebar({
 
   /** Check if a parent has all its children selected */
   const getParentState = (categoryId: string): "all" | "some" | "none" => {
-    const cat = DATASETS.find((c) => c.id === categoryId);
+    const cat = getDatasetById(categoryId);
     if (!cat?.children || cat.children.length === 0) return selectedLayers[categoryId]?.length > 0 ? "all" : "none";
     const allIds = getAllDescendantIds(cat);
     const checked = allIds.filter((id) => selectedLayers[id]?.length > 0).length;
@@ -109,7 +109,7 @@ export function GeoSearchSidebar({
 
   const toggleDataset = (datasetId: string) => {
     // If this ID is a parent category with children → toggle all descendants, skip parent itself
-    const category = DATASETS.find((c) => c.id === datasetId);
+    const category = getDatasetById(datasetId);
     if (category?.children) {
       const allChildIds = getAllDescendantIds(category);
       const state = getParentState(datasetId);
@@ -338,7 +338,7 @@ export function GeoSearchSidebar({
                           {child.children && expandedCategories.has(child.id) && (
                             <div className="geo-dataset-grandchildren">
                               {child.children.map(grandchild => (
-                                <div key={grandchild.id} className="geo-dataset-child-wrap" style={{ paddingLeft: '16px' }}>
+                                <div key={grandchild.id} className="geo-dataset-child-wrap">
                                   <label className="geo-dataset-child">
                                     <input
                                       type="checkbox"

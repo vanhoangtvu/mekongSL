@@ -276,10 +276,15 @@ export function useS3LayerRenderer(
             });
 
         // --- Style Definition Logic ---
-        const dsPrefix = getPrefix(id);
+        const dsPrefix = getPrefix(id).toLowerCase();
+        const lowerUrl = url.toLowerCase();
         let rasterStyle: any;
 
-        if (dsPrefix.startsWith("hydro-salinity")) {
+        const isSalinity = dsPrefix.includes("salinity") || lowerUrl.includes("salinity");
+        const isPh = dsPrefix.includes("ph") || lowerUrl.includes("ph");
+        const isWater = dsPrefix.includes("tidal") || lowerUrl.includes("tidal") || dsPrefix.includes("temp") || lowerUrl.includes("water-level");
+
+        if (isSalinity) {
           // Rule for Salinity: 0.01 to 27. Exactly 0 is transparent (background).
           rasterStyle = {
             color: [
@@ -297,7 +302,7 @@ export function useS3LayerRenderer(
               ],
             ],
           };
-        } else if (dsPrefix.startsWith("hydro-ph")) {
+        } else if (isPh) {
           // Rule for pH: 4 to 9. Exactly 0 is transparent (background).
           rasterStyle = {
             color: [
