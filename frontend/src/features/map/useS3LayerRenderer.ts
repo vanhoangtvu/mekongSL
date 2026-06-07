@@ -315,21 +315,21 @@ export function useS3LayerRenderer(
               ],
             ],
           };
-        } else if (dsPrefix.startsWith("hydro-temp")) {
-          // Rule for Water Level: -20 to 20. Exactly 0 is transparent (background).
+        } else if (isWater) {
+          // Rule for Water Level: -100 to 200. Exactly 0 is transparent (background).
           rasterStyle = {
             color: [
               "case",
               ["==", ["band", 1], 0], [0, 0, 0, 0], // Background is 0
               ["==", ["band", 1], info.nodata], [0, 0, 0, 0],
-              ["<", ["band", 1], -20], [0, 0, 0, 0],
-              [">", ["band", 1], 20], [0, 0, 0, 0],
+              ["<", ["band", 1], -100], [0, 0, 0, 0],
+              [">", ["band", 1], 200], [0, 0, 0, 0],
               ["interpolate", ["linear"], ["band", 1],
-                -20,   [0, 0, 0, 1],     // Black
-                -10,   [0, 0, 255, 1],   // Blue
-                0.001, [0, 255, 0, 1],   // Green (Offset slightly to avoid hitting the 0 transparent rule)
-                10,    [255, 255, 0, 1], // Yellow
-                20,    [255, 0, 0, 1],   // Red
+                -100,  [0, 0, 0, 1],     // Black
+                -25,   [0, 0, 255, 1],   // Blue
+                0.001, [0, 255, 0, 1],   // Green
+                100,   [255, 255, 0, 1], // Yellow
+                200,   [255, 0, 0, 1],   // Red
               ],
             ],
           };

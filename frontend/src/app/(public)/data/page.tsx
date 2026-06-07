@@ -577,20 +577,23 @@ function FilePreviewModal({ fileKey, onClose }: FilePreviewModalProps) {
             ]
           };
         } else if (isTidal || isWaterLevel) {
-          // Tidal / water-level: blue gradient
+          // Tidal / water-level: blue-to-red gradient
           layerStyle = {
             color: [
               'case',
-              ['<=', ['band', 1], -9000], [0, 0, 0, 0],
+              ['==', ['band', 1], 0], [0, 0, 0, 0],
+              ['==', ['band', 1], -9999], [0, 0, 0, 0],
+              ['<', ['band', 1], -100], [0, 0, 0, 0],
+              ['>', ['band', 1], 200], [0, 0, 0, 0],
               [
                 'interpolate',
                 ['linear'],
                 ['band', 1],
-                -0.5, [173, 216, 230, 0.6],
-                0,    [135, 206, 235, 0.75],
-                0.5,  [30, 144, 255, 0.85],
-                1.5,  [0, 80, 200, 0.9],
-                3.0,  [0, 0, 139, 1]
+                -100,  [0, 0, 0, 1],
+                -25,   [0, 0, 255, 1],
+                0.001, [0, 255, 0, 1],
+                100,   [255, 255, 0, 1],
+                200,   [255, 0, 0, 1]
               ]
             ]
           };
