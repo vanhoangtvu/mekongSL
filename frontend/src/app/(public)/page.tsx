@@ -112,7 +112,7 @@ export default function PublicHomePage() {
         {!isMobile && <SearchTabs activeTab={activeTab} onTabChange={setActiveTab} />}
         
         <div className={`app-content ${isSidebarOpen ? 'sidebar-open' : ''}`}>
-          <ResizablePanel defaultWidth={360} minWidth={280} maxWidth={600} side="left" isMobile={isMobile} isSidebarOpen={isSidebarOpen}>
+          <ResizablePanel defaultWidth={360} minWidth={280} maxWidth={600} side="left" isMobile={isMobile} isSidebarOpen={isSidebarOpen} onClose={() => setIsSidebarOpen(false)}>
             <GeoSearchSidebar
               activeTab={activeTab}
               onTabChange={(tab) => { setActiveTab(tab); }}

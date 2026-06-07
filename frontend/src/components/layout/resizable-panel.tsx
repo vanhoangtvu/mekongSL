@@ -10,6 +10,7 @@ type ResizablePanelProps = {
   side?: "left" | "right";
   isMobile?: boolean;
   isSidebarOpen?: boolean;
+  onClose?: () => void;
 };
 
 export function ResizablePanel({
@@ -20,6 +21,7 @@ export function ResizablePanel({
   side = "left",
   isMobile,
   isSidebarOpen,
+  onClose,
 }: ResizablePanelProps) {
   const [width, setWidth] = useState(defaultWidth);
   const [isDragging, setIsDragging] = useState(false);
@@ -65,7 +67,7 @@ export function ResizablePanel({
   if (isMobile) {
     return (
       <>
-        {isSidebarOpen && <div className="sidebar-backdrop" onClick={() => {}} />}
+        {isSidebarOpen && <div className="sidebar-backdrop" onClick={onClose} />}
         <div
           ref={panelRef}
           className={`resizable-panel mobile-drawer ${isSidebarOpen ? 'mobile-drawer--open' : ''}`}

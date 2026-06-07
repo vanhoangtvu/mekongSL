@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import Image from "next/image";
 import { authService } from "../../lib/auth";
-import { LogOut, User, Menu, X } from "lucide-react";
+import { LogOut, User, Menu, X, Shield, LogIn, Home } from "lucide-react";
 
 type AppHeaderProps = {
   onToggleSidebar?: () => void;
@@ -32,9 +32,15 @@ export function AppHeader({ onToggleSidebar, isSidebarOpen }: AppHeaderProps) {
     <header className="app-header">
       <div className="app-header-content">
         <div className="app-header-left">
-          <button className="app-header-mobile-toggle" onClick={onToggleSidebar} type="button" aria-label="Toggle menu">
-            {isSidebarOpen ? <X size={20} /> : <Menu size={20} />}
-          </button>
+          {onToggleSidebar ? (
+            <button className="app-header-mobile-toggle" onClick={onToggleSidebar} type="button" aria-label="Toggle menu">
+              {isSidebarOpen ? <X size={20} /> : <Menu size={20} />}
+            </button>
+          ) : (
+            <Link href="/" className="app-header-mobile-toggle" aria-label="Trang chủ">
+              <Home size={20} />
+            </Link>
+          )}
           <div className="app-brand">
             <Link href="/" className="app-logo">
               <Image src="/logo.png" alt="Mekong Salt Lab" width={158} height={30} style={{ objectFit: "contain" }} />
@@ -63,6 +69,7 @@ export function AppHeader({ onToggleSidebar, isSidebarOpen }: AppHeaderProps) {
           )}
         </nav>
       </div>
+
       <style jsx>{`
         .user-info {
           display: flex;

@@ -14,10 +14,9 @@ import Point from "ol/geom/Point";
 import { Style, Circle, Fill, Stroke, Text } from "ol/style";
 import proj4 from "proj4";
 import { register } from "ol/proj/proj4";
-import { DATASETS } from "../../lib/constants/datasets";
+import { DATASETS, getRootDataset } from "../../lib/constants/datasets";
 import { ECOWITT_DEVICES, type EcowittDevice } from "../../lib/constants/data-sources";
 import { useS3DatasetLayers } from "./useS3DatasetLayers";
-import { useSingleLayer } from "./useSingleLayer";
 import { useTimelapseLayer } from "./useTimelapseLayer";
 import type { ManualStation } from "../../lib/admin-api";
 import { listWaterQualitySamples, getWaterQualitySample, getBackendAdminUrl, type WaterQualitySampleDto } from "../../lib/admin-api";
@@ -87,25 +86,22 @@ type PlayerLayer = {
   opacity: number;
 };
 
-const ALL_AVAILABLE_LAYERS: PlayerLayer[] = DATASETS.flatMap((cat) =>
-  cat.children
-    ? cat.children.map((child) => ({
-        id: child.id,
-        name: child.name,
-        categoryId: cat.id,
-        categoryName: cat.name,
-        added: false,
-        opacity: 0.7,
-      }))
-    : [{
-        id: cat.id,
-        name: cat.name,
-        categoryId: cat.id,
-        categoryName: cat.name,
-        added: false,
-        opacity: 0.7,
-      }]
-);
+const ALL_AVAILABLE_LAYERS: PlayerLayer[] = DATASETS.flatMap((root) => {
+  function collectLeafLayers(item: typeof root): PlayerLayer[] {
+    if (item.children && item.children.length > 0) {
+      return item.children.flatMap((c) => collectLeafLayers(c));
+    }
+    return [{
+      id: item.id,
+      name: item.name,
+      categoryId: root.id,
+      categoryName: root.name,
+      added: false,
+      opacity: 0.7,
+    }];
+  }
+  return collectLeafLayers(root);
+});
 
 type WorldFile = {
   a: number;
@@ -338,7 +334,7 @@ const OBS_HOURS = [0, 5, 10, 15, 20];
 function buildTimelineUnits(startDate: Date, endDate: Date, mode: TimelineResolvedMode) {
   if (mode === "hour4") {
     const units: TimelineUnit[] = [];
-    let cur = new Date(startDate);
+    const cur = new Date(startDate);
     cur.setHours(0, 0, 0, 0);
     while (cur <= endDate) {
       for (const h of OBS_HOURS) {
@@ -961,7 +957,7 @@ function EcowittStationPopup({
                     marginBottom: "8px",
                   }}
                 >
-                  Today's Chart
+                  {"Today's Chart"}
                 </div>
                 {ECOWITT_POPUP_SENSORS.map((sensor) => (
                   <div key={sensor.key} style={{ marginBottom: "10px" }}>
@@ -1045,7 +1041,7 @@ function EcowittStationPopup({
 }
 
 export const MapStage = React.memo(function MapStage({ startDateTime, endDateTime, appliedDatasets, onRemoveDataset, onAddDataset, onStartDateTimeChange, onEndDateTimeChange, waterQualityStations, isMobile }: MapStageProps) {
-  console.log("[MapStage] render", { datasets: appliedDatasets, single: (appliedDatasets?.length ?? 0) === 1 });
+  // console.log("[MapStage] render", { datasets: appliedDatasets, single: (appliedDatasets?.length ?? 0) === 1 });
   const mapContainerRef = useRef<HTMLDivElement | null>(null);
   const scrollerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<Map | null>(null);
@@ -1132,10 +1128,19 @@ export const MapStage = React.memo(function MapStage({ startDateTime, endDateTim
     setTimeSlot(rawTimeSlot);
   }, [rawTimelineDate, rawTimeSlot]);
 
-  const isSingleMode = (appliedDatasets?.length ?? 0) === 1;
-  const singleDataset = isSingleMode ? appliedDatasets![0] : undefined;
-
   const isTimelinePlayingRef = useRef(false);
+
+  // Playback feature state
+  const [showPlaybackPicker, setShowPlaybackPicker] = useState(false);
+  const [pbStartDate, setPbStartDate] = useState("");
+  const [pbEndDate, setPbEndDate] = useState("");
+  const [pbError, setPbError] = useState("");
+  const [isTimelinePlaying, setIsTimelinePlaying] = useState(false);
+  useEffect(() => { isTimelinePlayingRef.current = isTimelinePlaying; }, [isTimelinePlaying]);
+  const [pbLoading, setPbLoading] = useState(false);
+  const [pbProgressText, setPbProgressText] = useState("");
+  const [playbackQueue, setPlaybackQueue] = useState<{ label: string; layers: Record<string, RenderedLayer> }[]>([]);
+  const [playbackIndex, setPlaybackIndex] = useState(0);
 
   const onActualSlot = (actualDate: string, actualSlot: string) => {
     // Don't snap timeline during playback — timelapse hook already shows correct frame
@@ -1145,55 +1150,35 @@ export const MapStage = React.memo(function MapStage({ startDateTime, endDateTim
     if (idx >= 0) setTimelineIndex(idx);
   };
 
-  // Single-layer mode: exact slot fetch, no cache
-  const singleResult = useSingleLayer(singleDataset, mapRef, timelineDate, timeSlot, onActualSlot);
-
-  // Split datasets: raster → timelapse, vector → legacy renderer (timelapse skips vector)
-  const rasterDatasets = useMemo(
-    () => (appliedDatasets ?? []).filter(d => d.type !== "vector"),
-    [appliedDatasets],
-  );
-  const vectorDatasets = useMemo(
-    () => (appliedDatasets ?? []).filter(d => d.type === "vector"),
-    [appliedDatasets],
-  );
-
-  // Timelapse mode: preload all frames, instant setVisible() swap (raster only)
-  const timelapseResult = useTimelapseLayer(
-    isSingleMode ? undefined : (rasterDatasets.length > 0 ? rasterDatasets : undefined),
-    mapRef, timelineDate, timeSlot, allTimelineDates, onActualSlot,
-  );
-  // Vector layers always go through the legacy multi-layer hook
-  const vectorResult = useS3DatasetLayers(
-    isSingleMode ? undefined : (vectorDatasets.length > 0 ? vectorDatasets : undefined),
-    mapRef, timelineDate, timeSlot, prefetchDate, allTimelineDates,
+  // Use useS3DatasetLayers for all applied datasets to support overlapping multiple layers
+  const s3Result = useS3DatasetLayers(
+    appliedDatasets,
+    mapRef,
+    timelineDate,
+    timeSlot,
+    prefetchDate,
+    allTimelineDates,
+    onActualSlot,
+    isTimelinePlaying && playbackQueue.length > 0 ? playbackQueue[playbackIndex].layers : undefined
   );
 
-  const { renderedLayers: baseRenderedLayers, layerRefs: baseLayerRefs, preloadFrames } =
-    isSingleMode ? { ...singleResult, preloadFrames: undefined } : timelapseResult;
+  const { renderedLayers, layerRefs: s3LayerRefs, layersCacheRef, sourceCacheRef } = s3Result;
 
-  // Merge vector rendered layers into the main set
-  const renderedLayers = useMemo(
-    () => isSingleMode ? baseRenderedLayers : { ...baseRenderedLayers, ...vectorResult.renderedLayers },
-    [isSingleMode, baseRenderedLayers, vectorResult.renderedLayers],
-  );
-
-  // Merged layerRefs: combine base (raster/single) + vector refs into one object
-  const layerRefs = useMemo(() => {
-    const merged: { current: Record<string, import("ol/layer/WebGLTile").default | import("ol/layer/Vector").default> } = {
-      get current() {
-        return { ...baseLayerRefs.current, ...vectorResult.layerRefs.current };
-      },
-      set current(v) {
-        baseLayerRefs.current = v;
-      },
-    };
-    return merged;
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  const effectiveRenderedLayers = useMemo(() => {
+    if (isTimelinePlaying && playbackQueue.length > 0) {
+      return playbackQueue[playbackIndex].layers;
+    }
+    return renderedLayers;
+  }, [isTimelinePlaying, playbackQueue, playbackIndex, renderedLayers]);
 
   // Keep a ref so the pointermove closure (created once) can read current renderedLayers
-  const renderedLayersRef = useRef(renderedLayers);
-  useEffect(() => { renderedLayersRef.current = renderedLayers; }, [renderedLayers]);
+  const renderedLayersRef = useRef(effectiveRenderedLayers);
+  useEffect(() => { renderedLayersRef.current = effectiveRenderedLayers; }, [effectiveRenderedLayers]);
+
+  // Merge layerRefs for inspector and other tools
+  const layerRefs = useMemo(() => {
+    return s3LayerRefs; // useS3LayerRenderer is already called inside useS3DatasetLayers
+  }, [s3LayerRefs]);
 
   // Store playback frames for controlling auto-advance range
   const [activeBaseLayer, setActiveBaseLayer] = useState<BaseLayerType>("light");
@@ -1266,120 +1251,158 @@ export const MapStage = React.memo(function MapStage({ startDateTime, endDateTim
     });
   }, [playerLayers, renderedLayers]);
 
-  // Playback feature state
-  const [showPlaybackPicker, setShowPlaybackPicker] = useState(false);
-  const [pbStartDate, setPbStartDate] = useState("");
-  const [pbEndDate, setPbEndDate] = useState("");
-  const [pbError, setPbError] = useState("");
-  const [isTimelinePlaying, setIsTimelinePlaying] = useState(false);
-  useEffect(() => { isTimelinePlayingRef.current = isTimelinePlaying; }, [isTimelinePlaying]);
-  const [playbackSpeed, setPlaybackSpeed] = useState(0.5);
-  const [pendingPlayback, setPendingPlayback] = useState<{ start: string; end: string } | null>(null);
-  const [pbLoading, setPbLoading] = useState(false);
-
   const handleOpenPlayback = () => {
     setPbStartDate("");
     setPbEndDate("");
     setPbError("");
     setShowPlaybackPicker(true);
   };
-  const playbackFramesRef = useRef<TimelineUnit[]>([]);
-
-  // Auto-advance timeline during playback (only within selected frames)
-  const playbackInterval = useMemo(() => Math.max(200, 1000 / playbackSpeed), [playbackSpeed]);
 
   useEffect(() => {
-    if (!isTimelinePlaying || timelineUnits.length === 0) return;
-    const frames = playbackFramesRef.current;
-    if (frames.length === 0) return;
-    const lastFrameIdx = timelineUnits.findIndex(u => u.value === frames[frames.length - 1].value);
+    if (!isTimelinePlaying || playbackQueue.length === 0) return;
     const interval = setInterval(() => {
-      setTimelineIndex((prev) => {
-        if (prev >= lastFrameIdx) {
+      setPlaybackIndex(prev => {
+        if (prev >= playbackQueue.length - 1) {
           setIsTimelinePlaying(false);
           return prev;
         }
         return prev + 1;
       });
-    }, playbackInterval);
+    }, 1000); // Set back to 1s per frame as requested
     return () => clearInterval(interval);
-  }, [isTimelinePlaying, timelineUnits.length, playbackInterval]);
+  }, [isTimelinePlaying, playbackQueue.length]);
 
-  const handleStartPlayback = () => {
+  const handleStartPlayback = async () => {
     if (!pbStartDate || !pbEndDate) {
       setPbError("Please select both start and end date.");
       return;
     }
-    if (pbStartDate > pbEndDate) {
-      setPbError("Start date must be before end date.");
+    const start = new Date(pbStartDate);
+    const end = new Date(pbEndDate);
+    const diffDays = Math.ceil((end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24));
+    
+    if (diffDays < 0 || diffDays > 7) {
+      setPbError("Please select a range between 0 and 7 days.");
       return;
     }
 
-    // Check if timelineUnits already covers the playback range
-    const firstInTimeline = timelineUnits.length > 0 ? timelineUnits[0].value.slice(0, 10) : null;
-    const lastInTimeline = timelineUnits.length > 0 ? timelineUnits[timelineUnits.length - 1].value.slice(0, 10) : null;
-    const rangeCoversPlayback = firstInTimeline && lastInTimeline &&
-      firstInTimeline <= pbStartDate && lastInTimeline >= pbEndDate;
+    setPbLoading(true);
+    setPbProgressText("Listing files from S3...");
+    setPbError("");
 
-    if (!rangeCoversPlayback) {
-      // Expand sidebar date range to cover the playback period
-      if (onStartDateTimeChange) {
-        const currentStart = startDateTime.slice(0, 10);
-        if (pbStartDate < currentStart) {
-          onStartDateTimeChange(pbStartDate + "T00:00");
-        }
+    try {
+      const activeDs = (appliedDatasets ?? []).filter(d => d.type === "raster" || d.type === "vector");
+      if (activeDs.length === 0) throw new Error("No active datasets selected.");
+
+      const activeNames = activeDs.map(d => d.id.replace("hydro-", "").toUpperCase()).join(", ");
+
+      // Step 1: Ensure timeline covers the range
+      const firstInTimeline = timelineUnits.length > 0 ? timelineUnits[0].value.slice(0, 10) : null;
+      const lastInTimeline = timelineUnits.length > 0 ? timelineUnits[timelineUnits.length - 1].value.slice(0, 10) : null;
+      const rangeCoversPlayback = firstInTimeline && lastInTimeline &&
+        firstInTimeline <= pbStartDate && lastInTimeline >= pbEndDate;
+
+      if (!rangeCoversPlayback) {
+        if (onStartDateTimeChange) onStartDateTimeChange(pbStartDate + "T00:00");
+        if (onEndDateTimeChange) onEndDateTimeChange(pbEndDate + "T23:59");
+        setPbProgressText("Expanding timeline...");
+        await new Promise(r => setTimeout(r, 2000));
       }
-      if (onEndDateTimeChange) {
-        const currentEnd = endDateTime.slice(0, 10);
-        if (pbEndDate > currentEnd) {
-          onEndDateTimeChange(pbEndDate + "T23:59");
-        }
-      }
-      // Defer playback start until timelineUnits expands to cover the range
-      setShowPlaybackPicker(false);
-      setPendingPlayback({ start: pbStartDate, end: pbEndDate });
-      return;
-    }
 
-    // Timeline already covers the range — start playback immediately
-    const frames = timelineUnits.filter(u => {
-      const d = u.value.slice(0, 10);
-      return d >= pbStartDate && d <= pbEndDate;
-    });
-
-    if (frames.length === 0) {
-      setPbError("No data frames in the selected range.");
-      return;
-    }
-
-    playbackFramesRef.current = frames;
-    setShowPlaybackPicker(false);
-
-    const dsKeys = appliedDatasets
-      ?.filter(ds => ds.type === "raster")
-      .map(ds => `${ds.id}-${ds.type}`) ?? [];
-
-    const allFrameKeys: string[] = [];
-    for (const f of frames) {
-      const date = f.value.slice(0, 10);
-      const slot = f.value.slice(11, 16).replace(":", "-");
-      for (const dk of dsKeys) {
-        allFrameKeys.push(`${dk}__${date}__${slot}`);
-      }
-    }
-
-    if (preloadFrames && allFrameKeys.length > 0) {
-      setPbLoading(true);
-      preloadFrames(allFrameKeys).then(() => {
-        setPbLoading(false);
-        const firstUnit = timelineUnits.findIndex(u => u.value === frames[0].value);
-        if (firstUnit >= 0) setTimelineIndex(firstUnit);
-        setIsTimelinePlaying(true);
+      const frames = timelineUnits.filter(u => {
+        const d = u.value.slice(0, 10);
+        return d >= pbStartDate && d <= pbEndDate;
       });
-    } else {
-      const firstUnit = timelineUnits.findIndex(u => u.value === frames[0].value);
-      if (firstUnit >= 0) setTimelineIndex(firstUnit);
+
+      if (frames.length === 0) throw new Error("No data frames in the selected range.");
+
+      const queue: { label: string; layers: Record<string, RenderedLayer> }[] = [];
+      
+      // We wait for metadata to appear in cache for ALL selected datasets
+      for (let attempt = 0; attempt < 15; attempt++) {
+        queue.length = 0;
+        let missingCount = 0;
+        let missingList = new Set<string>();
+
+        for (const f of frames) {
+          const dateStr = f.value.slice(0, 10);
+          const slot = f.value.slice(11, 16).replace(":", "-");
+          const frameLayers: Record<string, RenderedLayer> = {};
+          
+          const cachedDay = layersCacheRef.current[dateStr];
+          let allDsFoundForThisFrame = true;
+
+          for (const ds of activeDs) {
+            const dsKey = `${ds.id}-${ds.type}`;
+            const exactKey = `${dsKey}__${dateStr}__${slot}`;
+            
+            let datasetFound = false;
+            if (cachedDay && cachedDay[exactKey]) {
+              frameLayers[exactKey] = cachedDay[exactKey];
+              datasetFound = true;
+            } else if (cachedDay) {
+              const nearestKey = Object.keys(cachedDay).find(k => k.startsWith(dsKey + "__"));
+              if (nearestKey) {
+                frameLayers[nearestKey] = cachedDay[nearestKey];
+                datasetFound = true;
+              }
+            }
+            
+            if (!datasetFound) {
+              allDsFoundForThisFrame = false;
+              missingCount++;
+              missingList.add(ds.id.replace("hydro-", "").toUpperCase());
+            }
+          }
+
+          if (allDsFoundForThisFrame) {
+            queue.push({ label: f.label, layers: frameLayers });
+          }
+        }
+
+        if (missingCount === 0 && queue.length === frames.length) break;
+        
+        const missingStr = Array.from(missingList).join(", ");
+        setPbProgressText(`Loading metadata for ${activeNames}... (Missing: ${missingStr})`);
+        await new Promise(r => setTimeout(r, 1000));
+      }
+
+      if (queue.length === 0) throw new Error("No data ready. Ensure S3 has files for the selected range.");
+
+      // Step 4: Real Data Pre-loading (Fetch TIFF Headers)
+      setPbProgressText(`Warming up ${queue.length} frames...`);
+      const totalFrames = queue.length;
+      let loadedFrames = 0;
+
+      for (const item of queue) {
+        const frameEntries = Object.entries(item.layers);
+        await Promise.all(frameEntries.map(async ([frameKey, info]) => {
+          if (info.type !== "raster") return;
+          if (sourceCacheRef.current.get(frameKey)?.ready) return;
+
+          try {
+            const url = info.proxyUrl.startsWith("http") ? info.proxyUrl : `${window.location.origin}${info.proxyUrl}`;
+            const source = new (await import("ol/source/GeoTIFF")).default({
+              sources: [{ url, nodata: info.nodata }],
+              convertToRGB: false, normalize: false, interpolate: false,
+              projection: "EPSG:32648",
+            });
+            await source.getView();
+            sourceCacheRef.current.set(frameKey, { source, ready: true });
+          } catch (e) { console.warn("[playback-preload] failed for", frameKey, e); }
+        }));
+        loadedFrames++;
+        setPbProgressText(`Loading pixels (${loadedFrames}/${totalFrames})...`);
+      }
+
+      setPlaybackQueue(queue);
+      setPlaybackIndex(0);
       setIsTimelinePlaying(true);
+      setShowPlaybackPicker(false);
+    } catch (err: any) {
+      setPbError(err.message || "Failed to start playback.");
+    } finally {
+      setPbLoading(false);
     }
   };
 
@@ -1474,56 +1497,6 @@ export const MapStage = React.memo(function MapStage({ startDateTime, endDateTim
 
     setTimelineIndex((currentIndex) => Math.min(currentIndex, timelineUnits.length - 1));
   }, [timelineUnits.length]);
-
-  // ── When timelineUnits expands to cover pending playback range, start playback ──
-  useEffect(() => {
-    if (!pendingPlayback) return;
-    const { start, end } = pendingPlayback;
-    // Check if timelineUnits now covers the requested range
-    const firstInTimeline = timelineUnits.length > 0 ? timelineUnits[0].value.slice(0, 10) : null;
-    const lastInTimeline = timelineUnits.length > 0 ? timelineUnits[timelineUnits.length - 1].value.slice(0, 10) : null;
-    if (!firstInTimeline || !lastInTimeline) return;
-    if (firstInTimeline <= start && lastInTimeline >= end) {
-      setPendingPlayback(null);
-      const frames = timelineUnits.filter(u => {
-        const d = u.value.slice(0, 10);
-        return d >= start && d <= end;
-      });
-      playbackFramesRef.current = frames;
-      if (frames.length === 0) return;
-
-      const dsKeys = appliedDatasets
-        ?.filter(ds => ds.type === "raster")
-        .map(ds => `${ds.id}-${ds.type}`) ?? [];
-
-      const allFrameKeys: string[] = [];
-      for (const f of frames) {
-        const date = f.value.slice(0, 10);
-        const slot = f.value.slice(11, 16).replace(":", "-");
-        for (const dk of dsKeys) {
-          allFrameKeys.push(`${dk}__${date}__${slot}`);
-        }
-      }
-
-      if (preloadFrames && allFrameKeys.length > 0) {
-        setPbLoading(true);
-        preloadFrames(allFrameKeys).then(() => {
-          setPbLoading(false);
-          const firstFrameValue = frames[0].value;
-          const firstUnit = timelineUnits.findIndex(u => u.value === firstFrameValue);
-          if (firstUnit >= 0) setTimelineIndex(firstUnit);
-          setIsTimelinePlaying(true);
-        });
-      } else {
-        const firstFrameValue = frames[0].value;
-        const firstUnit = timelineUnits.findIndex(u => u.value === firstFrameValue);
-        if (firstUnit >= 0) setTimelineIndex(firstUnit);
-        setIsTimelinePlaying(true);
-      }
-    }
-  }, [timelineUnits, pendingPlayback]);
-
-
 
   useEffect(() => {
     if (!mapContainerRef.current || mapRef.current) {
@@ -2110,6 +2083,21 @@ export const MapStage = React.memo(function MapStage({ startDateTime, endDateTim
           }}
         />
 
+        {/* Preload Loading Overlay */}
+        {pbLoading && (
+          <div className="geo-map-preload-overlay">
+            <div className="geo-map-preload-box">
+              <div className="geo-map-preload-spinner" />
+              <span className="geo-map-preload-text">
+                Preparing time-lapse data…
+              </span>
+              <span className="geo-map-preload-sub">
+                {pbProgressText || "Downloading frames for smooth playback. Please wait."}
+              </span>
+            </div>
+          </div>
+        )}
+
         {/* Top Floating Controls Wrapper */}
         <div className={`map-top-controls-wrapper ${isMobile ? 'map-top-controls-wrapper--mobile' : ''}`}>
           {/* Add Player Button & Dropdown */}
@@ -2302,7 +2290,7 @@ export const MapStage = React.memo(function MapStage({ startDateTime, endDateTim
 
           {/* Top Control Bar (Timeline & Playback) */}
           <div className="map-top-bar">
-            {showTimeline && (
+            {showTimeline && !isTimelinePlaying && (
               <div 
                 className="map-timeline-container" 
                 data-unit-mode={timelineData.mode} 
@@ -2471,7 +2459,13 @@ export const MapStage = React.memo(function MapStage({ startDateTime, endDateTim
           <div className="map-player-controls">
             <button
               className="map-player-btn"
-              onClick={() => { setTimelineIndex((p) => Math.max(0, p - 1)); }}
+              onClick={() => { 
+                if (isTimelinePlaying && playbackQueue.length > 0) {
+                  setPlaybackIndex(p => Math.max(0, p - 1));
+                } else {
+                  setTimelineIndex((p) => Math.max(0, p - 1)); 
+                }
+              }}
               type="button"
               title="Previous"
             >
@@ -2492,30 +2486,28 @@ export const MapStage = React.memo(function MapStage({ startDateTime, endDateTim
             </button>
             <button
               className="map-player-btn"
-              onClick={() => { setTimelineIndex((p) => Math.min(timelineUnits.length - 1, p + 1)); }}
+              onClick={() => { 
+                if (isTimelinePlaying && playbackQueue.length > 0) {
+                  setPlaybackIndex(p => Math.min(playbackQueue.length - 1, p + 1));
+                } else {
+                  setTimelineIndex((p) => Math.min(timelineUnits.length - 1, p + 1)); 
+                }
+              }}
               type="button"
               title="Next"
             >
               <SkipForward size={14} fill="currentColor" />
             </button>
             <span className="map-player-date">
-              {timelineUnits[timelineIndex]?.label || ''}
+              {isTimelinePlaying && playbackQueue.length > 0 
+                ? playbackQueue[playbackIndex]?.label 
+                : (timelineUnits[timelineIndex]?.label || '')}
             </span>
             {pbLoading && (
               <span className="map-player-loading">
-                Loading frames…
+                {pbProgressText || "Loading frames…"}
               </span>
             )}
-            <div className="map-player-speed">
-              {[0.25, 0.5, 1, 1.5, 2].map((s) => (
-                <button
-                  key={s}
-                  className={`map-player-speed-btn ${playbackSpeed === s ? 'is-active' : ''}`}
-                  onClick={() => setPlaybackSpeed(s)}
-                  type="button"
-                >{s}x</button>
-              ))}
-            </div>
           </div>
         )}
 
@@ -2850,10 +2842,25 @@ export const MapStage = React.memo(function MapStage({ startDateTime, endDateTim
           <div className="pb-picker-body">
             <div className="pb-field">
               <label className="pb-label">Start Date</label>
-              <input className="pb-input" type="date" value={pbStartDate} onChange={e => { setPbStartDate(e.target.value); setPbError(""); }} />
+              <input 
+                className="pb-input" 
+                type="date" 
+                value={pbStartDate} 
+                onChange={e => { 
+                  const newStart = e.target.value;
+                  setPbStartDate(newStart); 
+                  setPbError("");
+                  // Auto-set end date to +7 days
+                  if (newStart) {
+                    const d = new Date(newStart);
+                    d.setDate(d.getDate() + 7);
+                    setPbEndDate(d.toISOString().slice(0, 10));
+                  }
+                }} 
+              />
             </div>
             <div className="pb-field">
-              <label className="pb-label">End Date</label>
+              <label className="pb-label">End Date (Max 7 days from start)</label>
               <input className="pb-input" type="date" value={pbEndDate} onChange={e => { setPbEndDate(e.target.value); setPbError(""); }} />
             </div>
             {pbError && <div className="pb-error">{pbError}</div>}

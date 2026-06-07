@@ -465,7 +465,7 @@ export default function S3Manager() {
   // ── Filter & sort ────────────────────────────────────────────────────
   const filteredFiles = useMemo(() => {
     const q = searchQuery.toLowerCase().trim();
-    let list = q
+    const list = q
       ? files.filter((f) => getFileName(f.key).toLowerCase().includes(q))
       : files;
 
@@ -945,7 +945,7 @@ export default function S3Manager() {
                 )}
                 {searchQuery && (
                   <span className="s3-status-search">
-                    Tìm kiếm: "{searchQuery}"
+                    {`Tìm kiếm: "${searchQuery}"`}
                   </span>
                 )}
               </div>

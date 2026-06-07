@@ -11,8 +11,7 @@ import { getDatasetSlug, getParentDataset, getDatasetById } from "../../lib/cons
 import { listS3Files } from "../../lib/admin-api";
 import type { RenderedLayer } from "./useS3DatasetLayers";
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-const RASTER_STYLE: any = {
+const RASTER_STYLE: Record<string, unknown> = {
   color: [
     "case",
     ["<=", ["band", 1], -9999], [0, 0, 0, 0],
@@ -26,14 +25,24 @@ const RASTER_STYLE: any = {
   ],
 };
 
-// Keep at most this many WebGL layers alive per dataset key
-const MAX_POOL = 8;
 const FADE_MS = 180;
-
+const PRELOAD_CONCURRENCY = 6;
+const MAX_SOURCE_CACHE = 300;
 type FrameKey = string;
-type PoolEntry = { frameKey: FrameKey; layer: WebGLTileLayer; ready: boolean; ts: number };
+
+type DsEntry = {
+  layer: WebGLTileLayer;
+  currentFrameKey: FrameKey | null;
+  loading: boolean;
+};
+
+type SourceCacheEntry = {
+  source: GeoTIFF;
+  ready: boolean;
+};
 
 function fade(layer: WebGLTileLayer, from: number, to: number, ms: number) {
+  if (from === to) return;
   const start = performance.now();
   const tick = (now: number) => {
     const t = Math.min(1, (now - start) / ms);
@@ -51,231 +60,288 @@ export function useTimelapseLayer(
   allTimelineDates?: string[],
   onActualSlot?: (date: string, slot: string) => void,
 ) {
-  const poolRef = useRef<Map<string, PoolEntry[]>>(new Map());
-  const activeRef = useRef<Map<string, FrameKey>>(new Map());
+  const dsLayersRef = useRef<Map<string, DsEntry>>(new Map());
   const metaRef = useRef<Map<FrameKey, RenderedLayer>>(new Map());
+  const sourceCacheRef = useRef<Map<FrameKey, SourceCacheEntry>>(new Map());
   const layerRefs = useRef<Record<string, WebGLTileLayer | VectorLayer>>({});
   const [renderedLayers, setRenderedLayers] = useState<Record<string, RenderedLayer>>({});
   const prevDsRef = useRef("");
   const fittedRef = useRef(false);
-  // True while pool is being cleared/rebuilt — prevents showFrame race
-  const rebuildingRef = useRef(false);
+  const [discoverTick, setDiscoverTick] = useState(0);
 
-  function evict(dsKey: string, map: OLMap) {
-    const pool = poolRef.current.get(dsKey) ?? [];
-    const active = activeRef.current.get(dsKey);
-    const evictable = pool.filter(e => e.frameKey !== active).sort((a, b) => a.ts - b.ts);
-    while (pool.length > MAX_POOL && evictable.length > 0) {
-      const e = evictable.shift()!;
-      map.removeLayer(e.layer);
-      e.layer.getSource()?.dispose?.();
-      pool.splice(pool.indexOf(e), 1);
-      delete layerRefs.current[e.frameKey];
+  function evictSourceCache(toKeep: number) {
+    const cache = sourceCacheRef.current;
+    if (cache.size <= toKeep) return;
+    const keys = [...cache.keys()];
+    const toEvict = cache.size - toKeep;
+    for (let i = 0; i < toEvict && i < keys.length; i++) {
+      const entry = cache.get(keys[i]);
+      if (entry) {
+        try { entry.source.dispose(); } catch { /* ignore */ }
+      }
+      cache.delete(keys[i]);
     }
   }
 
-  function buildLayer(frameKey: FrameKey, proxyUrl: string, dsKey: string, map: OLMap) {
-    const pool = poolRef.current.get(dsKey) ?? [];
-    if (pool.some(e => e.frameKey === frameKey)) return;
-    const src = new GeoTIFF({
-      sources: [{ url: `${window.location.origin}${proxyUrl}`, nodata: -9999 }],
+  function showFrame(dsKey: string, frameKey: FrameKey, map: OLMap) {
+    const entry = dsLayersRef.current.get(dsKey);
+    const meta = metaRef.current.get(frameKey);
+    if (!entry || !meta) return;
+    if (entry.currentFrameKey === frameKey) return;
+
+    const cached = sourceCacheRef.current.get(frameKey);
+    if (cached?.ready) {
+      entry.loading = false;
+      entry.currentFrameKey = frameKey;
+      entry.layer.setOpacity(0);
+      entry.layer.setSource(cached.source);
+      fade(entry.layer, 0, 0.7, FADE_MS);
+      setRenderedLayers(prev => ({ ...prev, [frameKey]: meta }));
+      if (!fittedRef.current) {
+        fittedRef.current = true;
+        cached.source.getView().then(vo => {
+          if (!mapRef.current || !vo.extent || !vo.projection) return;
+          const p = typeof vo.projection === "string" ? vo.projection : vo.projection.getCode();
+          mapRef.current.getView().fit(transformExtent(vo.extent, p, "EPSG:3857"), { padding: [48, 48, 48, 48], duration: 300, maxZoom: 15 });
+        }).catch(() => {});
+      }
+      return;
+    }
+
+    const proxyUrl = meta.proxyUrl as string;
+    const url = proxyUrl.startsWith("http") ? proxyUrl : `${window.location.origin}${proxyUrl}`;
+
+    const newSrc = new GeoTIFF({
+      sources: [{ url, nodata: -9999 }],
       convertToRGB: false, normalize: false, interpolate: false, projection: "EPSG:32648",
     });
-    const layer = new WebGLTileLayer({ source: src, opacity: 0, visible: true, style: RASTER_STYLE });
-    layer.setZIndex(110);
-    map.addLayer(layer);
-    const entry: PoolEntry = { frameKey, layer, ready: false, ts: Date.now() };
-    pool.push(entry);
-    poolRef.current.set(dsKey, pool);
-    layerRefs.current[frameKey] = layer;
 
-    if (!fittedRef.current) {
-      src.getView().then(vo => {
-        if (fittedRef.current || !mapRef.current || !vo.extent || !vo.projection) return;
+    entry.loading = true;
+    entry.currentFrameKey = frameKey;
+    entry.layer.setOpacity(0);
+    entry.layer.setSource(newSrc);
+
+    newSrc.once("change", () => {
+      if (newSrc.getState() !== "ready") return;
+      if (entry.currentFrameKey !== frameKey) return;
+      entry.loading = false;
+      fade(entry.layer, 0, 0.7, FADE_MS);
+      setRenderedLayers(prev => ({ ...prev, [frameKey]: meta }));
+
+      sourceCacheRef.current.set(frameKey, { source: newSrc, ready: true });
+      evictSourceCache(MAX_SOURCE_CACHE);
+
+      if (!fittedRef.current) {
         fittedRef.current = true;
-        const p = typeof vo.projection === "string" ? vo.projection : vo.projection.getCode();
-        mapRef.current.getView().fit(transformExtent(vo.extent, p, "EPSG:3857"), { padding: [48, 48, 48, 48], duration: 300, maxZoom: 15 });
-      }).catch(() => {});
-    }
-
-    src.once("change", () => {
-      if (src.getState() !== "ready") return;
-      entry.ready = true;
-      // Guard: pool may have been cleared while loading
-      if (rebuildingRef.current) return;
-      if (activeRef.current.get(dsKey) === frameKey) showFrame(dsKey, frameKey, map);
+        newSrc.getView().then(vo => {
+          if (!mapRef.current || !vo.extent || !vo.projection) return;
+          const p = typeof vo.projection === "string" ? vo.projection : vo.projection.getCode();
+          mapRef.current.getView().fit(transformExtent(vo.extent, p, "EPSG:3857"), { padding: [48, 48, 48, 48], duration: 300, maxZoom: 15 });
+        }).catch(() => {});
+      }
     });
-    evict(dsKey, map);
   }
 
-  function showFrame(dsKey: string, newKey: FrameKey, map: OLMap) {
-    const pool = poolRef.current.get(dsKey) ?? [];
-    const newEntry = pool.find(e => e.frameKey === newKey);
-    if (!newEntry?.ready) return;
-
-    const oldKey = activeRef.current.get(dsKey);
-    activeRef.current.set(dsKey, newKey);
-
-    // Fade in new layer first, then fade out old — no black gap
-    newEntry.layer.setOpacity(0);
-    fade(newEntry.layer, 0, 0.7, FADE_MS);
-    if (oldKey && oldKey !== newKey) {
-      const oldEntry = pool.find(e => e.frameKey === oldKey);
-      // Delay fade-out so new layer is visible before old disappears
-      if (oldEntry) setTimeout(() => fade(oldEntry.layer, oldEntry.layer.getOpacity(), 0, FADE_MS), FADE_MS * 0.5);
-    }
-
-    const meta = metaRef.current.get(newKey);
-    if (meta) setRenderedLayers({ [newKey]: meta });
-    evict(dsKey, map);
+  function buildDsPaths(ds: { id: string; type: string }) {
+    const dsInfo = getDatasetById(ds.id);
+    const parent = getParentDataset(ds.id);
+    let datasetId: string, catSlug: string;
+    if (parent) { datasetId = parent.id; catSlug = getDatasetSlug(ds.id) || ds.id; }
+    else if (dsInfo?.children?.length) { datasetId = ds.id; catSlug = getDatasetSlug(dsInfo.children[0].id) || dsInfo.children[0].id; }
+    else { datasetId = ds.id; catSlug = "default"; }
+    const dsSlug = getDatasetSlug(datasetId) || datasetId;
+    const catName = dsInfo?.name || ds.id;
+    return { parent, catName, dsSlug, catSlug, datasetId };
   }
 
-  // ── Discover all frames metadata (list S3) ──
   useEffect(() => {
     const map = mapRef.current;
-    if (!map || !appliedDatasets?.length || !allTimelineDates?.length) return;
+    if (!map) return;
 
-    const dsStr = appliedDatasets.map(d => `${d.id}-${d.type}`).join(",");
+    const rasterDs = (appliedDatasets ?? []).filter(d => d.type === "raster");
+    const dsStr = rasterDs.map(d => `${d.id}-${d.type}`).join(",");
+
     if (dsStr !== prevDsRef.current) {
       prevDsRef.current = dsStr;
       fittedRef.current = false;
-      rebuildingRef.current = true;
-      for (const pool of poolRef.current.values())
-        for (const e of pool) { map.removeLayer(e.layer); e.layer.getSource()?.dispose?.(); }
-      poolRef.current.clear();
+      for (const entry of dsLayersRef.current.values()) {
+        map.removeLayer(entry.layer);
+        entry.layer.getSource()?.dispose?.();
+      }
+      dsLayersRef.current.clear();
       metaRef.current.clear();
-      activeRef.current.clear();
       layerRefs.current = {};
       setRenderedLayers({});
+
+      rasterDs.forEach((ds, idx) => {
+        const dsKey = `${ds.id}-${ds.type}`;
+        const layer = new WebGLTileLayer({ opacity: 0, style: RASTER_STYLE });
+        layer.setZIndex(110 + idx);
+        map.addLayer(layer);
+        layerRefs.current[dsKey] = layer;
+        dsLayersRef.current.set(dsKey, { layer, currentFrameKey: null, loading: false });
+      });
     }
+
+    if (!rasterDs.length || !allTimelineDates?.length) return;
 
     let cancelled = false;
     void (async () => {
-      for (const dateStr of allTimelineDates) {
+      const dateOf = (k: string) => { const m2 = k.match(/\/(\d{4})\/(\d{2})\/(\d{2})\//); return m2 ? `${m2[1]}/${m2[2]}/${m2[3]}` : ""; };
+
+      // Group dates by month for bulk listing
+      const monthGroups = new Map<string, string[]>();
+      for (const d of allTimelineDates) {
+        const [y, m] = d.split("-");
+        const mk = `${y}-${m}`;
+        if (!monthGroups.has(mk)) monthGroups.set(mk, []);
+        monthGroups.get(mk)!.push(d);
+      }
+
+      let firstDateDone = false;
+
+      for (const ds of rasterDs) {
         if (cancelled) break;
-        const [y, m, d] = dateStr.split("-").map(Number);
-        const md = String(m).padStart(2, "0");
-        const dd = String(d).padStart(2, "0");
-        for (const ds of appliedDatasets) {
-          if (cancelled || ds.type !== "raster") continue;
-          const dsKey = `${ds.id}-${ds.type}`;
-          const dsInfo = getDatasetById(ds.id);
-          const parent = getParentDataset(ds.id);
-          if (dsInfo?.gisData === false || parent?.gisData === false) continue;
-          let datasetId: string, catSlug: string;
-          if (parent) { datasetId = parent.id; catSlug = getDatasetSlug(ds.id) || ds.id; }
-          else if (dsInfo?.children?.length) { datasetId = ds.id; catSlug = getDatasetSlug(dsInfo.children[0].id) || dsInfo.children[0].id; }
-          else { datasetId = ds.id; catSlug = "default"; }
-          const catName = dsInfo?.name || ds.id;
-          const dsSlug = getDatasetSlug(datasetId) || datasetId;
+        const paths = buildDsPaths(ds);
+        if (paths.datasetId === ds.id && !paths.dsSlug) continue;
+
+        const dsKey = `${ds.id}-${ds.type}`;
+
+        for (const [ym, dates] of monthGroups) {
+          if (cancelled) break;
+          const [y, m] = ym.split("-");
+          const md = String(Number(m)).padStart(2, "0");
+          const monthPrefix = `gis-data/${paths.dsSlug}/${paths.catSlug}/${y}/${md}/`;
+
           try {
-            const files = await listS3Files(`gis-data/${dsSlug}/${catSlug}/${y}/${md}/${dd}/`);
+            // List month once, then filter by dates
+            let monthFiles: Awaited<ReturnType<typeof listS3Files>>;
+            try {
+              monthFiles = await listS3Files(monthPrefix);
+            } catch { continue; }
             if (cancelled) break;
-            const dateOf = (k: string) => { const m2 = k.match(/\/(\d{4})\/(\d{2})\/(\d{2})\//); return m2 ? `${m2[1]}/${m2[2]}/${m2[3]}` : ""; };
-            for (const tif of files.filter(f => f.key?.match(/\.tiff?$/i) && dateOf(f.key) === `${y}/${md}/${dd}`)) {
-              const tm = tif.key!.match(/\/(\d{2}-\d{2})\//);
-              const slot = tm ? tm[1] : "00-00";
-              const frameKey: FrameKey = `${dsKey}__${dateStr}__${slot}`;
-              if (!metaRef.current.has(frameKey)) {
-                metaRef.current.set(frameKey, {
-                  name: parent ? `${parent.name} - ${catName} (${slot})` : `${catName} (${slot})`,
-                  proxyUrl: `/api/tif?key=${encodeURIComponent(tif.key!)}`,
-                  type: "raster", bbox: [594885, 1052655, 688485, 1117455], nodata: -9999,
-                });
+
+            const tifs = monthFiles.files.filter(f => f.key?.match(/\.tiff?$/i));
+            if (!tifs.length) continue;
+
+            // Build date→slot→tif map from the single month listing
+            const dateSlotMap = new Map<string, Map<string, typeof tifs[0]>>();
+            for (const t of tifs) {
+              const d = dateOf(t.key!);
+              if (!d) continue;
+              const sm = t.key!.match(/\/(\d{2}-\d{2})\//);
+              const slot = sm ? sm[1] : "00-00";
+              if (!dates.includes(d.replace(/\//g, "-"))) continue;
+              if (!dateSlotMap.has(d)) dateSlotMap.set(d, new Map());
+              dateSlotMap.get(d)!.set(slot, t);
+            }
+
+            for (const dateStr of dates) {
+              if (cancelled) break;
+              const [yy, mm, dd] = dateStr.split("-");
+              const dateKey = `${yy}/${String(Number(mm)).padStart(2, "0")}/${String(Number(dd)).padStart(2, "0")}`;
+
+              const slots = dateSlotMap.get(dateKey);
+              if (!slots) continue;
+
+              for (const [slot, tif] of slots) {
+                const frameKey: FrameKey = `${dsKey}__${dateStr}__${slot}`;
+                if (!metaRef.current.has(frameKey)) {
+                  metaRef.current.set(frameKey, {
+                    name: paths.parent ? `${paths.parent.name} - ${paths.catName} (${slot})` : `${paths.catName} (${slot})`,
+                    proxyUrl: `/api/tif?key=${encodeURIComponent(tif.key!)}`,
+                    type: "raster", bbox: [594885, 1052655, 688485, 1117455], nodata: -9999,
+                  });
+                }
               }
             }
           } catch { /* ignore */ }
         }
-        // Unblock showFrame after each date is discovered, not only at the end
-        if (rebuildingRef.current) rebuildingRef.current = false;
-      }
-    })();
-    return () => { cancelled = true; };
-  }, [appliedDatasets, allTimelineDates]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // ── Preload all frames for a given list of frameKeys, resolve when all ready ──
-  function preloadFrames(frameKeys: FrameKey[]): Promise<void> {
-    const map = mapRef.current;
-    if (!map || frameKeys.length === 0) return Promise.resolve();
-    return new Promise(resolve => {
-      const metaCheckInterval = setInterval(() => {
-        const missingMeta = frameKeys.filter(k => !metaRef.current.has(k));
-        if (missingMeta.length > 0) return;
-        clearInterval(metaCheckInterval);
-
-        const pending = frameKeys.filter(k => {
-          const pool = poolRef.current.get(k.split("__")[0]) ?? [];
-          return !pool.find(e => e.frameKey === k)?.ready;
-        });
-        if (pending.length === 0) { resolve(); return; }
-
-        let done = 0;
-        for (const frameKey of pending) {
-          const dsKey = frameKey.split("__")[0];
-          const meta = metaRef.current.get(frameKey);
-          if (!meta) { done++; if (done === pending.length) resolve(); continue; }
-          const existingPool = poolRef.current.get(dsKey) ?? [];
-          const existing = existingPool.find(e => e.frameKey === frameKey);
-          if (existing?.ready) { done++; if (done === pending.length) resolve(); continue; }
-          if (!existing) buildLayer(frameKey, meta.proxyUrl as string, dsKey, map);
-          const check = setInterval(() => {
-            const p = poolRef.current.get(dsKey) ?? [];
-            if (p.find(e => e.frameKey === frameKey)?.ready) {
-              clearInterval(check);
-              done++;
-              if (done === pending.length) resolve();
-            }
-          }, 100);
+        if (!firstDateDone) {
+          firstDateDone = true;
+          setDiscoverTick(t => t + 1);
         }
-      }, 200);
-    });
-  }
+      }
+      setDiscoverTick(t => t + 1);
+    })();
 
-  // ── On timeline change: show current frame ──
+    return () => { cancelled = true; };
+  }, [appliedDatasets, allTimelineDates]);
+
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !appliedDatasets?.length || !timelineDate || !timeSlot) return;
-    if (rebuildingRef.current) return; // pool is being rebuilt, skip
 
     for (const ds of appliedDatasets) {
       if (ds.type !== "raster") continue;
       const dsKey = `${ds.id}-${ds.type}`;
+      if (!dsLayersRef.current.has(dsKey)) continue;
 
-      // Resolve exact or nearest key
-      const frameKey: FrameKey = `${dsKey}__${timelineDate}__${timeSlot}`;
-      let targetKey = frameKey;
-      if (!metaRef.current.has(frameKey)) {
+      const exactKey: FrameKey = `${dsKey}__${timelineDate}__${timeSlot}`;
+      let targetKey = exactKey;
+
+      if (!metaRef.current.has(exactKey)) {
         const prefix = `${dsKey}__${timelineDate}__`;
         const avail = [...metaRef.current.keys()].filter(k => k.startsWith(prefix));
         if (!avail.length) continue;
         const sn = parseInt(timeSlot.replace("-", ""), 10);
-        targetKey = avail.reduce((b, k) => Math.abs(parseInt(k.slice(-5).replace("-", ""), 10) - sn) < Math.abs(parseInt(b.slice(-5).replace("-", ""), 10) - sn) ? k : b);
+        targetKey = avail.reduce((b, k) => {
+          const diff = (key: string) => Math.abs(parseInt(key.slice(-5).replace("-", ""), 10) - sn);
+          return diff(k) < diff(b) ? k : b;
+        });
         const actualSlot = targetKey.slice(-5);
         if (actualSlot !== timeSlot) onActualSlot?.(timelineDate, actualSlot);
       }
 
-      activeRef.current.set(dsKey, targetKey);
-      const meta = metaRef.current.get(targetKey);
-      if (!meta) continue;
-
-      const pool = poolRef.current.get(dsKey) ?? [];
-      const entry = pool.find(e => e.frameKey === targetKey);
-      if (entry?.ready) {
-        showFrame(dsKey, targetKey, map);
-      } else if (!entry) {
-        buildLayer(targetKey, meta.proxyUrl as string, dsKey, map);
-      }
-      // else: building, will show when ready via source.once("change")
+      showFrame(dsKey, targetKey, map);
     }
-  }, [timelineDate, timeSlot, appliedDatasets]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [timelineDate, timeSlot, appliedDatasets, discoverTick]);
+
+  async function preloadFrames(frameKeys: FrameKey[]): Promise<void> {
+    const toLoad = frameKeys.filter(k =>
+      metaRef.current.has(k) && !sourceCacheRef.current.has(k)
+    );
+    if (toLoad.length === 0) return;
+
+    evictSourceCache(Math.max(0, MAX_SOURCE_CACHE - toLoad.length));
+
+    for (let i = 0; i < toLoad.length; i += PRELOAD_CONCURRENCY) {
+      const batch = toLoad.slice(i, i + PRELOAD_CONCURRENCY);
+      await Promise.all(batch.map(async (frameKey) => {
+        const meta = metaRef.current.get(frameKey);
+        if (!meta || sourceCacheRef.current.has(frameKey)) return;
+        try {
+          const proxyUrl = meta.proxyUrl as string;
+          const url = proxyUrl.startsWith("http") ? proxyUrl : `${window.location.origin}${proxyUrl}`;
+          const source = new GeoTIFF({
+            sources: [{ url, nodata: -9999 }],
+            convertToRGB: false, normalize: false, interpolate: false,
+            projection: "EPSG:32648",
+          });
+          await source.getView();
+          sourceCacheRef.current.set(frameKey, { source, ready: true });
+        } catch {
+          console.warn("[preloadFrames] failed", frameKey);
+        }
+      }));
+    }
+    evictSourceCache(MAX_SOURCE_CACHE);
+  }
 
   useEffect(() => {
     return () => {
       const map = mapRef.current;
-      for (const pool of poolRef.current.values())
-        for (const e of pool) { map?.removeLayer(e.layer); e.layer.getSource()?.dispose?.(); }
+      for (const entry of dsLayersRef.current.values()) {
+        map?.removeLayer(entry.layer);
+        entry.layer.getSource()?.dispose?.();
+      }
+      for (const entry of sourceCacheRef.current.values()) {
+        try { entry.source.dispose(); } catch { /* ignore */ }
+      }
+      sourceCacheRef.current.clear();
     };
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  }, []);
 
   return {
     renderedLayers, layerRefs,

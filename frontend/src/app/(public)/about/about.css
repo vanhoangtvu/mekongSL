@@ -1,5 +1,6 @@
 .app-main-about {
   flex: 1;
+  min-height: 0;
   background: var(--background);
   padding-bottom: 4rem;
   overflow-y: auto;
@@ -315,3 +316,5 @@ html[data-theme="dark"] .member-card {
   line-height: 1.6;
   margin: 0;
 }
+
+

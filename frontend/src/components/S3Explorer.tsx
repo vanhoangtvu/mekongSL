@@ -142,8 +142,8 @@ export default function S3Explorer({
     setLoading(true);
     setError('');
     try {
-      const data = await listS3Files(prefix);
-      setFiles(data as S3FileEntry[]);
+      const { files: s3Files } = await listS3Files(prefix);
+      setFiles(s3Files as S3FileEntry[]);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Không thể tải danh sách tệp');
     } finally {

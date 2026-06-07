@@ -9,7 +9,7 @@ const FOOTER_LINKS = [
   { href: "/legal", label: "Legal" },
   { href: "/accessibility", label: "Accessibility" },
   { href: "/sitemap", label: "Site Map" },
-  { href: "/contact", label: "Contact" },
+  { href: "/news", label: "News" },
 ];
 
 export function AppFooter() {

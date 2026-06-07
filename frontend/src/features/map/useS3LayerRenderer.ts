@@ -2,7 +2,7 @@
 
 import { useEffect, useRef } from "react";
 import type React from "react";
-import type Map from "ol/Map";
+import type OLMap from "ol/Map";
 import WebGLTileLayer from "ol/layer/WebGLTile";
 import VectorLayer from "ol/layer/Vector";
 import VectorSource from "ol/source/Vector";
@@ -33,31 +33,49 @@ const defaultVectorStyle = new Style({
   }),
 });
 
-const FADE_MS = 350;
+const FADE_MS = 700;
 
 function animateLayer(
   layer: WebGLTileLayer | VectorLayer,
   from: number,
   to: number,
   duration: number,
+  linkedLayer?: WebGLTileLayer | VectorLayer, // Add linkedLayer to sync opacities
 ): Promise<void> {
   if (from === to) return Promise.resolve();
   return new Promise((resolve) => {
     const start = performance.now();
+    const targetTotal = 0.7; // The desired constant visual density
+
     function step(now: number) {
       const elapsed = now - start;
       const t = Math.min(1, elapsed / duration);
-      const eased = t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2;
-      layer.setOpacity(from + (to - from) * eased);
+      
+      const currentOpacity = from + (to - from) * t;
+      layer.setOpacity(currentOpacity);
+
+      // Strict Capping: if linkedLayer exists, ensure total doesn't exceed 0.7
+      if (linkedLayer) {
+        // If this is the new layer (fading in), the linked old layer should be (0.7 - current)
+        if (to > from) {
+          linkedLayer.setOpacity(Math.max(0, targetTotal - currentOpacity));
+        } 
+        // If this is the old layer (fading out), the linked new layer is already handled by its own animation
+      }
+
       if (t < 1) requestAnimationFrame(step);
-      else { layer.setOpacity(to); resolve(); }
+      else { 
+        layer.setOpacity(to); 
+        if (linkedLayer && to > from) linkedLayer.setOpacity(0); // Ensure old is fully gone
+        resolve(); 
+      }
     }
     requestAnimationFrame(step);
   });
 }
 
 function removeLayerFromMap(
-  map: Map,
+  map: OLMap,
   layer: WebGLTileLayer | VectorLayer,
   refs: Record<string, WebGLTileLayer | VectorLayer>,
   id: string,
@@ -154,9 +172,10 @@ function getPrefix(key: string) { return key.split("__")[0]; }
  */
 export function useS3LayerRenderer(
   renderedLayers: Record<string, RenderedLayer>,
-  mapRef: React.MutableRefObject<Map | null>,
+  mapRef: React.MutableRefObject<OLMap | null>,
   prebuiltLayersRef: React.MutableRefObject<Record<string, Record<string, WebGLTileLayer | VectorLayer>>>,
   activeDateRef: React.MutableRefObject<string>,
+  sourceCacheRef?: React.MutableRefObject<Map<string, { source: GeoTIFF; ready: boolean }>>,
 ) {
   const layerRefs = useRef<Record<string, WebGLTileLayer | VectorLayer>>({});
   const pendingReplaceRef = useRef<Record<string, { oldId: string; done: boolean }>>({});
@@ -202,18 +221,32 @@ export function useS3LayerRenderer(
         if (!renderedIds.has(id) || currentLayers[id]) continue;
         const prefix = getPrefix(id);
         const pending = pendingReplace[prefix];
-        safeMap.addLayer(layer);
+
+        // Safety: check if layer is already on the map (e.g. reused from a different ID)
+        const mapLayers = safeMap.getLayers().getArray();
+        if (!mapLayers.includes(layer)) {
+          safeMap.addLayer(layer);
+        }
+
         currentLayers[id] = layer;
         layer.setZIndex(100 + Object.keys(currentLayers).length);
+
         if (pending && !pending.done && currentLayers[pending.oldId]) {
           const old = currentLayers[pending.oldId] as WebGLTileLayer | VectorLayer;
-          layer.setOpacity(0.7);
-          animateLayer(old, old.getOpacity(), 0, FADE_MS).then(() => {
-            removeLayerFromMap(safeMap, old, currentLayers, pending.oldId);
-            for (const dl of Object.values(prebuiltLayersRef.current)) delete dl[pending.oldId];
+          if (old === layer) {
+            // Same instance, just claim it
+            delete currentLayers[pending.oldId];
             pending.done = true;
             delete pendingReplace[prefix];
-          });
+          } else {
+            layer.setOpacity(0.7);
+            animateLayer(old, old.getOpacity(), 0, FADE_MS).then(() => {
+              removeLayerFromMap(safeMap, old, currentLayers, pending.oldId);
+              for (const dl of Object.values(prebuiltLayersRef.current)) delete dl[pending.oldId];
+              pending.done = true;
+              delete pendingReplace[prefix];
+            });
+          }
         }
       }
     }
@@ -231,13 +264,16 @@ export function useS3LayerRenderer(
           ? info.proxyUrl
           : `${window.location.origin}${info.proxyUrl}`;
 
-        const source = new GeoTIFF({
-          sources: [{ url, nodata: info.nodata }],
-          convertToRGB: false,
-          normalize: false,
-          interpolate: false,
-          projection: "EPSG:32648",
-        });
+        const cachedSrc = sourceCacheRef?.current?.get(id);
+        const source = cachedSrc?.ready
+          ? cachedSrc.source
+          : new GeoTIFF({
+              sources: [{ url, nodata: info.nodata }],
+              convertToRGB: false,
+              normalize: false,
+              interpolate: false,
+              projection: "EPSG:32648",
+            });
 
         const rasterLayer = new WebGLTileLayer({
           opacity: 0,
@@ -261,27 +297,33 @@ export function useS3LayerRenderer(
         });
 
         rasterLayer.setZIndex(100 + Object.keys(currentLayers).length);
-        safeMap.addLayer(rasterLayer);
+        if (!safeMap.getLayers().getArray().includes(rasterLayer)) {
+          safeMap.addLayer(rasterLayer);
+        }
         currentLayers[id] = rasterLayer;
         const dl = prebuiltLayersRef.current[activeDate] ?? {};
         dl[id] = rasterLayer;
         prebuiltLayersRef.current[activeDate] = dl;
 
-        source.once("change", () => {
+        const onSourceReady = () => {
           if (source.getState() !== "ready" || !isActive) return;
           const targetOp = 0.7;
+          
           if (pending && !pending.done && currentLayers[pending.oldId]) {
             const old = currentLayers[pending.oldId] as WebGLTileLayer | VectorLayer;
-            animateLayer(rasterLayer, 0, targetOp, FADE_MS);
-            animateLayer(old, old.getOpacity(), 0, FADE_MS).then(() => {
+            
+            // Strict Opacity Sync: new layer controls old layer to keep sum at 0.7
+            animateLayer(rasterLayer, 0, targetOp, FADE_MS, old).then(() => {
+              // Cleanup only after animation finishes
               removeLayerFromMap(safeMap, old, currentLayers, pending.oldId);
-              for (const d2 of Object.values(prebuiltLayersRef.current)) delete d2[pending.oldId];
+              for (const dlX of Object.values(prebuiltLayersRef.current)) delete dlX[pending.oldId];
               pending.done = true;
               delete pendingReplace[prefix];
             });
           } else {
             animateLayer(rasterLayer, 0, targetOp, FADE_MS);
           }
+
           if (Object.keys(currentLayers).filter(k => !pendingReplace[getPrefix(k)]).length <= 1) {
             source.getView().then((vo) => {
               if (!mapRef.current || !vo.extent || !vo.projection) return;
@@ -291,8 +333,14 @@ export function useS3LayerRenderer(
               });
             }).catch(() => {});
           }
-        });
-        source.refresh();
+        };
+        if (cachedSrc?.ready) {
+          onSourceReady();
+        } else if (source.getState() === "ready") {
+          onSourceReady();
+        } else {
+          source.once("change", onSourceReady);
+        }
 
       } else if (info.type === "vector") {
         const url = info.proxyUrl.startsWith("http")
@@ -345,7 +393,9 @@ export function useS3LayerRenderer(
             vectorLayer.setZIndex(150 + Object.keys(currentLayers).length);
 
             if (!isActive || !new Set(Object.keys(renderedLayers)).has(layerId) || currentLayers[layerId]) return;
-            safeMap.addLayer(vectorLayer);
+            if (!safeMap.getLayers().getArray().includes(vectorLayer)) {
+              safeMap.addLayer(vectorLayer);
+            }
             currentLayers[layerId] = vectorLayer;
             const dl2 = prebuiltLayersRef.current[activeDate] ?? {};
             dl2[layerId] = vectorLayer;

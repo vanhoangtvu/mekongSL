@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { AREA_TYPES, DATASETS, getDatasetById } from "../../lib/constants/datasets";
+import { AREA_TYPES, DATASETS, getDatasetById, type DatasetItem } from "../../lib/constants/datasets";
 
 type TabType = "datasets" | "additional" | "results";
 
@@ -90,21 +90,28 @@ export function GeoSearchSidebar({
     });
   };
 
+  /** Collect all leaf descendant IDs recursively */
+  const getAllDescendantIds = (item: DatasetItem): string[] => {
+    if (!item.children || item.children.length === 0) return [item.id];
+    return item.children.flatMap(c => getAllDescendantIds(c));
+  };
+
   /** Check if a parent has all its children selected */
   const getParentState = (categoryId: string): "all" | "some" | "none" => {
     const cat = DATASETS.find((c) => c.id === categoryId);
     if (!cat?.children || cat.children.length === 0) return selectedLayers[categoryId]?.length > 0 ? "all" : "none";
-    const checked = cat.children.filter((c) => selectedLayers[c.id]?.length > 0).length;
+    const allIds = getAllDescendantIds(cat);
+    const checked = allIds.filter((id) => selectedLayers[id]?.length > 0).length;
     if (checked === 0) return "none";
-    if (checked === cat.children.length) return "all";
+    if (checked === allIds.length) return "all";
     return "some";
   };
 
   const toggleDataset = (datasetId: string) => {
-    // If this ID is a parent category with children → toggle all children, skip parent itself
+    // If this ID is a parent category with children → toggle all descendants, skip parent itself
     const category = DATASETS.find((c) => c.id === datasetId);
     if (category?.children) {
-      const allChildIds = category.children.map((c) => c.id);
+      const allChildIds = getAllDescendantIds(category);
       const state = getParentState(datasetId);
       if (state === "all") {
         setSelectedLayers((prev) => {
@@ -169,8 +176,9 @@ export function GeoSearchSidebar({
     let count = 0;
     DATASETS.forEach((cat) => {
       if (cat.children) {
-        cat.children.forEach((child) => {
-          if (selectedLayers[child.id]?.length > 0) count++;
+        const allIds = getAllDescendantIds(cat);
+        allIds.forEach((id) => {
+          if (selectedLayers[id]?.length > 0) count++;
         });
       } else {
         if (selectedLayers[cat.id]?.length > 0) count++;
@@ -278,23 +286,79 @@ export function GeoSearchSidebar({
                   {category.children && expandedCategories.has(category.id) && (
                     <div className="geo-dataset-children">
                       {category.children.map((child) => (
-                        <div key={child.id} className="geo-dataset-child-wrap">
-                          <label className="geo-dataset-child">
-                            <input
-                              type="checkbox"
-                              checked={(selectedLayers[child.id]?.length || 0) > 0}
-                              onChange={() => toggleDataset(child.id)}
-                            />
-                            <span className="geo-dataset-child-content">
-                              <span className="geo-dataset-child-name">{child.name}</span>
-                            </span>
-                          </label>
-                          {child.gisData !== false && (category.group ?? "gis") === "gis" && (selectedLayers[child.id]?.length || 0) > 0 && (
-                            <div className="geo-layer-type-col">
-                              <div className="geo-layer-type-picker" style={{ display: 'flex', gap: '4px', alignItems: 'center' }}>
-                                <button className={`geo-layer-type-opt${selectedLayers[child.id]?.includes("raster") ? " is-selected" : ""}`} onClick={() => toggleLayerType(child.id, "raster")} type="button">R</button>
-                                <button className={`geo-layer-type-opt${selectedLayers[child.id]?.includes("vector") ? " is-selected" : ""}`} onClick={() => toggleLayerType(child.id, "vector")} type="button">V</button>
+                        <div key={child.id}>
+                          <div className="geo-dataset-child-wrap">
+                            {child.children ? (
+                              <>
+                                <button
+                                  className="geo-dataset-toggle"
+                                  onClick={() => toggleCategory(child.id)}
+                                  type="button"
+                                  style={{ fontSize: '12px', width: '18px', height: '18px', flexShrink: 0 }}
+                                >
+                                  <span className="geo-dataset-icon">
+                                    {expandedCategories.has(child.id) ? "−" : "+"}
+                                  </span>
+                                </button>
+                                <label className="geo-dataset-child" style={{ paddingLeft: 0 }}>
+                                  <input
+                                    type="checkbox"
+                                    checked={getParentState(child.id) === "all"}
+                                    onChange={() => toggleDataset(child.id)}
+                                    ref={(el) => {
+                                      if (el) el.indeterminate = getParentState(child.id) === "some";
+                                    }}
+                                  />
+                                  <span className="geo-dataset-child-content">
+                                    <span className="geo-dataset-child-name">{child.name}</span>
+                                  </span>
+                                </label>
+                              </>
+                            ) : (
+                              <label className="geo-dataset-child">
+                                <input
+                                  type="checkbox"
+                                  checked={(selectedLayers[child.id]?.length || 0) > 0}
+                                  onChange={() => toggleDataset(child.id)}
+                                />
+                                <span className="geo-dataset-child-content">
+                                  <span className="geo-dataset-child-name">{child.name}</span>
+                                </span>
+                              </label>
+                            )}
+                            {child.gisData !== false && !child.children && (category.group ?? "gis") === "gis" && (selectedLayers[child.id]?.length || 0) > 0 && (
+                              <div className="geo-layer-type-col">
+                                <div className="geo-layer-type-picker" style={{ display: 'flex', gap: '4px', alignItems: 'center' }}>
+                                  <button className={`geo-layer-type-opt${selectedLayers[child.id]?.includes("raster") ? " is-selected" : ""}`} onClick={() => toggleLayerType(child.id, "raster")} type="button">R</button>
+                                  <button className={`geo-layer-type-opt${selectedLayers[child.id]?.includes("vector") ? " is-selected" : ""}`} onClick={() => toggleLayerType(child.id, "vector")} type="button">V</button>
+                                </div>
                               </div>
+                            )}
+                          </div>
+                          {child.children && expandedCategories.has(child.id) && (
+                            <div className="geo-dataset-grandchildren">
+                              {child.children.map(grandchild => (
+                                <div key={grandchild.id} className="geo-dataset-child-wrap" style={{ paddingLeft: '16px' }}>
+                                  <label className="geo-dataset-child">
+                                    <input
+                                      type="checkbox"
+                                      checked={(selectedLayers[grandchild.id]?.length || 0) > 0}
+                                      onChange={() => toggleDataset(grandchild.id)}
+                                    />
+                                    <span className="geo-dataset-child-content">
+                                      <span className="geo-dataset-child-name">{grandchild.name}</span>
+                                    </span>
+                                  </label>
+                                  {grandchild.gisData !== false && (category.group ?? "gis") === "gis" && (selectedLayers[grandchild.id]?.length || 0) > 0 && (
+                                    <div className="geo-layer-type-col">
+                                      <div className="geo-layer-type-picker" style={{ display: 'flex', gap: '4px', alignItems: 'center' }}>
+                                        <button className={`geo-layer-type-opt${selectedLayers[grandchild.id]?.includes("raster") ? " is-selected" : ""}`} onClick={() => toggleLayerType(grandchild.id, "raster")} type="button">R</button>
+                                        <button className={`geo-layer-type-opt${selectedLayers[grandchild.id]?.includes("vector") ? " is-selected" : ""}`} onClick={() => toggleLayerType(grandchild.id, "vector")} type="button">V</button>
+                                      </div>
+                                    </div>
+                                  )}
+                                </div>
+                              ))}
                             </div>
                           )}
                         </div>

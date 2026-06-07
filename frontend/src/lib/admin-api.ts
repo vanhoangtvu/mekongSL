@@ -168,17 +168,29 @@ export async function registerLayerObject(layerId: number, s3Key: string, sizeBy
   });
 }
 
-export async function listS3Files(prefix = '') {
+export interface S3ListResult {
+  files: S3FileItem[];
+  count: number;
+  _error?: string;
+  _detail?: string;
+}
+
+export async function listS3Files(prefix = ''): Promise<S3ListResult> {
   // Use Next.js API route to bypass auth for public GIS data
   const url = new URL('/api/s3-list', window.location.origin);
   if (prefix) {
     url.searchParams.set('prefix', prefix);
   }
 
-  const payload = await requestJson<{ files: string[] | S3FileItem[]; count: number }>(url);
-  return Array.isArray(payload.files)
-    ? payload.files.map((file) => (typeof file === 'string' ? { key: file } : file))
-    : [];
+  try {
+    const payload = await requestJson<S3ListResult>(url);
+    const files = Array.isArray(payload.files)
+      ? payload.files.map((file) => (typeof file === 'string' ? { key: file } : file))
+      : [];
+    return { files, count: payload.count ?? files.length, _error: payload._error, _detail: payload._detail };
+  } catch (e) {
+    return { files: [], count: 0, _error: String(e) };
+  }
 }
 
 export async function uploadS3File(file: File, key?: string) {

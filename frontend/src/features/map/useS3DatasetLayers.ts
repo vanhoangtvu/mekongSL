@@ -5,7 +5,7 @@ import type React from "react";
 import type Map from "ol/Map";
 import WebGLTileLayer from "ol/layer/WebGLTile";
 import VectorLayer from "ol/layer/Vector";
-import { getDatasetSlug, getParentDataset, getDatasetById } from "../../lib/constants/datasets";
+import { getDatasetSlug, getParentDataset, getDatasetById, getRootDataset } from "../../lib/constants/datasets";
 import { listS3Files } from "../../lib/admin-api";
 import { showNotification } from "../../lib/notification";
 import { useS3LayerRenderer } from "./useS3LayerRenderer";
@@ -38,12 +38,14 @@ export function useS3DatasetLayers(
   prefetchDate?: string,
   allTimelineDates?: string[],
   onActualSlot?: (date: string, slot: string) => void,
+  renderedLayersOverride?: Record<string, RenderedLayer>,
 ) {
   const prevDateRef = useRef<string | undefined>(undefined);
   const [renderedLayers, setRenderedLayers] = useState<Record<string, RenderedLayer>>({});
   const layersCacheRef = useRef<Record<string, Record<string, RenderedLayer>>>({});
   const prebuiltLayersRef = useRef<Record<string, Record<string, WebGLTileLayer | VectorLayer>>>({});
   const activeDateRef = useRef<string>("");
+  const sourceCacheRef = useRef<Map<string, { source: import("ol/source/GeoTIFF").default; ready: boolean }>>(new Map());
   // Track which dataset keys are being applied for the first time (fresh apply, not re-apply)
   const firstApplyKeysRef = useRef<Set<string>>(new Set());
 
@@ -129,8 +131,12 @@ export function useS3DatasetLayers(
 
         const parent = getParentDataset(dsId);
         const dsInfo = getDatasetById(dsId);
+        const root = getRootDataset(dsId);
         let datasetId: string, categorySlug: string;
-        if (parent) {
+        if (root && root.id !== dsId) {
+          datasetId = root.id;
+          categorySlug = getDatasetSlug(dsId) || dsId;
+        } else if (parent) {
           datasetId = parent.id;
           categorySlug = getDatasetSlug(dsId) || dsId;
         } else if (dsInfo?.children?.length) {
@@ -155,7 +161,7 @@ export function useS3DatasetLayers(
         for (const prefix of prefixes) {
           if (!isActive) break;
           try {
-            const allFiles = await listS3Files(prefix);
+            const { files: allFiles } = await listS3Files(prefix);
             if (!isActive) break;
             const files = [...allFiles].sort((a, b) => (b.key ?? "").localeCompare(a.key ?? ""));
 
@@ -271,7 +277,7 @@ export function useS3DatasetLayers(
     if (!allTimelineDates?.length || !appliedDatasets?.length) return;
 
     const idx = timelineDate ? allTimelineDates.indexOf(timelineDate) : -1;
-    const nearby = allTimelineDates.filter((_, i) => idx >= 0 && Math.abs(i - idx) <= 2 && i !== idx);
+    const nearby = allTimelineDates.filter((_, i) => idx >= 0 && Math.abs(i - idx) <= 7 && i !== idx);
     const uniqueDates = [...new Set([...(prefetchDate ? [prefetchDate] : []), ...nearby])];
     let cancelled = false;
 
@@ -308,9 +314,11 @@ export function useS3DatasetLayers(
           for (const prefix of [`${basePrefix}${y}/${md}/${dd}/`, `${basePrefix}${y}/${md}/`]) {
             if (cancelled) break;
             try {
-              const allFiles = await listS3Files(prefix);
+              const { files: allFiles } = await listS3Files(prefix);
               if (cancelled) break;
               const files = [...allFiles].sort((a, b) => (b.key ?? "").localeCompare(a.key ?? ""));
+
+
               const dateOf = (key: string) => { const m2 = key.match(/\/(\d{4})\/(\d{2})\/(\d{2})\//); return m2 ? `${m2[1]}/${m2[2]}/${m2[3]}` : ""; };
 
               if (ds.type === "vector") {
@@ -350,6 +358,19 @@ export function useS3DatasetLayers(
     return () => { cancelled = true; };
   }, [timelineDate, prefetchDate, allTimelineDates, appliedDatasets]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const layerRefs = useS3LayerRenderer(renderedLayers, mapRef, prebuiltLayersRef, activeDateRef);
-  return { renderedLayers, layerRefs, layersCacheRef: layersCacheRef as React.MutableRefObject<Record<string, Record<string, RenderedLayer>>> };
+  const layerRefs = useS3LayerRenderer(
+    renderedLayersOverride || renderedLayers,
+    mapRef,
+    prebuiltLayersRef,
+    activeDateRef,
+    sourceCacheRef
+  );
+  return { 
+    renderedLayers, 
+    layerRefs, 
+    layersCacheRef: layersCacheRef as React.MutableRefObject<Record<string, Record<string, RenderedLayer>>>,
+    prebuiltLayersRef,
+    activeDateRef,
+    sourceCacheRef
+  };
 }

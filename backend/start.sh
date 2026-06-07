@@ -1,6 +1,6 @@
 #!/bin/bash
 
-set -euo pipefail
+set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PID_FILE="$SCRIPT_DIR/.backend.pid"
@@ -19,30 +19,35 @@ cd "$SCRIPT_DIR"
 
 # Source environment variables
 if [ -f "$SCRIPT_DIR/../.env" ]; then
-  export $(grep -v '^#' "$SCRIPT_DIR/../.env" | xargs)
+  set -a
+  source "$SCRIPT_DIR/../.env" || { echo "Warning: failed to source .env file"; }
+  set +a
+else
+  echo "Warning: .env file not found at $SCRIPT_DIR/../.env"
 fi
 
-# Cấu hình temp dir cho Jansi để tránh lỗi thư mục /tmp bị noexec
+# Cau hinh temp dir cho Jansi de tranh loi thu muc /tmp bi noexec
 export MAVEN_OPTS="-Djansi.tmpdir=$SCRIPT_DIR/target/tmp"
 mkdir -p "$SCRIPT_DIR/target/tmp"
 
-echo "Compiling backend..."
-./mvnw -q clean compile -DskipTests
+JAR_FILE=$(ls "$SCRIPT_DIR"/target/*.jar 2>/dev/null | head -1)
 
-echo "Starting backend on 0.0.0.0:8084..."
-nohup ./mvnw spring-boot:run > "$LOG_FILE" 2>&1 &
-MAVEN_PID=$!
-
-# Đợi Java process con khởi động
-sleep 3
-JAVA_PID=$(pgrep -P "$MAVEN_PID" java 2>/dev/null || echo "")
-if [[ -z "$JAVA_PID" ]]; then
-  # Fallback: lưu PID Maven nếu chưa tìm thấy Java process
-  echo "$MAVEN_PID" > "$PID_FILE"
-else
-  echo "$JAVA_PID" > "$PID_FILE"
+if [[ -z "$JAR_FILE" ]]; then
+  echo "No jar found, compiling..."
+  ./mvnw -q package -DskipTests || { echo "Maven compile failed!"; exit 1; }
+  JAR_FILE=$(ls "$SCRIPT_DIR"/target/*.jar 2>/dev/null | head -1)
+  if [[ -z "$JAR_FILE" ]]; then
+    echo "Still no jar after compile!"
+    exit 1
+  fi
 fi
 
-echo "Backend started with PID: $(cat "$PID_FILE") (Maven: $MAVEN_PID)"
+echo "Starting backend on 0.0.0.0:8084..."
+java -jar "$JAR_FILE" > "$LOG_FILE" 2>&1 &
+JAVA_PID=$!
+disown $JAVA_PID
+echo "$JAVA_PID" > "$PID_FILE"
+
+echo "Backend started with PID: $JAVA_PID"
 echo "Access at: http://14.227.143.142:8084"
 echo "Logs: tail -f $LOG_FILE"

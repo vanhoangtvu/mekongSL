@@ -122,6 +122,7 @@ Biodiversity
 Vegetation Index
 Habitat Mapping
 Species Distribution
+Mangroves
 ```
 
 ### Baseline Environment
@@ -134,7 +135,6 @@ Channel System
 Ground Water Storage
 Road
 Landuse Classification
-Mangroves
 Salinity Intrusion
 ```
 

@@ -181,6 +181,35 @@ function getEcowittDisplayColumns(records: DataRecord[]): ColumnDefinition[] {
   return ECOWITT_DISPLAY_COLUMNS.filter((column) => availableKeys.has(column.key));
 }
 
+type GisCategoryNode = {
+  key: string;
+  label: string;
+  children?: GisCategoryNode[];
+};
+
+type GisDatasetConfig = {
+  label: string;
+  categories: GisCategoryNode[];
+};
+
+function renderGisCategoryOptions(categories: GisCategoryNode[]) {
+  return categories.flatMap((category) => {
+    if (category.children?.length) {
+      return [
+        <optgroup key={category.key} label={category.label}>
+          {category.children.map((child) => (
+            <option key={child.key} value={child.key}>{child.label}</option>
+          ))}
+        </optgroup>,
+      ];
+    }
+
+    return [
+      <option key={category.key} value={category.key}>{category.label}</option>,
+    ];
+  });
+}
+
 const GIS_DATASETS = {
   'landsat-imagery': {
     label: 'Landsat Imagery',
@@ -218,14 +247,41 @@ const GIS_DATASETS = {
       { key: 'soil-type', label: 'Soil Type' },
       { key: 'water-body', label: 'Water Body' },
       { key: 'channel-system', label: 'Channel System' },
+      { key: 'river', label: 'Channel - River' },
+      { key: 'canal', label: 'Channel - Canal' },
+      { key: 'sluice', label: 'Channel - Sluice' },
+      { key: 'pump-station', label: 'Channel - Pump Station' },
+      { key: 'dike-embankments', label: 'Channel - Dike & Embankments' },
+      { key: 'irrigation', label: 'Channel - Irrigation' },
       { key: 'ground-water-storage', label: 'Ground Water Storage' },
       { key: 'road', label: 'Road' },
-      { key: 'landuse-classification', label: 'Landuse Classification' },
-      { key: 'mangroves', label: 'Mangroves' },
+      {
+        key: 'landuse-classification',
+        label: 'Landuse Classification',
+        children: [
+          { key: '1', label: 'Aquaculture and Water Surface Lands' },
+          { key: '2', label: 'Rice-to-shrimp conversion area or Intensive shrimp farming' },
+          { key: '3', label: 'Perennial crops, Fruit Orchards and Mangrove Forests' },
+          { key: '4', label: 'Residential Land and Sandy Ridge Land' },
+          { key: '5', label: 'Coconut Plantation, mix garden' },
+          { key: '6', label: 'Vegetable and Upland Crop Area' },
+          { key: '7', label: 'Rice Cultivation Zone' },
+        ],
+      },
       { key: 'salinity-intrusion', label: 'Salinity Intrusion' }
     ]
+  },
+  'ecology': {
+    label: 'Ecology',
+    categories: [
+      { key: 'biodiversity', label: 'Biodiversity' },
+      { key: 'vegetation-index', label: 'Vegetation Index' },
+      { key: 'habitat-mapping', label: 'Habitat Mapping' },
+      { key: 'species-distribution', label: 'Species Distribution' },
+      { key: 'mangroves', label: 'Mangroves' }
+    ]
   }
-};
+} satisfies Record<string, GisDatasetConfig>;
 
 const STATION_DATA_TYPES = [
   { key: 'water-quality', label: 'Chất lượng nước' },
@@ -2126,7 +2182,8 @@ export default function DataPage() {
 
   const fetchAndSetRecentUploads = async () => {
     try {
-      const files = await listS3Files('');
+      const { files: allFiles, _error } = await listS3Files('');
+      const files = _error ? [] : allFiles;
       const filtered = files.filter((file) => {
         const keyLower = file.key.toLowerCase();
         return !keyLower.startsWith('backups/') && !keyLower.endsWith('.sql') && !keyLower.endsWith('.sql.gz');
@@ -4122,9 +4179,9 @@ function ScheduleConfig({ source }: { source: string }) {
                                 className={`form-input ${hasValue(gisCategory) ? 'has-value' : ''}`}
                               >
                                 <option value="">-- Chọn Category --</option>
-                                {(GIS_DATASETS[gisDataset as keyof typeof GIS_DATASETS]?.categories || []).map((cat) => (
-                                  <option key={cat.key} value={cat.key}>{cat.label}</option>
-                                ))}
+                                {renderGisCategoryOptions(
+                                  (GIS_DATASETS[gisDataset as keyof typeof GIS_DATASETS]?.categories || []) as GisCategoryNode[],
+                                )}
                               </select>
                             </div>
                             <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>

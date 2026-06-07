@@ -46,6 +46,7 @@ public class SecurityConfig {
                         .requestMatchers("/api/data/**").hasAnyRole("DATA_MANAGER", "ADMIN")
                         .requestMatchers("/api/s3/render").permitAll()
                         .requestMatchers("/api/s3/download").permitAll()
+                        .requestMatchers(HttpMethod.GET, "/api/s3/list").permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/gis/manual-stations/**").permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/gis/water-quality/**").permitAll()
                         .anyRequest().authenticated()
