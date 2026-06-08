@@ -270,13 +270,13 @@ const GIS_DATASETS = {
         key: 'landuse-classification',
         label: 'Landuse Classification',
         children: [
-          { key: '1', label: 'Aquaculture and Water Surface Lands' },
-          { key: '2', label: 'Rice-to-shrimp conversion area or Intensive shrimp farming' },
-          { key: '3', label: 'Perennial crops, Fruit Orchards and Mangrove Forests' },
-          { key: '4', label: 'Residential Land and Sandy Ridge Land' },
-          { key: '5', label: 'Coconut Plantation, mix garden' },
-          { key: '6', label: 'Vegetable and Upland Crop Area' },
-          { key: '7', label: 'Rice Cultivation Zone' },
+          { key: 'landuse-classification/aquaculture', label: 'Aquaculture and Water Surface Lands' },
+          { key: 'landuse-classification/rice-shrimp', label: 'Rice-to-shrimp conversion area or Intensive shrimp farming' },
+          { key: 'landuse-classification/perennial-crops', label: 'Perennial crops, Fruit Orchards and Mangrove Forests' },
+          { key: 'landuse-classification/residential-land', label: 'Residential Land and Sandy Ridge Land' },
+          { key: 'landuse-classification/coconut-garden', label: 'Coconut Plantation, mix garden' },
+          { key: 'landuse-classification/vegetable-crops', label: 'Vegetable and Upland Crop Area' },
+          { key: 'landuse-classification/rice-cultivation', label: 'Rice Cultivation Zone' },
         ],
       },
       { key: 'salinity-intrusion', label: 'Salinity Intrusion' }
@@ -4300,7 +4300,7 @@ function ScheduleConfig({ source }: { source: string }) {
                                 className={`form-input ${hasValue(gisYear) ? 'has-value' : ''}`}
                               >
                                 <option value="">-- Chọn Năm --</option>
-                                {Array.from({ length: 15 }, (_, i) => String(2020 + i)).map((yr) => (
+                                {Array.from({ length: new Date().getFullYear() - 1900 + 1 }, (_, i) => String(1900 + i)).map((yr) => (
                                   <option key={yr} value={yr}>{yr}</option>
                                 ))}
                               </select>
