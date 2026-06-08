@@ -20,7 +20,7 @@ import { ECOWITT_DEVICES, type EcowittDevice } from "../../lib/constants/data-so
 import { useS3DatasetLayers } from "./useS3DatasetLayers";
 import type { ManualStation } from "../../lib/admin-api";
 import { listWaterQualitySamples, getWaterQualitySample, getBackendAdminUrl, listS3Files, type WaterQualitySampleDto } from "../../lib/admin-api";
-import { MapPin, Activity, Image, Calendar, X, Play, Pause, SkipForward, SkipBack, Layers, Clock } from "lucide-react";
+import { MapPin, Activity, Image, Calendar, X, Play, Pause, SkipForward, SkipBack, Layers, Clock, Map as MapIcon } from "lucide-react";
 
 // Register UTM 48N projection
 proj4.defs("EPSG:32648", "+proj=utm +zone=48 +datum=WGS84 +units=m +no_defs");
@@ -254,8 +254,8 @@ const baseLayers = {
   },
 };
 
-type TimelineUnitMode = "auto" | "hour4" | "day" | "month";
-type TimelineResolvedMode = "hour4" | "day" | "month";
+type TimelineUnitMode = "auto" | "hour4" | "day" | "month" | "year";
+type TimelineResolvedMode = "hour4" | "day" | "month" | "year";
 
 type TimelineUnit = {
   label: string;
@@ -334,6 +334,20 @@ function resolveTimelineMode(startDate: Date, endDate: Date, preferredMode: Time
 const OBS_HOURS = [0, 5, 10, 15, 20];
 
 function buildTimelineUnits(startDate: Date, endDate: Date, mode: TimelineResolvedMode) {
+  if (mode === "year") {
+    const units: TimelineUnit[] = [];
+    const startYear = startDate.getFullYear();
+    const endYear = endDate.getFullYear();
+    for (let y = startYear; y <= endYear; y++) {
+      units.push({
+        label: String(y),
+        value: `${y}-01-01T00:00`,
+        isMajor: true,
+      });
+    }
+    return { mode, units };
+  }
+
   if (mode === "hour4") {
     const units: TimelineUnit[] = [];
     const cur = new Date(startDate);
@@ -948,10 +962,19 @@ export const MapStage = React.memo(function MapStage({ startDateTime, endDateTim
 
     const normalizedStart = startDate <= endDate ? startDate : endDate;
     const normalizedEnd = startDate <= endDate ? endDate : startDate;
+
+    const hasLandsat = (appliedDatasets ?? []).some(d => d.id.startsWith("landsat-"));
+    if (hasLandsat) {
+      const currentYear = new Date().getFullYear();
+      const lsStart = new Date(2014, 0, 1);
+      const lsEnd = new Date(currentYear, 11, 31);
+      return buildTimelineUnits(lsStart, lsEnd, "year");
+    }
+
     const resolvedMode = resolveTimelineMode(normalizedStart, normalizedEnd, timelineUnitMode);
 
     return buildTimelineUnits(normalizedStart, normalizedEnd, resolvedMode);
-  }, [startDate, endDate, timelineUnitMode]);
+  }, [startDate, endDate, timelineUnitMode, appliedDatasets]);
 
   const timelineUnits = timelineData.units;
 
@@ -1174,7 +1197,7 @@ export const MapStage = React.memo(function MapStage({ startDateTime, endDateTim
         }
         return prev + 1;
       });
-    }, 1000); // Set back to 1s per frame as requested
+    }, 500);
     return () => clearInterval(interval);
   }, [isTimelinePlaying, playbackQueue.length]);
 
@@ -1397,6 +1420,7 @@ export const MapStage = React.memo(function MapStage({ startDateTime, endDateTim
     { value: "hour4", label: "4h" },
     { value: "day", label: "Day" },
     { value: "month", label: "Month" },
+    { value: "year", label: "Year" },
   ];
 
   useEffect(() => {
@@ -2480,7 +2504,7 @@ export const MapStage = React.memo(function MapStage({ startDateTime, endDateTim
                 data-unit-mode={timelineData.mode} 
                 title="Timeline control"
                 onMouseLeave={() => setHoverTime(null)}
-                style={!timelapseSupported ? { opacity: 0.45, pointerEvents: "none" } : undefined}
+
               >
                 {hoverTime && (
                   <div 
@@ -2559,6 +2583,27 @@ export const MapStage = React.memo(function MapStage({ startDateTime, endDateTim
                       });
                     }
                   }}
+                  onTouchMove={(e) => {
+                    const containerRect = e.currentTarget.parentElement?.getBoundingClientRect();
+                    if (!containerRect) return;
+
+                    const rect = e.currentTarget.getBoundingClientRect();
+                    const touch = e.touches[0];
+                    if (!touch) return;
+                    const x = touch.clientX - rect.left;
+                    const ratio = Math.max(0, Math.min(1, x / rect.width));
+                    const index = Math.round(ratio * (timelineUnits.length - 1));
+                    const unit = timelineUnits[index];
+
+                    if (unit) {
+                      setHoverTime(unit.label);
+                      setHoverPos({
+                        x: touch.clientX - containerRect.left,
+                        y: touch.clientY - containerRect.top - 25,
+                      });
+                    }
+                  }}
+                  onTouchEnd={() => setHoverTime(null)}
                 >
                   <div className="map-timeline-inner">
                     <div className="map-timeline-track-wrap">
@@ -2630,7 +2675,7 @@ export const MapStage = React.memo(function MapStage({ startDateTime, endDateTim
               type="button"
               title="Change base layer"
             >
-              <Layers size={18} />
+              <MapIcon size={18} />
             </button>
 
             {showLayerMenu && (

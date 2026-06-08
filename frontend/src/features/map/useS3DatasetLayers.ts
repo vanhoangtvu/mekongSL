@@ -252,27 +252,54 @@ export function useS3DatasetLayers(
                 // Landsat/Baseline: filter by year only
                 const targetYear = String(searchYear);
                 const uniqueYears = [...new Set(allTifs.map(f => yearOf(f.key ?? "")))].filter(Boolean).sort();
-                const lte = timelineDate ? uniqueYears.filter(y2 => y2 <= targetYear) : uniqueYears;
-                if (!lte.length) {
-                  if (isActive) showNotification(`No data for "${catName}" in year ${searchYear}`, "info");
-                  break;
-                }
-                const bestYear = lte[lte.length - 1];
-                const tifsForYear = allTifs.filter(f => yearOf(f.key ?? "") === bestYear);
+                const exactMatch = uniqueYears.find(y => y === targetYear);
                 
-                const pickedTif = tifsForYear[0];
-                if (pickedTif) {
-                  const frameKey = `${dsKey}__${bestYear}__00-00`;
-                  additions[frameKey] = {
-                    name: parent ? `${parent.name} - ${catName} (${bestYear})` : `${catName} (${bestYear})`,
-                    proxyUrl: `/api/tif?key=${encodeURIComponent(pickedTif.key!)}`,
-                    type: "raster",
-                    bbox: [594885, 1052655, 688485, 1117455],
-                    nodata: -9999,
-                  };
-                  rasterFound = true;
-                  break;
+                if (exactMatch) {
+                  const tifsForYear = allTifs.filter(f => yearOf(f.key ?? "") === exactMatch);
+                  const pickedTif = tifsForYear[0];
+                  if (pickedTif) {
+                    const frameKey = `${dsKey}__${exactMatch}__00-00`;
+                    additions[frameKey] = {
+                      name: parent ? `${parent.name} - ${catName} (${exactMatch})` : `${catName} (${exactMatch})`,
+                      proxyUrl: `/api/tif?key=${encodeURIComponent(pickedTif.key!)}`,
+                      type: "raster",
+                      bbox: [594885, 1052655, 688485, 1117455],
+                      nodata: -9999,
+                    };
+                    rasterFound = true;
+                    firstApplyKeysRef.current.delete(dsKey);
+                    break;
+                  }
                 }
+                
+                // First load: fall back to nearest year ≤ target
+                if (firstApplyKeysRef.current.has(dsKey)) {
+                  const lte = timelineDate ? uniqueYears.filter(y2 => y2 <= targetYear) : uniqueYears;
+                  if (!lte.length) {
+                    if (isActive) showNotification(`No data for "${catName}" in year ${searchYear}`, "info");
+                    break;
+                  }
+                  const bestYear = lte[lte.length - 1];
+                  const tifsForYear = allTifs.filter(f => yearOf(f.key ?? "") === bestYear);
+                  const pickedTif = tifsForYear[0];
+                  if (pickedTif) {
+                    const frameKey = `${dsKey}__${bestYear}__00-00`;
+                    additions[frameKey] = {
+                      name: parent ? `${parent.name} - ${catName} (${bestYear})` : `${catName} (${bestYear})`,
+                      proxyUrl: `/api/tif?key=${encodeURIComponent(pickedTif.key!)}`,
+                      type: "raster",
+                      bbox: [594885, 1052655, 688485, 1117455],
+                      nodata: -9999,
+                    };
+                    rasterFound = true;
+                    firstApplyKeysRef.current.delete(dsKey);
+                    break;
+                  }
+                }
+                
+                // User dragged to a year with no data
+                if (isActive) showNotification(`No data for "${catName}" in year ${searchYear}`, "info");
+                break;
               } else {
                 // Non-Landsat: filter by full date
                 const targetDateStr = `${y}/${md}/${dd}`;

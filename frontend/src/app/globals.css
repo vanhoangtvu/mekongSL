@@ -4198,14 +4198,37 @@ html[data-theme="dark"] .map-playback-btn:hover {
 
   /* Timeline: gọn hơn */
   .map-timeline-container {
-    padding: 0.15rem 0.4rem;
-    border-radius: 8px;
+    padding: 0.1rem 0.3rem;
+    border-radius: 6px;
     gap: 0;
     flex: 1;
     min-width: 0;
   }
 
   .map-timeline-header {
+    flex-direction: row;
+    align-items: center;
+    gap: 0;
+    padding: 0;
+  }
+
+  .map-timeline-header .map-timeline-unit-control {
+    margin: 0;
+  }
+
+  .map-timeline-header .map-timeline-unit-toggle {
+    padding: 0.1rem 0.15rem;
+    gap: 0;
+    border: none;
+    background: transparent;
+  }
+
+  .map-timeline-header .map-timeline-unit-toggle svg {
+    width: 12px;
+    height: 12px;
+  }
+
+  .map-timeline-header .unit-label-current {
     display: none;
   }
 
@@ -4214,7 +4237,7 @@ html[data-theme="dark"] .map-playback-btn:hover {
   }
 
   .map-timeline-inner {
-    padding: 0 0.8rem;
+    padding: 0 0.6rem;
   }
 
   .map-timeline-slider {
@@ -4243,7 +4266,13 @@ html[data-theme="dark"] .map-playback-btn:hover {
   }
 
   .map-timeline-ticks {
-    display: none;
+    overflow: visible;
+  }
+
+  .map-timeline-tick::after {
+    font-size: 0.5rem;
+    padding: 0.1rem 0.2rem;
+    white-space: nowrap;
   }
 
   .map-timeline-tooltip {

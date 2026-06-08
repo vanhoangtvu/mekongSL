@@ -44,7 +44,6 @@ export function AppHeader({ onToggleSidebar, isSidebarOpen }: AppHeaderProps) {
           <div className="app-brand">
             <Link href="/" className="app-logo">
               <Image src="/logo.png" alt="Mekong Salt Lab" width={158} height={30} style={{ objectFit: "contain" }} />
-              <span className="app-logo-text">Environmental Data For Mekong</span>
             </Link>
              <p className="app-slogan">Empowering Sustainable Water Management Through Data</p>
           </div>

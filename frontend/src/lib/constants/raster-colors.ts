@@ -26,15 +26,14 @@ export const LANDUSE_COLORS: ClassifiedColorEntry[] = [
 // ── Continuous (value-based) color ramps ──
 
 export const SALINITY_STOPS: ColorStop[] = [
-  { value: 0.01, color: [3, 1, 15, 1] },         // gần đen
-  { value: 0.5,  color: [15, 8, 45, 1] },         // xanh dương tím đậm
-  { value: 1.5,  color: [35, 20, 90, 1] },        // xanh dương tím
-  { value: 6,    color: [0, 130, 60, 1] },         // xanh lá đậm
-  { value: 12,   color: [255, 230, 0, 1] },        // vàng tươi
-  { value: 17,   color: [255, 140, 0, 1] },        // cam
-  { value: 20,   color: [255, 30, 30, 1] },        // đỏ tươi
-  { value: 23,   color: [180, 0, 20, 1] },         // đỏ sẫm
-  { value: 25,   color: [200, 30, 100, 1] },       // đỏ hồng
+  { value: 0.01, color: [20, 20, 80, 1] },          // 0: xanh đậm
+  { value: 1.5,  color: [80, 220, 255, 1] },        // 1.5: xanh lam sáng
+  { value: 3,    color: [50, 240, 255, 1] },         // 3: xanh lam sáng hơn
+  { value: 6,    color: [80, 255, 80, 1] },          // 6: xanh lá sáng
+  { value: 10,   color: [255, 255, 50, 1] },         // 10: vàng
+  { value: 15,   color: [255, 180, 50, 1] },         // 15: cam
+  { value: 18,   color: [220, 50, 50, 1] },          // 18: đỏ đậm
+  { value: 25,   color: [255, 255, 255, 1] },        // 25: trắng
 ];
 
 export const PH_STOPS: ColorStop[] = [
@@ -68,6 +67,64 @@ export const TIMELAPSE_STOPS: ColorStop[] = [
 ];
 
 // ── Helper: build WebGL style expressions ──
+
+function lerp(a: number, b: number, t: number): number {
+  return a + (b - a) * t;
+}
+
+function interpolateColor(stops: ColorStop[], value: number): RgbaColor {
+  if (value <= stops[0].value) return stops[0].color;
+  if (value >= stops[stops.length - 1].value) return stops[stops.length - 1].color;
+
+  for (let i = 0; i < stops.length - 1; i++) {
+    if (value >= stops[i].value && value <= stops[i + 1].value) {
+      const t = (value - stops[i].value) / (stops[i + 1].value - stops[i].value);
+      return [
+        Math.round(lerp(stops[i].color[0], stops[i + 1].color[0], t)),
+        Math.round(lerp(stops[i].color[1], stops[i + 1].color[1], t)),
+        Math.round(lerp(stops[i].color[2], stops[i + 1].color[2], t)),
+        lerp(stops[i].color[3], stops[i + 1].color[3], t),
+      ];
+    }
+  }
+  return stops[stops.length - 1].color;
+}
+
+export function buildQuantizedStyle(
+  stops: ColorStop[],
+  nodata: number,
+  minVal: number,
+  maxVal: number,
+  numSteps = 256,
+): Record<string, unknown> {
+  const conditions: unknown[] = [
+    ["==", ["band", 1], 0], [0, 0, 0, 0],
+    ["==", ["band", 1], nodata], [0, 0, 0, 0],
+  ];
+  conditions.push(["<", ["band", 1], minVal], [0, 0, 0, 0]);
+  conditions.push([">", ["band", 1], maxVal], [0, 0, 0, 0]);
+
+  const scale = numSteps / (maxVal - minVal);
+  const invScale = 1 / scale;
+
+  const quantized = [
+    "clamp",
+    ["floor", ["*", ["-", ["band", 1], minVal], scale]],
+    0,
+    numSteps,
+  ];
+
+  const stepped = ["+", ["*", quantized, invScale], minVal];
+
+  const interpolateArgs: unknown[] = ["interpolate", ["linear"], stepped];
+  for (const s of stops) {
+    interpolateArgs.push(s.value, s.color);
+  }
+
+  return {
+    color: ["case", ...conditions, interpolateArgs],
+  };
+}
 
 export function buildInterpolateStyle(
   stops: ColorStop[],
@@ -135,7 +192,7 @@ export function getRasterStyle(
   }
 
   if (lowerId.includes("salinity") || lowerUrl.includes("salinity")) {
-    return buildInterpolateStyle(SALINITY_STOPS, nodata, 0.01, 25);
+    return buildQuantizedStyle(SALINITY_STOPS, nodata, 0.01, 25);
   }
   if (lowerId.includes("ph") || lowerUrl.includes("ph")) {
     return buildInterpolateStyle(PH_STOPS, nodata, 4, 9);
