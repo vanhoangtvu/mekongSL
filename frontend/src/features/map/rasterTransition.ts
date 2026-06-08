@@ -1,11 +1,9 @@
-const COLOR_STOPS: { value: number; color: [number, number, number] }[] = [
-  { value: 0.06, color: [0, 0, 255] },
-  { value: 5, color: [0, 255, 255] },
-  { value: 10, color: [0, 255, 0] },
-  { value: 15, color: [255, 255, 0] },
-  { value: 20, color: [255, 165, 0] },
-  { value: 21, color: [255, 0, 0] },
-];
+import { TIMELAPSE_STOPS } from "../../lib/constants/raster-colors";
+
+const COLOR_STOPS: { value: number; color: [number, number, number] }[] = TIMELAPSE_STOPS.map(s => ({
+  value: s.value,
+  color: [s.color[0], s.color[1], s.color[2]] as [number, number, number],
+}));
 
 function rampColor(value: number, nodata: number): [number, number, number, number] {
   if (value <= nodata || value <= -9999 || value < 0.06) return [0, 0, 0, 0];

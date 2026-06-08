@@ -1601,7 +1601,7 @@ html[data-theme="light"] .geo-settings-panel {
   bottom: 1.5rem;
   left: 1.5rem;
   z-index: 30;
-  width: 280px;
+  width: 320px;
   background: rgba(255, 255, 255, 0.95); /* Bright white background */
   backdrop-filter: blur(16px) saturate(180%);
   border: 1px solid rgba(37, 99, 168, 0.25); /* Soft themed light blue border */
@@ -1743,6 +1743,13 @@ html[data-theme="light"] .geo-map-inspector-layer {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+.geo-map-inspector-layer-name--wrap {
+  white-space: normal;
+  overflow: visible;
+  text-overflow: clip;
+  word-break: break-word;
+  line-height: 1.35;
 }
 html[data-theme="light"] .geo-map-inspector-layer-name {
   color: #1e293b;
@@ -2545,6 +2552,17 @@ html[data-theme="dark"] .map-player-dropdown {
 
 html[data-theme="dark"] .map-player-list::-webkit-scrollbar-thumb {
   background: rgba(255, 255, 255, 0.2);
+}
+
+.map-player-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2rem 1rem;
+  font-size: 0.78rem;
+  color: #64748b;
+  text-align: center;
+  line-height: 1.4;
 }
 
 /* Each layer row */

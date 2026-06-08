@@ -10,20 +10,9 @@ import { transformExtent } from "ol/proj";
 import { getDatasetSlug, getParentDataset, getDatasetById, getRootDataset } from "../../lib/constants/datasets";
 import { listS3Files } from "../../lib/admin-api";
 import type { RenderedLayer } from "./useS3DatasetLayers";
+import { buildInterpolateStyle, TIMELAPSE_STOPS } from "../../lib/constants/raster-colors";
 
-const RASTER_STYLE: Record<string, unknown> = {
-  color: [
-    "case",
-    ["<=", ["band", 1], -9999], [0, 0, 0, 0],
-    ["<=", ["band", 1], 0], [0, 0, 0, 0],
-    ["<", ["band", 1], 0.06], [0, 0, 0, 0],
-    ["interpolate", ["linear"], ["band", 1],
-      0.06, [0, 0, 255, 1], 5, [0, 255, 255, 1],
-      10, [0, 255, 0, 1], 15, [255, 255, 0, 1],
-      20, [255, 165, 0, 1], 21, [255, 0, 0, 1],
-    ],
-  ],
-};
+const RASTER_STYLE = buildInterpolateStyle(TIMELAPSE_STOPS, -9999);
 
 const FADE_MS = 180;
 const PRELOAD_CONCURRENCY = 6;

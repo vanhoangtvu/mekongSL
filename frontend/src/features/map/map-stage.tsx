@@ -395,6 +395,10 @@ function translateLegendLabel(label: string): string {
     .replace(/Độ sâu/g, "Depth");
 }
 
+function isLanduseLayer(key: string): boolean {
+  return key.startsWith("landuse-classification/");
+}
+
 // ---------------------------------------------------------------------------
 // SensorChart — interactive sparkline with hover crosshair
 // ---------------------------------------------------------------------------
@@ -2285,12 +2289,15 @@ export const MapStage = React.memo(function MapStage({ startDateTime, endDateTim
             )}
             {showPlayerDropdown && (
               <div className={`map-player-dropdown ${isMobile ? 'map-player-dropdown--mobile' : ''}`}>
-                <div className="map-player-dropdown-title">Select Data Layer</div>
+                <div className="map-player-dropdown-title">Active Layers</div>
                 {isMobile && (
                   <div className="map-player-dropdown-handle" />
                 )}
                 <div className="map-player-list">
-                  {playerLayers.map((layer) => {
+                  {playerLayers.filter(l => l.added).length === 0 && (
+                    <div className="map-player-empty">No layers active. Add layers from the sidebar.</div>
+                  )}
+                  {playerLayers.filter(l => l.added).map((layer) => {
                     const layerKey = getLayerKey(layer);
                     return (
                       <div
@@ -2809,10 +2816,12 @@ export const MapStage = React.memo(function MapStage({ startDateTime, endDateTim
                       type="button"
                       onClick={() => setInspectorExpandedKey(isExpanded ? null : key)}
                     >
-                      <span className="geo-map-inspector-layer-name">{layerInfo.name}</span>
-                      <span className="geo-map-inspector-val value-highlight">
-                        {val.toFixed(2)}{unit ? ` ${unit}` : ""}
-                      </span>
+                      <span className={`geo-map-inspector-layer-name${isLanduseLayer(key) ? ' geo-map-inspector-layer-name--wrap' : ''}`}>{layerInfo.name}</span>
+                      {!isLanduseLayer(key) && (
+                        <span className="geo-map-inspector-val value-highlight">
+                          {val.toFixed(2)}{unit ? ` ${unit}` : ""}
+                        </span>
+                      )}
                       <span className="geo-map-inspector-chevron">{isExpanded ? "▲" : "▼"}</span>
                     </button>
                     {isExpanded && (
