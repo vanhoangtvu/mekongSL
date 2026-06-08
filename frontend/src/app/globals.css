@@ -2502,7 +2502,7 @@ html[data-theme="dark"] .map-timeline-tick::after {
   position: absolute;
   top: 3.2rem;
   left: 0;
-  width: 450px;
+  width: 580px;
   background: rgba(255, 255, 255, 0.95);
   border: 1px solid rgba(0, 0, 0, 0.08);
   border-radius: 12px;
@@ -2569,7 +2569,7 @@ html[data-theme="dark"] .map-player-list::-webkit-scrollbar-thumb {
 .map-player-item {
   position: relative;
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 0.6rem;
   padding: 0.45rem 0.6rem;
   border-radius: 8px;
@@ -2586,6 +2586,10 @@ html[data-theme="dark"] .map-player-list::-webkit-scrollbar-thumb {
 html[data-theme="dark"] .map-player-item:hover {
   background: rgba(255, 255, 255, 0.04);
   border-color: rgba(255, 255, 255, 0.06);
+}
+
+.map-player-item.is-inactive {
+  opacity: 0.65;
 }
 
 .map-player-item.is-dragging {
@@ -2655,10 +2659,33 @@ html[data-theme="dark"] .map-player-item-type--ecology       { color: #86efac; b
   flex: 1;
   font-size: 0.85rem;
   color: var(--text);
-  white-space: nowrap;
+  white-space: normal;
+  word-break: break-word;
+  line-height: 1.35;
   overflow: hidden;
-  text-overflow: ellipsis;
   min-width: 0;
+}
+@media (max-width: 767px) {
+  .map-player-item-name {
+    white-space: nowrap;
+    overflow-x: auto;
+    overflow-y: hidden;
+    scrollbar-width: thin;
+    scrollbar-color: rgba(148, 163, 184, 0.3) transparent;
+  }
+  .map-player-item-name::-webkit-scrollbar {
+    height: 4px;
+  }
+  .map-player-item-name::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  .map-player-item-name::-webkit-scrollbar-thumb {
+    background: rgba(148, 163, 184, 0.4);
+    border-radius: 99px;
+  }
+  .map-player-item-name:hover::-webkit-scrollbar-thumb {
+    background: rgba(148, 163, 184, 0.6);
+  }
 }
 .map-player-opacity-slider {
   flex-shrink: 0;
@@ -2709,16 +2736,50 @@ html[data-theme="dark"] .map-player-item-type--ecology       { color: #86efac; b
   transform: rotate(45deg);
 }
 
-.map-player-item-tick.is-added {
+.map-player-item-tick.is-visible {
   border-color: #16a34a;
   background: #16a34a;
   color: #ffffff;
 }
 
-.map-player-item-tick.is-added:hover {
+.map-player-item-tick.is-visible:hover {
   border-color: #dc2626;
   background: #dc2626;
   color: #ffffff;
+}
+
+/* Actions container for visibility toggle + remove */
+.map-player-item-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.2rem;
+  flex-shrink: 0;
+}
+
+/* Remove (X) button */
+.map-player-item-remove {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.4rem;
+  height: 1.4rem;
+  border-radius: 50%;
+  border: none;
+  background: transparent;
+  color: #cbd5e1;
+  cursor: pointer;
+  transition: all 140ms ease;
+  opacity: 0;
+}
+
+.map-player-item:hover .map-player-item-remove {
+  opacity: 1;
+}
+
+.map-player-item-remove:hover {
+  color: #dc2626;
+  background: rgba(220, 53, 69, 0.1);
 }
 
 /* Inline type-picker popover */
@@ -3797,7 +3858,7 @@ html[data-theme="dark"] .map-playback-btn:hover {
     top: auto !important;
     left: 12px !important;
     right: 12px !important;
-    bottom: 12px !important;
+    bottom: 5rem !important;
     width: auto !important;
     max-width: min(calc(100vw - 24px), 480px) !important;
     max-height: 60vh;
@@ -3806,19 +3867,72 @@ html[data-theme="dark"] .map-playback-btn:hover {
     padding: 0.75rem !important;
     animation: slideUp 250ms ease;
     z-index: 10000 !important;
+    background: rgba(255, 255, 255, 0.92) !important;
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+  }
+
+  html[data-theme="dark"] .map-player-dropdown {
+    background: rgba(33, 37, 41, 0.92) !important;
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+  }
+
+  .map-player-dropdown-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding-bottom: 0.5rem;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .map-player-dropdown-title {
+    padding-bottom: 0 !important;
+    border-bottom: none !important;
+  }
+
+  .map-player-dropdown-close {
+    flex-shrink: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    border: 1px solid #cbd5e1;
+    background: #f1f5f9;
+    color: #475569;
+    cursor: pointer;
+    transition: all 140ms ease;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  .map-player-dropdown-close:active {
+    background: #e2e8f0;
+  }
+
+  html[data-theme="dark"] .map-player-dropdown-close {
+    background: rgba(255, 255, 255, 0.1);
+    border-color: rgba(255, 255, 255, 0.2);
+    color: #cbd5e1;
   }
 
   .map-player-dropdown-handle {
-    width: 36px;
+    width: 32px;
     height: 4px;
     border-radius: 2px;
-    background: var(--border);
-    margin: 0.25rem auto 0.5rem;
+    background: #cbd5e1;
+    margin: 0 auto 8px;
     flex-shrink: 0;
+  }
+
+  html[data-theme="dark"] .map-player-dropdown-handle {
+    background: rgba(255, 255, 255, 0.2);
   }
 
   .map-player-list {
     max-height: 50vh !important;
+    -webkit-overflow-scrolling: touch;
   }
 
   @keyframes slideUp {

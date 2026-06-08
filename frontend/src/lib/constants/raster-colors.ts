@@ -26,11 +26,15 @@ export const LANDUSE_COLORS: ClassifiedColorEntry[] = [
 // ── Continuous (value-based) color ramps ──
 
 export const SALINITY_STOPS: ColorStop[] = [
-  { value: 0.01,  color: [0, 0, 0, 1] },
-  { value: 6.75,  color: [0, 0, 255, 1] },
-  { value: 13.5,  color: [0, 255, 0, 1] },
-  { value: 20.25, color: [255, 255, 0, 1] },
-  { value: 27,    color: [255, 0, 0, 1] },
+  { value: 0.01, color: [3, 1, 15, 1] },         // gần đen
+  { value: 0.5,  color: [15, 8, 45, 1] },         // xanh dương tím đậm
+  { value: 1.5,  color: [35, 20, 90, 1] },        // xanh dương tím
+  { value: 6,    color: [0, 130, 60, 1] },         // xanh lá đậm
+  { value: 12,   color: [255, 230, 0, 1] },        // vàng tươi
+  { value: 17,   color: [255, 140, 0, 1] },        // cam
+  { value: 20,   color: [255, 30, 30, 1] },        // đỏ tươi
+  { value: 23,   color: [180, 0, 20, 1] },         // đỏ sẫm
+  { value: 25,   color: [200, 30, 100, 1] },       // đỏ hồng
 ];
 
 export const PH_STOPS: ColorStop[] = [
@@ -131,7 +135,7 @@ export function getRasterStyle(
   }
 
   if (lowerId.includes("salinity") || lowerUrl.includes("salinity")) {
-    return buildInterpolateStyle(SALINITY_STOPS, nodata, 0.01, 27);
+    return buildInterpolateStyle(SALINITY_STOPS, nodata, 0.01, 25);
   }
   if (lowerId.includes("ph") || lowerUrl.includes("ph")) {
     return buildInterpolateStyle(PH_STOPS, nodata, 4, 9);

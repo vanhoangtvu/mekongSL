@@ -21,7 +21,7 @@ import { useS3DatasetLayers } from "./useS3DatasetLayers";
 import { useTimelapseLayer } from "./useTimelapseLayer";
 import type { ManualStation } from "../../lib/admin-api";
 import { listWaterQualitySamples, getWaterQualitySample, getBackendAdminUrl, listS3Files, type WaterQualitySampleDto } from "../../lib/admin-api";
-import { MapPin, Activity, Image, Calendar, X, Play, Pause, SkipForward, SkipBack, Layers, Plus, Clock } from "lucide-react";
+import { MapPin, Activity, Image, Calendar, X, Play, Pause, SkipForward, SkipBack, Layers, Clock } from "lucide-react";
 
 // Register UTM 48N projection
 proj4.defs("EPSG:32648", "+proj=utm +zone=48 +datum=WGS84 +units=m +no_defs");
@@ -83,6 +83,7 @@ type PlayerLayer = {
   categoryId: string;
   categoryName: string;
   added: boolean;
+  visible: boolean;
   type?: string;
   opacity: number;
 };
@@ -98,6 +99,7 @@ const ALL_AVAILABLE_LAYERS: PlayerLayer[] = DATASETS.flatMap((root) => {
       categoryId: root.id,
       categoryName: root.name,
       added: false,
+      visible: false,
       opacity: 0.7,
     }];
   }
@@ -1038,26 +1040,16 @@ export const MapStage = React.memo(function MapStage({ startDateTime, endDateTim
     HYDROLOGY_IDS.has(d.id) || IGNORE_TIMELAPSE_BLOCKERS.has(d.id)
   );
 
-  // Use useS3DatasetLayers for all applied datasets to support overlapping multiple layers
   const s3Result = useS3DatasetLayers(
-    appliedDatasets,
-    mapRef,
-    timelineDate,
-    timeSlot,
-    prefetchDate,
-    allTimelineDates,
+    appliedDatasets, mapRef,
+    timelineDate, timeSlot,
+    prefetchDate, allTimelineDates,
     onActualSlot,
-    isTimelinePlaying && playbackQueue.length > 0 ? playbackQueue[playbackIndex].layers : undefined
   );
 
   const { renderedLayers, layerRefs: s3LayerRefs, layersCacheRef, sourceCacheRef } = s3Result;
 
-  const effectiveRenderedLayers = useMemo(() => {
-    if (isTimelinePlaying && playbackQueue.length > 0) {
-      return playbackQueue[playbackIndex].layers;
-    }
-    return renderedLayers;
-  }, [isTimelinePlaying, playbackQueue, playbackIndex, renderedLayers]);
+  const effectiveRenderedLayers = renderedLayers;
 
   // Keep a ref so the pointermove closure (created once) can read current renderedLayers
   const renderedLayersRef = useRef(effectiveRenderedLayers);
@@ -1080,6 +1072,26 @@ export const MapStage = React.memo(function MapStage({ startDateTime, endDateTim
     ALL_AVAILABLE_LAYERS.map((l) => ({ ...l }))
   );
   const [pendingLayerId, setPendingLayerId] = useState<string | null>(null);
+  const playerControlRef = useRef<HTMLDivElement>(null);
+
+  // Click outside / Escape to close layer dropdown
+  useEffect(() => {
+    if (!showPlayerDropdown) return;
+    const handlePointerDown = (event: PointerEvent) => {
+      if (playerControlRef.current && !playerControlRef.current.contains(event.target as Node)) {
+        setShowPlayerDropdown(false);
+      }
+    };
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setShowPlayerDropdown(false);
+    };
+    document.addEventListener("pointerdown", handlePointerDown);
+    document.addEventListener("keydown", handleEscape);
+    return () => {
+      document.removeEventListener("pointerdown", handlePointerDown);
+      document.removeEventListener("keydown", handleEscape);
+    };
+  }, [showPlayerDropdown]);
 
   // Sync playerLayers from appliedDatasets: selected ones on top (reversed order = last=first), unselected below
   useEffect(() => {
@@ -1095,7 +1107,7 @@ export const MapStage = React.memo(function MapStage({ startDateTime, endDateTim
       seenKeys.add(layerKey);
       const child = ALL_AVAILABLE_LAYERS.find((l) => l.id === ds.id);
       if (child) {
-        selected.push({ ...child, added: true, type: ds.type });
+        selected.push({ ...child, added: true, visible: true, type: ds.type });
       } else {
         const cat = DATASETS.find((c) => c.id === ds.id || c.children?.some((ch) => ch.id === ds.id));
         const item = cat?.children?.find((ch) => ch.id === ds.id) || cat;
@@ -1105,6 +1117,7 @@ export const MapStage = React.memo(function MapStage({ startDateTime, endDateTim
           categoryId: cat?.id || ds.id,
           categoryName: cat?.name || ds.id,
           added: true,
+          visible: true,
           type: ds.type,
           opacity: 0.7,
         });
@@ -1113,7 +1126,7 @@ export const MapStage = React.memo(function MapStage({ startDateTime, endDateTim
     // Then append unselected in original ALL_AVAILABLE_LAYERS order
     for (const al of ALL_AVAILABLE_LAYERS) {
       if (!selectedLookup.has(al.id)) {
-        unselected.push({ ...al, added: false, type: undefined });
+        unselected.push({ ...al, added: false, visible: false, type: undefined });
       }
     }
     setPlayerLayers([...selected, ...unselected]);
@@ -1131,7 +1144,7 @@ export const MapStage = React.memo(function MapStage({ startDateTime, endDateTim
         if (!renderedIds.has(key)) continue;
         const olLayer = layers[key];
         if (olLayer) {
-          olLayer.setVisible(pl.added);
+          olLayer.setVisible(pl.visible);
           olLayer.setOpacity(pl.opacity ?? 0.7);
           olLayer.setZIndex(100 + (playerLayers.length - idx));
         }
@@ -1315,18 +1328,23 @@ export const MapStage = React.memo(function MapStage({ startDateTime, endDateTim
   };
 
   const confirmAddLayer = (key: string, layerType: "raster" | "vector") => {
-    setPlayerLayers(prev => prev.map(l => getLayerKey(l) === key ? { ...l, added: true, type: layerType } : l));
+    setPlayerLayers(prev => prev.map(l => getLayerKey(l) === key ? { ...l, added: true, visible: true, type: layerType } : l));
     setPendingLayerId(null);
     const id = key.replace(/-(?:raster|vector)$/, "");
     onAddDataset?.(id, layerType);
   };
 
   const removeLayer = (key: string) => {
-    setPlayerLayers(prev => prev.map(l => getLayerKey(l) === key ? { ...l, added: false, type: undefined } : l));
+    setPlayerLayers(prev => prev.map(l => getLayerKey(l) === key ? { ...l, added: false, visible: false, type: undefined } : l));
     setPendingLayerId(prev => prev === key ? null : prev);
-    // Sync ngược lên appliedDatasets
-    const [id, type] = key.split(/-(?=[^-]*$)/); // split at last dash
+    const [id, type] = key.split(/-(?=[^-]*$)/);
     onRemoveDataset?.(id, type ?? "raster");
+  };
+
+  // Local toggle — hide/show on map, layer stays in dropdown
+  const toggleLayerVisibility = (key: string) => {
+    setPlayerLayers(prev => prev.map(l => getLayerKey(l) === key ? { ...l, visible: !l.visible } : l));
+    setPendingLayerId(prev => prev === key ? null : prev);
   };
 
   // Drag-and-drop reordering
@@ -2272,37 +2290,53 @@ export const MapStage = React.memo(function MapStage({ startDateTime, endDateTim
 
         {/* Top Floating Controls Wrapper */}
         <div className={`map-top-controls-wrapper ${isMobile ? 'map-top-controls-wrapper--mobile' : ''}`}>
-          {/* Add Player Button & Dropdown */}
-          <div className="map-player-control">
+          {/* Layers Button & Dropdown */}
+          <div className="map-player-control" ref={playerControlRef}>
             <button
               className="map-add-layer-btn"
               onClick={() => { setShowPlayerDropdown(!showPlayerDropdown); setPendingLayerId(null); }}
               type="button"
               title="Manage layers"
             >
-              <Plus size={15} />
-              <span>Add Layer</span>
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <polygon points="12 2 2 7 12 12 22 7 12 2"/>
+                <polyline points="2 17 12 22 22 17"/>
+                <polyline points="2 12 12 17 22 12"/>
+              </svg>
+              <span>Layers</span>
             </button>
 
-            {isMobile && showPlayerDropdown && (
-              <div className="sidebar-backdrop" onClick={() => setShowPlayerDropdown(false)} />
-            )}
             {showPlayerDropdown && (
               <div className={`map-player-dropdown ${isMobile ? 'map-player-dropdown--mobile' : ''}`}>
-                <div className="map-player-dropdown-title">Active Layers</div>
                 {isMobile && (
                   <div className="map-player-dropdown-handle" />
                 )}
+                <div className="map-player-dropdown-header">
+                  <div className="map-player-dropdown-title">My Layers</div>
+                  {isMobile && (
+                    <button
+                      className="map-player-dropdown-close"
+                      type="button"
+                      onClick={() => setShowPlayerDropdown(false)}
+                      title="Close"
+                    >
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
+                        <line x1="18" y1="6" x2="6" y2="18"/>
+                        <line x1="6" y1="6" x2="18" y2="18"/>
+                      </svg>
+                    </button>
+                  )}
+                </div>
                 <div className="map-player-list">
                   {playerLayers.filter(l => l.added).length === 0 && (
-                    <div className="map-player-empty">No layers active. Add layers from the sidebar.</div>
+                    <div className="map-player-empty">No layers added yet. Add layers from the sidebar or data panel.</div>
                   )}
                   {playerLayers.filter(l => l.added).map((layer) => {
                     const layerKey = getLayerKey(layer);
                     return (
                       <div
                         key={layerKey}
-                        className={`map-player-item ${dragLayerId === layerKey ? "is-dragging" : ""}`}
+                        className={`map-player-item ${dragLayerId === layerKey ? "is-dragging" : ""} ${!layer.visible ? "is-inactive" : ""}`}
                         draggable={!isMobile}
                         onDragStart={() => !isMobile && setDragLayerId(layerKey)}
                         onDragEnd={() => !isMobile && setDragLayerId(null)}
@@ -2359,7 +2393,7 @@ export const MapStage = React.memo(function MapStage({ startDateTime, endDateTim
                           {layer.categoryId === "water-quality" && (
                             <svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor"><path d="M19.14 12.94c.04-.3.06-.61.06-.94s-.02-.64-.07-.94l2.03-1.58c.18-.14.23-.41.12-.61l-1.92-3.32c-.12-.22-.37-.29-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54c-.04-.24-.24-.41-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.09.63-.09.94s.02.64.07.94l-2.03 1.58c-.18.14-.23.41-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z"/></svg>
                           )}
-                          <span>{layer.categoryName}</span>
+                          <span>{isMobile && layer.categoryName === "Landsat Imagery" ? "Landsat" : layer.categoryName}</span>
                         </span>
 
                         {/* Layer name */}
@@ -2386,66 +2420,33 @@ export const MapStage = React.memo(function MapStage({ startDateTime, endDateTim
 
                         {/* Layer type badge */}
                         {layer.type && (
-                          <span className="map-player-item-type-badge">{layer.type}</span>
+                          <span className="map-player-item-type-badge">{isMobile ? layer.type === "raster" ? "R" : layer.type === "vector" ? "V" : layer.type : layer.type}</span>
                         )}
 
-                        {/* Add / Added button */}
-                        {layer.added ? (
+                        {/* Visibility toggle (green checkmark) + Remove button */}
+                        <div className="map-player-item-actions">
                           <button
-                            className="map-player-item-tick is-added"
-                            title="Added - Click to remove"
+                            className={`map-player-item-tick ${layer.visible ? "is-visible" : ""}`}
+                            title={layer.visible ? "Hide layer" : "Show layer"}
                             type="button"
-                            onClick={() => removeLayer(layerKey)}
+                            onClick={() => toggleLayerVisibility(layerKey)}
                           >
                             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
                               <polyline points="20 6 9 17 4 12"/>
                             </svg>
                           </button>
-                        ) : (
                           <button
-                            className={`map-player-item-tick ${pendingLayerId === layerKey ? "is-pending" : ""}`}
-                            title="Add layer"
+                            className="map-player-item-remove"
+                            title="Remove layer"
                             type="button"
-                            onClick={() => {
-                              if (layer.type) {
-                                // Already has type from sidebar — add directly
-                                confirmAddLayer(layerKey, layer.type as "raster" | "vector");
-                              } else {
-                                setPendingLayerId(pendingLayerId === layerKey ? null : layerKey);
-                              }
-                            }}
+                            onClick={() => removeLayer(layerKey)}
                           >
-                            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
-                              <line x1="12" y1="5" x2="12" y2="19"/>
-                              <line x1="5" y1="12" x2="19" y2="12"/>
+                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round">
+                              <line x1="18" y1="6" x2="6" y2="18"/>
+                              <line x1="6" y1="6" x2="18" y2="18"/>
                             </svg>
                           </button>
-                        )}
-
-                        {/* Inline type-picker popover */}
-                        {pendingLayerId === layerKey && (
-                          <div className="map-player-type-popover">
-                            <div className="map-player-type-popover-label">Select layer format:</div>
-                            <div className="map-player-type-popover-options">
-                              <button
-                                className="map-player-type-opt"
-                                type="button"
-                                onClick={() => confirmAddLayer(layerKey, "raster")}
-                              >
-                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><rect x="3" y="3" width="18" height="18"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="3" y1="15" x2="21" y2="15"/><line x1="9" y1="3" x2="9" y2="21"/><line x1="15" y1="3" x2="15" y2="21"/></svg>
-                                Raster
-                              </button>
-                              <button
-                                className="map-player-type-opt"
-                                type="button"
-                                onClick={() => confirmAddLayer(layerKey, "vector")}
-                              >
-                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="3,18 8,8 13,13 18,6"/><circle cx="3" cy="18" r="1.5" fill="currentColor"/><circle cx="8" cy="8" r="1.5" fill="currentColor"/><circle cx="13" cy="13" r="1.5" fill="currentColor"/><circle cx="18" cy="6" r="1.5" fill="currentColor"/></svg>
-                                Vector
-                              </button>
-                            </div>
-                          </div>
-                        )}
+                        </div>
                       </div>
                     );
                   })}
@@ -2458,7 +2459,7 @@ export const MapStage = React.memo(function MapStage({ startDateTime, endDateTim
                     <button
                       className="map-player-summary-clear"
                       type="button"
-                      onClick={() => setPlayerLayers(prev => prev.map(l => ({ ...l, added: false })))}
+                      onClick={() => setPlayerLayers(prev => prev.map(l => ({ ...l, added: false, visible: false, type: undefined })))}
                     >Clear all</button>
                   </div>
                 )}
@@ -3070,8 +3071,8 @@ export const MapStage = React.memo(function MapStage({ startDateTime, endDateTim
         )}
 
         {/* ---- Mobile Popup Backdrop ---- */}
-        {isMobile && (popupDeviceId || selectedWqStation) && (
-          <div className="popup-backdrop" onClick={() => { setPopupDeviceId(null); setSelectedWqStation(null); }} />
+        {isMobile && (popupDeviceId || selectedWqStation || showPlayerDropdown) && (
+          <div className="popup-backdrop" onClick={() => { setPopupDeviceId(null); setSelectedWqStation(null); setShowPlayerDropdown(false); }} />
         )}
     </section>
 

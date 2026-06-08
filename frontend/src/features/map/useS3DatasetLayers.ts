@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import type React from "react";
-import type Map from "ol/Map";
+import type OLMap from "ol/Map";
 import WebGLTileLayer from "ol/layer/WebGLTile";
 import VectorLayer from "ol/layer/Vector";
 import { getDatasetSlug, getParentDataset, getDatasetById, getRootDataset } from "../../lib/constants/datasets";
@@ -32,13 +32,12 @@ function getPrefix(key: string) { return key.split("__")[0]; }
  */
 export function useS3DatasetLayers(
   appliedDatasets: Array<{ id: string; type: string }> | undefined,
-  mapRef: React.MutableRefObject<Map | null>,
+  mapRef: React.MutableRefObject<OLMap | null>,
   timelineDate?: string,
   timeSlot?: string,
   prefetchDate?: string,
   allTimelineDates?: string[],
   onActualSlot?: (date: string, slot: string) => void,
-  renderedLayersOverride?: Record<string, RenderedLayer>,
 ) {
   const prevDateRef = useRef<string | undefined>(undefined);
   const [renderedLayers, setRenderedLayers] = useState<Record<string, RenderedLayer>>({});
@@ -503,7 +502,7 @@ export function useS3DatasetLayers(
   }, [timelineDate, prefetchDate, allTimelineDates, appliedDatasets]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const layerRefs = useS3LayerRenderer(
-    renderedLayersOverride || renderedLayers,
+    renderedLayers,
     mapRef,
     prebuiltLayersRef,
     activeDateRef,
