@@ -18,7 +18,7 @@ import OLLineString from "ol/geom/LineString";
 import OLPolygon from "ol/geom/Polygon";
 import type { RenderedLayer } from "./useS3DatasetLayers";
 import { showNotification } from "../../lib/notification";
-import { getRasterStyle } from "../../lib/constants/raster-colors";
+import { getRasterStyle, isLandsatBand } from "../../lib/constants/raster-colors";
 
 export { parseVCT, animateLayer, removeLayerFromMap, defaultVectorStyle, FADE_MS };
 
@@ -78,6 +78,7 @@ function removeLayerFromMap(
   refs: Record<string, WebGLTileLayer | VectorLayer>,
   id: string,
 ) {
+  if (!map) return;
   map.removeLayer(layer);
   const src = layer.getSource?.();
   if (src && typeof src === "object" && "dispose" in src) {
@@ -263,18 +264,19 @@ export function useS3LayerRenderer(
           ? info.proxyUrl
           : `${window.location.origin}${info.proxyUrl}`;
 
+        const dsPrefix = getPrefix(id);
+
         const cachedSrc = sourceCacheRef?.current?.get(id);
         const source = cachedSrc?.ready
           ? cachedSrc.source
           : new GeoTIFF({
               sources: [{ url, nodata: info.nodata }],
               convertToRGB: false,
-              normalize: false,
+              normalize: isLandsatBand(dsPrefix),
               interpolate: false,
               projection: "EPSG:32648",
             });
 
-        const dsPrefix = getPrefix(id);
         const rasterStyle = getRasterStyle(dsPrefix, url, info.nodata);
 
         const rasterLayer = new WebGLTileLayer({

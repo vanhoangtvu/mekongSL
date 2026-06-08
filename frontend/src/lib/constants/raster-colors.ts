@@ -57,6 +57,18 @@ export const DEFAULT_STOPS: ColorStop[] = [
   { value: 21.0, color: [255, 0, 0, 1] },
 ];
 
+export const LANDSAT_STOPS: ColorStop[] = [
+  { value: 0,     color: [0, 0, 0, 1] },
+  { value: 0.12,  color: [128, 0, 255, 1] },
+  { value: 0.24,  color: [0, 0, 255, 1] },
+  { value: 0.35,  color: [0, 128, 255, 1] },
+  { value: 0.47,  color: [0, 255, 255, 1] },
+  { value: 0.59,  color: [0, 255, 0, 1] },
+  { value: 0.71,  color: [255, 255, 0, 1] },
+  { value: 0.82,  color: [255, 128, 0, 1] },
+  { value: 1,     color: [255, 0, 0, 1] },
+];
+
 export const TIMELAPSE_STOPS: ColorStop[] = [
   { value: 0.06, color: [0, 0, 255, 1] },
   { value: 5,   color: [0, 255, 255, 1] },
@@ -177,6 +189,11 @@ export function getLanduseColor(datasetId: string): RgbaColor | null {
   return null;
 }
 
+export function isLandsatBand(datasetId: string): boolean {
+  const lower = datasetId.toLowerCase();
+  return lower.startsWith("landsat-b") || lower === "landsat-rgb" || /^band-[1-7]$/.test(lower) || lower === "rgb";
+}
+
 export function getRasterStyle(
   datasetId: string,
   url: string,
@@ -199,6 +216,10 @@ export function getRasterStyle(
   }
   if (lowerId.includes("tidal") || lowerUrl.includes("tidal") || lowerId.includes("temp") || lowerUrl.includes("water-level")) {
     return buildInterpolateStyle(WATER_LEVEL_STOPS, nodata, -100, 200);
+  }
+
+  if (isLandsatBand(lowerId)) {
+    return buildInterpolateStyle(LANDSAT_STOPS, nodata);
   }
 
   return buildInterpolateStyle(DEFAULT_STOPS, nodata);
