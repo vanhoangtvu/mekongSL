@@ -1598,9 +1598,9 @@ html[data-theme="light"] .geo-settings-panel {
 /* Map Inspector Card (Hover Parameter Display) */
 .geo-map-inspector {
   position: absolute;
-  bottom: 1.5rem;
+  bottom: 4.5rem;
   left: 1.5rem;
-  z-index: 30;
+  z-index: 110;
   width: 320px;
   background: rgba(255, 255, 255, 0.95); /* Bright white background */
   backdrop-filter: blur(16px) saturate(180%);

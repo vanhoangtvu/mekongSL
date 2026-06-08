@@ -41,12 +41,12 @@ function animateLayer(
   from: number,
   to: number,
   duration: number,
-  linkedLayer?: WebGLTileLayer | VectorLayer, // Add linkedLayer to sync opacities
+  linkedLayer?: WebGLTileLayer | VectorLayer,
+  targetTotal = 0.7,
 ): Promise<void> {
   if (from === to) return Promise.resolve();
   return new Promise((resolve) => {
     const start = performance.now();
-    const targetTotal = 0.7; // The desired constant visual density
 
     function step(now: number) {
       const elapsed = now - start;
@@ -55,13 +55,10 @@ function animateLayer(
       const currentOpacity = from + (to - from) * t;
       layer.setOpacity(currentOpacity);
 
-      // Strict Capping: if linkedLayer exists, ensure total doesn't exceed 0.7
       if (linkedLayer) {
-        // If this is the new layer (fading in), the linked old layer should be (0.7 - current)
         if (to > from) {
           linkedLayer.setOpacity(Math.max(0, targetTotal - currentOpacity));
-        } 
-        // If this is the old layer (fading out), the linked new layer is already handled by its own animation
+        }
       }
 
       if (t < 1) requestAnimationFrame(step);
@@ -177,6 +174,7 @@ export function useS3LayerRenderer(
   prebuiltLayersRef: React.MutableRefObject<Record<string, Record<string, WebGLTileLayer | VectorLayer>>>,
   activeDateRef: React.MutableRefObject<string>,
   sourceCacheRef?: React.MutableRefObject<Map<string, { source: GeoTIFF; ready: boolean }>>,
+  targetOpacity = 0.7,
 ) {
   const layerRefs = useRef<Record<string, WebGLTileLayer | VectorLayer>>({});
   const pendingReplaceRef = useRef<Record<string, { oldId: string; done: boolean }>>({});
@@ -302,13 +300,23 @@ export function useS3LayerRenderer(
             sourceCacheRef.current.set(id, { source, ready: true });
           }
 
-          const targetOp = 0.7;
-          
-          if (pending && !pending.done && currentLayers[pending.oldId]) {
+          const targetOp = targetOpacity;
+
+          if (targetOpacity > 0.7) {
+            // Playback: instant opacity, skip fade
+            rasterLayer.setOpacity(targetOp);
+            if (pending && !pending.done && currentLayers[pending.oldId]) {
+              const old = currentLayers[pending.oldId] as WebGLTileLayer | VectorLayer;
+              removeLayerFromMap(safeMap, old, currentLayers, pending.oldId);
+              for (const dlX of Object.values(prebuiltLayersRef.current)) delete dlX[pending.oldId];
+              pending.done = true;
+              delete pendingReplace[prefix];
+            }
+          } else if (pending && !pending.done && currentLayers[pending.oldId]) {
             const old = currentLayers[pending.oldId] as WebGLTileLayer | VectorLayer;
-            
-            // Strict Opacity Sync: new layer controls old layer to keep sum at 0.7
-            animateLayer(rasterLayer, 0, targetOp, FADE_MS, old).then(() => {
+
+            // Strict Opacity Sync: new layer controls old layer to keep sum at targetOpacity
+            animateLayer(rasterLayer, 0, targetOp, FADE_MS, old, targetOpacity).then(() => {
               // Cleanup only after animation finishes
               removeLayerFromMap(safeMap, old, currentLayers, pending.oldId);
               for (const dlX of Object.values(prebuiltLayersRef.current)) delete dlX[pending.oldId];
@@ -396,7 +404,7 @@ export function useS3LayerRenderer(
             dl2[layerId] = vectorLayer;
             prebuiltLayersRef.current[activeDate] = dl2;
 
-            const targetOp = 0.7;
+            const targetOp = targetOpacity;
             if (pending && !pending.done && currentLayers[pending.oldId]) {
               const old = currentLayers[pending.oldId] as WebGLTileLayer | VectorLayer;
               animateLayer(vectorLayer, 0, targetOp, FADE_MS);

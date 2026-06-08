@@ -18,7 +18,6 @@ import { register } from "ol/proj/proj4";
 import { DATASETS, getRootDataset, getDatasetSlug, getParentDataset, getDatasetById } from "../../lib/constants/datasets";
 import { ECOWITT_DEVICES, type EcowittDevice } from "../../lib/constants/data-sources";
 import { useS3DatasetLayers } from "./useS3DatasetLayers";
-import { useTimelapseLayer } from "./useTimelapseLayer";
 import type { ManualStation } from "../../lib/admin-api";
 import { listWaterQualitySamples, getWaterQualitySample, getBackendAdminUrl, listS3Files, type WaterQualitySampleDto } from "../../lib/admin-api";
 import { MapPin, Activity, Image, Calendar, X, Play, Pause, SkipForward, SkipBack, Layers, Clock } from "lucide-react";
@@ -1045,11 +1044,17 @@ export const MapStage = React.memo(function MapStage({ startDateTime, endDateTim
     timelineDate, timeSlot,
     prefetchDate, allTimelineDates,
     onActualSlot,
+    isTimelinePlaying && playbackQueue.length > 0 ? playbackQueue[playbackIndex].layers : undefined
   );
 
   const { renderedLayers, layerRefs: s3LayerRefs, layersCacheRef, sourceCacheRef } = s3Result;
 
-  const effectiveRenderedLayers = renderedLayers;
+  const effectiveRenderedLayers = useMemo(() => {
+    if (isTimelinePlaying && playbackQueue.length > 0) {
+      return playbackQueue[playbackIndex].layers;
+    }
+    return renderedLayers;
+  }, [isTimelinePlaying, playbackQueue, playbackIndex, renderedLayers]);
 
   // Keep a ref so the pointermove closure (created once) can read current renderedLayers
   const renderedLayersRef = useRef(effectiveRenderedLayers);
@@ -2791,11 +2796,12 @@ export const MapStage = React.memo(function MapStage({ startDateTime, endDateTim
             </div>
             <div className="geo-map-inspector-body">
               <div className="geo-map-inspector-row">
-                <span className="geo-map-inspector-label">Coordinates:</span>
+                <span className="geo-map-inspector-label">UTM (48N):</span>
                 <span className="geo-map-inspector-val">
                   {(() => {
                     const lonLat = toLonLat(mouseCoords);
-                    return `${lonLat[1].toFixed(4)}° N, ${lonLat[0].toFixed(4)}° E`;
+                    const utm = transform(lonLat, 'EPSG:4326', 'EPSG:32648');
+                    return `${Math.round(utm[0])} m E, ${Math.round(utm[1])} m N`;
                   })()}
                 </span>
               </div>
@@ -2804,7 +2810,13 @@ export const MapStage = React.memo(function MapStage({ startDateTime, endDateTim
                 if (!layerInfo) return null;
                 const label = translateLegendLabel(layerInfo.name);
                 const unitMatch = label.match(/\(([^)]+)\)/);
-                const unit = unitMatch ? unitMatch[1] : "";
+                const HYDRO_UNITS: Record<string, string> = {
+                  "hydro-salinity": "ppt",
+                  "hydro-temp": "cm",
+                  "hydro-ph": "",
+                };
+                const hydroPrefix = Object.keys(HYDRO_UNITS).find(p => key.startsWith(p));
+                const unit = hydroPrefix ? HYDRO_UNITS[hydroPrefix] : (unitMatch ? unitMatch[1] : "");
                 const isExpanded = inspectorExpandedKey === key;
                 // Extract date from S3 key if available
                 const s3Key = layerInfo.type === "raster" || layerInfo.type === "vector" ? layerInfo.proxyUrl : "";

@@ -38,6 +38,7 @@ export function useS3DatasetLayers(
   prefetchDate?: string,
   allTimelineDates?: string[],
   onActualSlot?: (date: string, slot: string) => void,
+  renderedLayersOverride?: Record<string, RenderedLayer>,
 ) {
   const prevDateRef = useRef<string | undefined>(undefined);
   const [renderedLayers, setRenderedLayers] = useState<Record<string, RenderedLayer>>({});
@@ -502,11 +503,12 @@ export function useS3DatasetLayers(
   }, [timelineDate, prefetchDate, allTimelineDates, appliedDatasets]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const layerRefs = useS3LayerRenderer(
-    renderedLayers,
+    renderedLayersOverride || renderedLayers,
     mapRef,
     prebuiltLayersRef,
     activeDateRef,
-    sourceCacheRef
+    sourceCacheRef,
+    renderedLayersOverride ? 1 : undefined
   );
   return { 
     renderedLayers, 
