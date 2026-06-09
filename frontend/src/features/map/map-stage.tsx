@@ -963,10 +963,18 @@ export const MapStage = React.memo(function MapStage({ startDateTime, endDateTim
     const normalizedStart = startDate <= endDate ? startDate : endDate;
     const normalizedEnd = startDate <= endDate ? endDate : startDate;
 
-    const hasLandsat = (appliedDatasets ?? []).some(d => d.id.startsWith("landsat-"));
-    if (hasLandsat) {
+    const hasYearOnly = (appliedDatasets ?? []).some(d => {
+      const root = getRootDataset(d.id);
+      return root?.id === "landsat" || root?.id === "baseline" || root?.id === "flooding";
+    });
+
+    if (hasYearOnly) {
       const currentYear = new Date().getFullYear();
-      const lsStart = new Date(2014, 0, 1);
+      let startYear = 2014; // Default for Landsat
+      if ((appliedDatasets ?? []).some(d => getRootDataset(d.id)?.id === "flooding")) {
+        startYear = 1990;
+      }
+      const lsStart = new Date(startYear, 0, 1);
       const lsEnd = new Date(currentYear, 11, 31);
       return buildTimelineUnits(lsStart, lsEnd, "year");
     }

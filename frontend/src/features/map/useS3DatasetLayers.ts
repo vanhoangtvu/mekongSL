@@ -193,7 +193,7 @@ export function useS3DatasetLayers(
           categorySlug = relativePath;
         } else {
           datasetSlug = getDatasetSlug(dsId) || dsId;
-          categorySlug = "default";
+          categorySlug = datasetSlug;
         }
 
         const catName = dsInfo?.name || dsId;
@@ -207,7 +207,8 @@ export function useS3DatasetLayers(
                           dsId.startsWith("admin-") || dsId.startsWith("waterbody") ||
                           dsId.startsWith("soil") || dsId.startsWith("road") ||
                           dsId.startsWith("groundwater");
-        const yearOnly = isLandsat || isBaseline;
+        const isFlooding = rootId === "flooding" || dsId.startsWith("flooding");
+        const yearOnly = isLandsat || isBaseline || isFlooding;
         
         // For yearOnly datasets: use year only. For others: use full date path (always use current date if no timelineDate)
         const searchYear = timelineDate ? y : new Date().getFullYear();
@@ -462,7 +463,8 @@ export function useS3DatasetLayers(
                             ds.id.startsWith("admin-") || ds.id.startsWith("waterbody") ||
                             ds.id.startsWith("soil") || ds.id.startsWith("road") ||
                             ds.id.startsWith("groundwater");
-          if (isLandsat || isBaseline) continue;
+          const isFlooding = rootId === "flooding" || ds.id.startsWith("flooding");
+          if (isLandsat || isBaseline || isFlooding) continue;
 
           let datasetSlug: string, categorySlug: string;
           if (root && root.id !== ds.id) {
@@ -477,7 +479,7 @@ export function useS3DatasetLayers(
             categorySlug = relativePath;
           } else {
             datasetSlug = getDatasetSlug(ds.id) || ds.id;
-            categorySlug = "default";
+            categorySlug = datasetSlug;
           }
 
           const basePrefix = `gis-data/${datasetSlug}/${categorySlug}/`;
