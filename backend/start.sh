@@ -49,5 +49,5 @@ disown $JAVA_PID
 echo "$JAVA_PID" > "$PID_FILE"
 
 echo "Backend started with PID: $JAVA_PID"
-echo "Access at: http://14.227.143.142:8084"
+echo "Access at: http://103.54.251.212:8084"
 echo "Logs: tail -f $LOG_FILE"

@@ -84,6 +84,7 @@ function lerp(a: number, b: number, t: number): number {
   return a + (b - a) * t;
 }
 
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 function interpolateColor(stops: ColorStop[], value: number): RgbaColor {
   if (value <= stops[0].value) return stops[0].color;
   if (value >= stops[stops.length - 1].value) return stops[stops.length - 1].color;

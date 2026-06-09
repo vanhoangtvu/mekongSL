@@ -894,7 +894,7 @@ export default function S3Manager() {
                   <YAxis dataKey="name" type="category" width={80} tick={{ fontSize: 10 }} />
                   <Tooltip
                     contentStyle={{ borderRadius: "8px", border: "none", boxShadow: "0 4px 12px rgba(0,0,0,0.1)" }}
-                    formatter={(val: number) => formatSize(val)}
+                    formatter={(val) => typeof val === 'number' ? formatSize(val) : val}
                   />
                   <Bar dataKey="value" radius={[0, 4, 4, 0]} barSize={12}>
                     {chartData.map((entry, index) => (

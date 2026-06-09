@@ -17,18 +17,23 @@ fi
 
 cd "$SCRIPT_DIR"
 
-echo "Starting frontend dev server on 0.0.0.0:3004..."
-:
+echo "Building frontend..."
 > "$LOG_FILE"
-FRONTEND_PID_FILE="$PID_FILE" setsid sh -c 'echo $$ > "$FRONTEND_PID_FILE"; exec npm run dev -- -H 0.0.0.0 -p 3004' > "$LOG_FILE" 2>&1 &
+npm run build >> "$LOG_FILE" 2>&1 || { echo "Build failed!"; tail -20 "$LOG_FILE"; exit 1; }
 
-for _ in {1..20}; do
-  if [[ -s "$PID_FILE" ]]; then
+echo "Starting frontend production server on 0.0.0.0:3004..."
+nohup npm start -- -H 0.0.0.0 -p 3004 >> "$LOG_FILE" 2>&1 &
+FPID=$!
+echo "$FPID" > "$PID_FILE"
+disown "$FPID"
+
+for _ in {1..30}; do
+  if grep -q "Local:" "$LOG_FILE" 2>/dev/null; then
     break
   fi
-  sleep 1
+  sleep 2
 done
 
 echo "Frontend đang chạy. PID: $(cat "$PID_FILE")"
-echo "Truy cập tại: http://14.227.143.142:3004"
+echo "Truy cập tại: https://103.54.251.212"
 echo "Xem log: tail -f $LOG_FILE"

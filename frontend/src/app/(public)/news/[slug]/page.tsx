@@ -4,7 +4,7 @@ import { notFound } from "next/navigation";
 import { AppHeader } from "../../../../components/layout/app-header";
 import { AppFooter } from "../../../../components/layout/app-footer";
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://14.227.143.142:8084/api";
+const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8084/api";
 
 interface NewsArticle {
   id: number;

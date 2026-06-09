@@ -65,8 +65,11 @@ public class SecurityConfig {
         configuration.setAllowedOrigins(List.of(
             "http://localhost:3004", 
             "http://localhost:3000",
-            "http://14.227.143.142:3004",
-            "http://14.227.143.142:3000"
+            "http://103.54.251.212:3004",
+            "http://103.54.251.212:3000",
+            "https://103.54.251.212",
+            "https://mekongsaltlab.org",
+            "https://www.mekongsaltlab.org"
         ));
         configuration.setAllowedMethods(List.of("GET", "POST", "PUT", "DELETE", "OPTIONS"));
         configuration.setAllowedHeaders(List.of("*"));
