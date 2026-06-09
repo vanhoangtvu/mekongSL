@@ -39,7 +39,7 @@ export default function AboutPage() {
                 <div className="role-line" />
               </div>
               
-              <div className="team-members-grid cols-2">
+              <div className="team-members-grid cols-3">
                 {/* Member 1: Steven Starman */}
                 <div className="member-card leadership-card">
                   <div className="member-header">
@@ -73,6 +73,22 @@ export default function AboutPage() {
                     Long serves as the Project Lead and Chief WebGIS Architect, overseeing the conceptualization, design, and implementation of the entire WebGIS platform. He is responsible for defining the technical framework, coordinating multidisciplinary development activities, and ensuring the successful integration of geospatial databases, spatial analysis tools, and web-based visualization services. His leadership guides all technical aspects of the project from planning to deployment.
                   </p>
                 </div>
+
+                {/* Member: Dương Hoàng Oanh */}
+                <div className="member-card leadership-card">
+                  <div className="member-header">
+                    <div className="member-avatar avatar-leadership">
+                      <img src="/contact/oanh.jpg" alt="Dương Hoàng Oanh" className="avatar-img" />
+                    </div>
+                    <div className="member-meta-info">
+                      <h3>Dương Hoàng Oanh, M.Sc.</h3>
+                      <span className="member-role">Aquaculture and Environmental Data Specialist</span>
+                    </div>
+                  </div>
+                  <p className="member-desc">
+                    Ms. Dương Hoàng Oanh is responsible for providing scientific expertise in aquaculture systems, aquatic ecosystems, and environmental monitoring. She contributes to the development and validation of aquaculture-related datasets, supports spatial analysis of aquatic resources, and advises on the integration of environmental and fisheries information into the WebGIS platform. Her role includes data quality assurance, interpretation of aquaculture and ecosystem indicators, and supporting the design of decision-support tools for sustainable resource management and environmental assessment.
+                  </p>
+                </div>
               </div>
             </div>
 
@@ -103,7 +119,9 @@ export default function AboutPage() {
                 {/* Member 7: N V.Hoang */}
                 <div className="member-card">
                   <div className="member-header">
-                    <div className="member-avatar">NH</div>
+                    <div className="member-avatar">
+                      <img src="/contact/hoang.png" alt="N V.Hoang" className="avatar-img" />
+                    </div>
                     <div className="member-meta-info">
                       <h3>N V.Hoang, BsC</h3>
                       <span className="member-role">WebGIS Developer & Data Developer</span>
@@ -117,7 +135,10 @@ export default function AboutPage() {
                 {/* Member 6: N L.Duy */}
                 <div className="member-card">
                   <div className="member-header">
-                    <div className="member-avatar">ND</div>
+                    <div className="member-avatar">
+                      <img src="/contact/duy.png" alt="N L.Duy" className="avatar-img" />
+                    </div>
+                    
                     <div className="member-meta-info">
                       <h3>N L.Duy, BsC</h3>
                       <span className="member-role">WebGIS Developer & Data Developer</span>

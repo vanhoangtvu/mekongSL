@@ -3644,6 +3644,12 @@ html[data-theme="dark"] .map-playback-btn:hover {
     overflow: hidden !important;
   }
 
+  /* Cho phép cuộn trên trang news */
+  .app-main:has(.news-detail-page),
+  .app-main:has(.news-page) {
+    overflow-y: auto !important;
+  }
+
   .app-content {
     overflow: hidden !important;
     flex-direction: row !important;

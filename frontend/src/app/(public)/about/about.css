@@ -251,9 +251,9 @@ html[data-theme="dark"] .member-card {
 }
 
 .member-avatar {
-  width: 46px;
-  height: 46px;
-  border-radius: 50%;
+  width: 56px;
+  height: 56px;
+  border-radius: 10px;
   background: linear-gradient(135deg, #475569 0%, #64748b 100%);
   color: white;
   font-weight: 700;
@@ -273,8 +273,9 @@ html[data-theme="dark"] .member-card {
 .avatar-img {
   width: 100%;
   height: 100%;
-  border-radius: 50%;
+  border-radius: 10px;
   object-fit: cover;
+  transform: scale(1.1);
 }
 
 .member-meta-info {

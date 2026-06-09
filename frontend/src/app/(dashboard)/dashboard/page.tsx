@@ -93,6 +93,10 @@ export default function DashboardPage() {
   const [message, setMessage] = useState<string | null>(null);
   const [messageKind, setMessageKind] = useState<"success" | "error" | "info">("info");
   const [busyAction, setBusyAction] = useState<string | null>(null);
+  const [s3Unlocked, setS3Unlocked] = useState(false);
+  const [showS3Password, setShowS3Password] = useState(false);
+  const [s3Password, setS3Password] = useState("");
+  const [s3PasswordError, setS3PasswordError] = useState(false);
   const dataColumns = useMemo(() => collectRecordKeys(dataRows).slice(0, 8), [dataRows]);
   const previewRows = useMemo(() => dataRows.slice(0, 10), [dataRows]);
   const selectedTimeframe = useMemo(
@@ -246,6 +250,18 @@ export default function DashboardPage() {
     catch (error) { pushMessage(error instanceof Error ? error.message : "Xóa thư mục thất bại", "error"); }
   };
 
+  const handleS3PasswordSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (s3Password === "4444") {
+      setS3Unlocked(true);
+      setShowS3Password(false);
+      setS3Password("");
+      setActiveTab("storage");
+    } else {
+      setS3PasswordError(true);
+    }
+  };
+
   const handleFetchData = async () => {
     setBusyAction("fetch-data");
     try { const result = await triggerDataFetch(dataSource); pushMessage(result.message, "success"); await Promise.all([selectedRunId ? loadData(selectedRunId) : loadData(), loadSourceFilesData(), loadMonthlyFilesData()]); }
@@ -302,7 +318,7 @@ export default function DashboardPage() {
               {tabs.map((tab) => {
                 const Icon = tab.icon;
                 return (
-                  <button key={tab.key} type="button" className={`d-nav-item${activeTab === tab.key ? " active" : ""}`} onClick={() => setActiveTab(tab.key)}>
+                  <button key={tab.key} type="button" className={`d-nav-item${activeTab === tab.key ? " active" : ""}`} onClick={() => { if (tab.key === "storage" && !s3Unlocked) { setShowS3Password(true); setS3Password(""); setS3PasswordError(false); } else setActiveTab(tab.key); }}>
                     <Icon size={18} />
                     <span>{tab.label}</span>
                     {tab.count !== null && <span className="d-nav-badge">{tab.count}</span>}
@@ -381,7 +397,7 @@ export default function DashboardPage() {
                         ].map((item) => {
                           const Icon = item.icon;
                           return (
-                            <button key={item.key} type="button" className="d-quick" onClick={() => setActiveTab(item.key)}>
+                            <button key={item.key} type="button" className="d-quick" onClick={() => { if (item.key === "storage" && !s3Unlocked) { setShowS3Password(true); setS3Password(""); setS3PasswordError(false); } else setActiveTab(item.key); }}>
                               <div className="d-quick-icon" style={{ background: `${item.color}12`, color: item.color }}><Icon size={20} /></div>
                               <div><strong>{item.label}</strong><em>{item.desc}</em></div>
                             </button>
@@ -553,6 +569,33 @@ export default function DashboardPage() {
           </main>
         </div>
         <AppFooter />
+
+        {showS3Password && (
+          <div className="d-overlay" onClick={() => setShowS3Password(false)}>
+            <div className="d-modal" onClick={(e) => e.stopPropagation()}>
+              <div className="d-modal-header">
+                <Server size={22} />
+                <h2>Xác thực truy cập S3</h2>
+              </div>
+              <p className="d-modal-desc">Nhập mật khẩu để truy cập vào tab quản lý S3 Storage</p>
+              <form onSubmit={handleS3PasswordSubmit}>
+                <input
+                  type="password"
+                  className={`d-modal-input${s3PasswordError ? " error" : ""}`}
+                  placeholder="Nhập mật khẩu..."
+                  value={s3Password}
+                  onChange={(e) => { setS3Password(e.target.value); setS3PasswordError(false); }}
+                  autoFocus
+                />
+                {s3PasswordError && <p className="d-modal-error">Mật khẩu không đúng, vui lòng thử lại!</p>}
+                <div className="d-modal-actions">
+                  <button type="button" className="d-btn d-btn-ghost" onClick={() => setShowS3Password(false)}>Hủy</button>
+                  <button type="submit" className="d-btn d-btn-primary">Xác nhận</button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
       </div>
 
       <style jsx>{`
@@ -777,6 +820,38 @@ export default function DashboardPage() {
           .d-stats { grid-template-columns: 1fr; }
           .d-split { grid-template-columns: 1fr; }
         }
+
+        /* ── S3 Password Modal ── */
+        .d-overlay {
+          position: fixed; inset: 0; z-index: 1000;
+          display: flex; align-items: center; justify-content: center;
+          background: rgba(15, 23, 42, 0.45);
+          backdrop-filter: blur(4px);
+          animation: dFadeIn 0.2s ease;
+        }
+        @keyframes dFadeIn { from { opacity: 0; } to { opacity: 1; } }
+        .d-modal {
+          background: #fff; border-radius: 20px; padding: 2rem;
+          width: 100%; max-width: 420px;
+          box-shadow: 0 25px 50px rgba(0,0,0,0.15);
+          animation: dModalIn 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+        @keyframes dModalIn { from { opacity: 0; transform: scale(0.95) translateY(10px); } to { opacity: 1; transform: scale(1) translateY(0); } }
+        .d-modal-header {
+          display: flex; align-items: center; gap: 0.75rem; margin-bottom: 0.5rem;
+          color: #2563a8;
+        }
+        .d-modal-header h2 { margin: 0; font-size: 1.2rem; font-weight: 700; color: #0f172a; }
+        .d-modal-desc { color: #64748b; font-size: 0.88rem; margin-bottom: 1.5rem; }
+        .d-modal-input {
+          width: 100%; padding: 0.85rem 1rem; border: 1px solid #e2e8f0;
+          border-radius: 12px; font-size: 1rem; font-family: inherit;
+          transition: all 0.2s; box-sizing: border-box; margin-bottom: 0.5rem;
+        }
+        .d-modal-input:focus { outline: none; border-color: #2563a8; box-shadow: 0 0 0 4px rgba(37, 99, 168, 0.1); }
+        .d-modal-input.error { border-color: #ef4444; box-shadow: 0 0 0 4px rgba(239, 68, 68, 0.1); }
+        .d-modal-error { color: #ef4444; font-size: 0.82rem; font-weight: 600; margin: 0.25rem 0 1rem; }
+        .d-modal-actions { display: flex; justify-content: flex-end; gap: 0.75rem; margin-top: 1.25rem; }
       `}</style>
     </AuthGuard>
   );
