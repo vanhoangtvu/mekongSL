@@ -53,9 +53,9 @@ get_frontend_mode() {
   fi
 }
 
-get_current_ip() {
+get_current_host() {
   if [[ -f "$ENV_FILE" ]]; then
-    sed -n 's/^NEXT_PUBLIC_API_URL=http:\/\/\([^:]*\).*/\1/p' "$ENV_FILE" 2>/dev/null
+    sed -n 's/^NEXT_PUBLIC_API_URL=http:\/\/\([^:\/]*\).*/\1/p' "$ENV_FILE" 2>/dev/null
   fi
 }
 
@@ -185,7 +185,7 @@ display_line() {
 
 print_status() {
   local be_pid=$(get_pid "$BE_PID_FILE") fe_pid=$(get_pid "$FE_PID_FILE")
-  local current_ip=$(get_current_ip)
+  local current_host=$(get_current_host)
 
   is_pid_running "$be_pid" || be_pid=""
   is_pid_running "$fe_pid" || fe_pid=""
@@ -211,10 +211,10 @@ print_status() {
   display_line "Frontend" "$fe_pid" "$fe_port" "$fe_up" "$fe_mem" "$fe_mode"
   print_line_left "" "─"
   
-  if [[ -n "$current_ip" ]]; then
-    print_line_left "  ${BOLD}IP hiện tại:${NC} ${CYAN}$current_ip${NC}"
+  if [[ -n "$current_host" ]]; then
+    print_line_left "  ${BOLD}Domain:${NC} ${CYAN}$current_host${NC}"
   else
-    print_line_left "  ${BOLD}IP hiện tại:${NC} ${YELLOW}Chưa cấu hình${NC}"
+    print_line_left "  ${BOLD}Domain:${NC} ${YELLOW}Chưa cấu hình${NC}"
   fi
 }
 
@@ -225,7 +225,8 @@ print_menu() {
   print_menu_row "2" "FE Dev mode"             "7" "Xem log backend"
   print_menu_row "3" "FE Production mode"      "8" "Xem log frontend"
   print_menu_row "4" "Dừng backend"           "9" "Đổi IP"
-  print_menu_row "5" "Dừng frontend"         "0" "Thoát"
+  print_menu_row "5" "Dừng frontend"         "9" "Cấu hình Domain"
+  print_menu_row "0" "Thoát"               "" ""
   print_menu_row "0" "Thoát"               "A" "Restart tất cả"
 }
 
@@ -249,7 +250,7 @@ start_backend() {
     jar=$(ls target/*.jar 2>/dev/null | head -1)
   fi
   local cors_origins="http://localhost:3004,http://localhost:3000"
-  local ip=$(get_current_ip)
+  local ip=$(get_current_host)
   [[ -n "$ip" ]] && cors_origins="http://$ip:3004,http://$ip:3000,http://localhost:3004,http://localhost:3000"
   CORS_ALLOWED_ORIGINS="$cors_origins" nohup java -jar "$jar" > "$BE_LOG" 2>&1 &
   local pid=$!
@@ -334,37 +335,33 @@ rebuild_backend() {
   echo -e "  ${GREEN}✓ Hoàn tất${NC}"
 }
 
-change_ip() {
-  local current=$(get_current_ip)
+change_host() {
+  local current=$(get_current_host)
   echo ""
-  echo -e "  ${BOLD}ĐỔI IP${NC}"
+  echo -e "  ${BOLD}CẤU HÌNH DOMAIN / IP${NC}"
   echo "  ─────────────────────────────────"
-  [[ -n "$current" ]] && echo -e "  IP hiện tại: ${CYAN}$current${NC}" || echo -e "  IP hiện tại: ${YELLOW}Chưa cấu hình${NC}"
+  [[ -n "$current" ]] && echo -e "  Hiện tại: ${CYAN}$current${NC}" || echo -e "  Hiện tại: ${YELLOW}Chưa cấu hình${NC}"
   echo ""
-  read -p "  Nhập IP mới (ví dụ: 123.22.61.134): " new_ip || true
-  if [[ -z "$new_ip" ]]; then
-    echo -e "  ${RED}IP không được để trống${NC}"
-    return
-  fi
-  if [[ ! "$new_ip" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-    echo -e "  ${RED}IP không hợp lệ. Định dạng: xxx.xxx.xxx.xxx${NC}"
+  read -p "  Nhập domain hoặc IP (vd: mekongsaltlab.org): " new_host || true
+  if [[ -z "$new_host" ]]; then
+    echo -e "  ${RED}Không được để trống${NC}"
     return
   fi
   echo ""
   echo -e "  ${YELLOW}→ Cập nhật frontend/.env.local...${NC}"
-  echo "NEXT_PUBLIC_API_URL=http://$new_ip:8084/api" > "$ENV_FILE"
+  echo "NEXT_PUBLIC_API_URL=http://$new_host:8084/api" > "$ENV_FILE"
   echo -e "  ${GREEN}✓ Đã cập nhật .env.local${NC}"
   echo ""
-  echo -e "  ${YELLOW}→ Khởi động lại dịch vụ để áp dụng IP mới...${NC}"
+  echo -e "  ${YELLOW}→ Khởi động lại dịch vụ để áp dụng...${NC}"
   stop_backend || true
   stop_frontend || true
   sleep 1
   start_backend || true
   start_frontend || true
   echo ""
-  echo -e "  ${GREEN}✓ Đã chuyển sang IP: $new_ip${NC}"
-  echo -e "  ${GREEN}  Frontend: http://$new_ip:$FE_PORT${NC}"
-  echo -e "  ${GREEN}  Backend:  http://$new_ip:$BE_PORT/api${NC}"
+  echo -e "  ${GREEN}✓ Đã chuyển sang: $new_host${NC}"
+  echo -e "  ${GREEN}  Frontend: http://$new_host:$FE_PORT${NC}"
+  echo -e "  ${GREEN}  Backend:  http://$new_host:$BE_PORT/api${NC}"
 }
 
 view_log() {
@@ -396,7 +393,7 @@ while true; do
     6) rebuild_backend; pause ;;
     7) view_log "$BE_LOG" "backend" ;;
     8) view_log "$FE_LOG" "frontend" ;;
-    9) change_ip; pause ;;
+    9) change_host; pause ;;
     A|a) stop_backend || true; stop_frontend || true; sleep 1; start_backend || true; start_frontend || true; pause ;;
     0) cleanup ;;
     *) echo -e "  ${RED}Lựa chọn không hợp lệ${NC}"; sleep 1 ;;
