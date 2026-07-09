@@ -970,18 +970,7 @@ export const MapStage = React.memo(function MapStage({ startDateTime, endDateTim
       const data = await image.readRasters();
       const band = data[0] as Float32Array | Int16Array | Uint8Array;
       const resolution = image.getResolution();
-      const fileDir = image.getFileDirectory();
-      const gtk = fileDir?.GeoKeyDirectory ?? [];
-      const isGeographic = gtk.includes(4326) || gtk.includes(4269) || gtk.includes(0x0402);
-      let pixelAreaM2: number;
-      if (isGeographic) {
-        const origin = image.getOrigin();
-        const centerLat = origin ? Math.abs(origin[1] + resolution[1] * band.length / 2) : 0;
-        const metersPerDegree = 111320 * Math.cos((centerLat * Math.PI) / 180);
-        pixelAreaM2 = (resolution[0] * metersPerDegree) * (resolution[1] * metersPerDegree);
-      } else {
-        pixelAreaM2 = resolution[0] * resolution[1];
-      }
+      const pixelAreaM2 = resolution[0] * resolution[1];
       let classPixels = 0;
       const totalPixels = band.length;
       for (let i = 0; i < band.length; i++) {
@@ -2971,20 +2960,17 @@ export const MapStage = React.memo(function MapStage({ startDateTime, endDateTim
                           {val.toFixed(2)}{unit ? ` ${unit}` : ""}
                         </span>
                       )}
-                      {isLanduseLayer(key) && luStats && (
-                        <span className="geo-map-inspector-val value-highlight">
-                          {luStats.areaHa.toLocaleString(undefined, { maximumFractionDigits: 0 })} ha
-                        </span>
-                      )}
-                      {isLanduseLayer(key) && statsLoading && !luStats && (
-                        <span className="geo-map-inspector-val" style={{ fontSize: '0.75rem' }}>...ha</span>
-                      )}
                       <span className="geo-map-inspector-chevron">{isExpanded ? "▲" : "▼"}</span>
                     </button>
-                    {isLanduseLayer(key) && luStats && isExpanded && (
-                      <div className="geo-map-inspector-detail">
-                        <div><span className="geo-map-inspector-label">Area (ha):</span> {luStats.areaHa.toLocaleString(undefined, { maximumFractionDigits: 0 })}</div>
-                        <div><span className="geo-map-inspector-label">Landuse (%):</span> {luStats.percentage.toFixed(1)}%</div>
+                    {isLanduseLayer(key) && (
+                      <div className="geo-map-inspector-landuse-stats" style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                        {statsLoading && !luStats && <span className="geo-map-inspector-label">Computing...</span>}
+                        {luStats && (
+                          <>
+                            <span className="geo-map-inspector-val"><span className="geo-map-inspector-label">Area(ha):</span> {luStats.areaHa.toLocaleString(undefined, { maximumFractionDigits: 0 })}</span>
+                            <span className="geo-map-inspector-val"><span className="geo-map-inspector-label">Landuse (%):</span> {luStats.percentage.toFixed(1)}%</span>
+                          </>
+                        )}
                       </div>
                     )}
                     {isExpanded && (
