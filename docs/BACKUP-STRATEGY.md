@@ -108,7 +108,7 @@ s3:
 
 ## Dependencies
 
-- AWS SDK v2 (`software.amazon.awssdk:s3:2.20.26`)
+- S3-compatible client (`software.amazon.awssdk:s3:2.20.26`)
 - S3Presigner cho signed URLs
 - Path-style access cho S3-compatible endpoints
 

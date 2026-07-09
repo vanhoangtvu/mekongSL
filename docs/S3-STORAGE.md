@@ -290,5 +290,5 @@ s3:
     <version>2.20.26</version>
 </dependency>
 ```
-AWS SDK v2 voi S3Client + S3Presigner (signed URLs).
+S3-compatible client (software.amazon.awssdk s3 2.20.26) dung S3Client + S3Presigner cho signed URLs.
 Path-style access duoc bat cho S3-compatible endpoints.

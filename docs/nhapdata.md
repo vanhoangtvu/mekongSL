@@ -162,7 +162,7 @@ Backend:
 - Spring Boot 4.0.6 + Java 17
 - MySQL 8.0 (database: `mekong`)
 - S3-compatible storage (backup.hci.vn, bucket: c01-mekong-prod-01)
-- AWS SDK v2 cho S3 operations
+- S3-compatible client cho S3 operations
 
 Upload:
 - Multipart upload qua S3Controller
