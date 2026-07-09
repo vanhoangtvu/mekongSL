@@ -1,5 +1,4 @@
 import { NextRequest } from 'next/server';
-import { API_URL } from './api';
 
 export type AppRole = 'USER' | 'DATA_MANAGER' | 'ADMIN';
 

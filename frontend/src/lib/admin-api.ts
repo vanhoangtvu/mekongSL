@@ -1,4 +1,3 @@
-import { API_URL } from './api';
 import { authService } from './auth';
 import { DEFAULT_DATA_SOURCE, type DataSourceKey } from './constants/data-sources';
 import type { DataRecord } from './utils/record-utils';

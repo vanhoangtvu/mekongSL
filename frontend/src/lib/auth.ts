@@ -24,8 +24,6 @@ export interface AuthResponse {
   role: string;
 }
 
-import { API_URL } from './api';
-
 const ROLE_PRIORITY: Record<string, number> = {
   USER: 0,
   DATA_MANAGER: 1,

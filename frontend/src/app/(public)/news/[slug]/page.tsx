@@ -1,7 +1,6 @@
 import Link from "next/link";
 import { Metadata } from "next";
 import { notFound } from "next/navigation";
-import { API_URL } from "@/lib/api";
 import { AppHeader } from "../../../../components/layout/app-header";
 import { AppFooter } from "../../../../components/layout/app-footer";
 
