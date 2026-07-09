@@ -5,6 +5,8 @@ import { API_URL } from "@/lib/api";
 import { AppHeader } from "../../../../components/layout/app-header";
 import { AppFooter } from "../../../../components/layout/app-footer";
 
+const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8084/api";
+
 interface NewsArticle {
   id: number;
   title: string;

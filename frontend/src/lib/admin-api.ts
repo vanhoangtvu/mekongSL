@@ -3,6 +3,7 @@ import { authService } from './auth';
 import { DEFAULT_DATA_SOURCE, type DataSourceKey } from './constants/data-sources';
 import type { DataRecord } from './utils/record-utils';
 
+const API_URL = typeof window !== 'undefined' ? '/api' : (process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:8084/api');
 export { API_URL };
 
 export type AdminRole = 'USER' | 'DATA_MANAGER' | 'ADMIN';
@@ -57,7 +58,11 @@ async function requestJson<T>(input: RequestInfo | URL, init: RequestInit = {}):
 }
 
 export function getBackendAdminUrl(path: string) {
-  return `${API_URL}${path}`;
+  const base = API_URL;
+  if (base.startsWith('/') && typeof window !== 'undefined') {
+    return `${window.location.origin}${base}${path}`;
+  }
+  return `${base}${path}`;
 }
 
 export async function loadCurrentAccount() {

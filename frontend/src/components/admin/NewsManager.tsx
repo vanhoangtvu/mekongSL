@@ -32,9 +32,16 @@ function formatDate(value: string | null | undefined) {
   return Number.isNaN(d.getTime()) ? value : d.toLocaleString("vi-VN");
 }
 
+type BlockStyles = {
+  color?: string;
+  fontSize?: string;
+  fontWeight?: string;
+  textAlign?: string;
+};
+
 type ContentBlock =
-  | { id: string; type: "text"; value: string }
-  | { id: string; type: "heading"; value: string; level: number }
+  | { id: string; type: "text"; value: string; styles?: BlockStyles }
+  | { id: string; type: "heading"; value: string; level: number; styles?: BlockStyles }
   | { id: string; type: "image"; value: string; caption: string; align: string }
   | { id: string; type: "table"; rows: string[][] };
 
@@ -165,8 +172,8 @@ export default function NewsManager() {
   const addBlock = (type: ContentBlock["type"]) => {
     const id = Math.random().toString(36).slice(2, 9);
     let nb: ContentBlock;
-    if (type === "text") nb = { id, type, value: "", styles: {} };
-    else if (type === "heading") nb = { id, type, value: "", level: 3, styles: {} };
+    if (type === "text") nb = { id, type, value: "" };
+    else if (type === "heading") nb = { id, type, value: "", level: 3 };
     else if (type === "image") nb = { id, type, value: "", caption: "", align: "center" };
     else nb = { id, type, rows: [["Tiêu đề 1", "Tiêu đề 2"], ["Dữ liệu 1", "Dữ liệu 2"]] };
     updateFormContent([...blocks, nb]);

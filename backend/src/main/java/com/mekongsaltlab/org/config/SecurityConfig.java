@@ -67,7 +67,15 @@ public class SecurityConfig {
     @Bean
     public CorsConfigurationSource corsConfigurationSource() {
         CorsConfiguration configuration = new CorsConfiguration();
-        configuration.setAllowedOrigins(allowedOrigins);
+        configuration.setAllowedOrigins(List.of(
+            "http://localhost:3004", 
+            "http://localhost:3000",
+            "http://103.54.251.212:3004",
+            "http://103.54.251.212:3000",
+            "https://103.54.251.212",
+            "https://mekongsaltlab.org",
+            "https://www.mekongsaltlab.org"
+        ));
         configuration.setAllowedMethods(List.of("GET", "POST", "PUT", "DELETE", "OPTIONS"));
         configuration.setAllowedHeaders(List.of("*"));
         configuration.setExposedHeaders(List.of("Content-Range", "Accept-Ranges", "Content-Length"));

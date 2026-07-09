@@ -41,3 +41,4 @@ Thumbs.db
 .kiro/
 *.swp
 *.swo
+*.pid

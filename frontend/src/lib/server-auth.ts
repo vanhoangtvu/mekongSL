@@ -14,7 +14,7 @@ export interface AccountResponse {
 }
 
 function getBackendUrl() {
-  return API_URL;
+  return process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:8084/api';
 }
 
 function getBearerToken(request: NextRequest) {

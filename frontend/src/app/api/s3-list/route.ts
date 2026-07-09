@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { API_URL } from '@/lib/api';
+
+const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:8084/api';
 
 export async function GET(request: NextRequest) {
   const searchParams = request.nextUrl.searchParams;

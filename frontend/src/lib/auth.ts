@@ -32,6 +32,8 @@ const ROLE_PRIORITY: Record<string, number> = {
   ADMIN: 2,
 };
 
+const API_URL = typeof window !== 'undefined' ? '/api' : (process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:8084/api');
+
 class AuthService {
   private readonly STORAGE_KEY = 'auth';
 

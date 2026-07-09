@@ -13,7 +13,7 @@ function encodeFormComponent(value: string) {
     .replace(/%20/g, '+');
 }
 
-function buildSign(params: Record<string, string>, path: string) {
+function buildSign(params: Record<string, string>) {
   const sortedEntries = Object.keys(params)
     .sort()
     .map((key) => `${key}=${encodeFormComponent(params[key])}`)
@@ -23,7 +23,7 @@ function buildSign(params: Record<string, string>, path: string) {
 
 function buildRequestBody(payload: Record<string, string>, requestPath: string) {
   const requestPayload: Record<string, string> = { ...payload, time: String(Math.floor(Date.now() / 1000)) };
-  requestPayload.sign = buildSign(requestPayload, requestPath);
+  requestPayload.sign = buildSign(requestPayload);
   return new URLSearchParams(requestPayload).toString();
 }
 
