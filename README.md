@@ -32,7 +32,7 @@ Mekong WebGIS là nền tảng giám sát và trực quan hóa dữ liệu khôn
 │  Next.js 15  │  Spring Boot 4   │    Node.js ESM        │
 │  React 19    │   Java 17         │    MySQL2             │
 │  OpenLayers  │   JWT + Security  │    Cron Scheduler     │
-│  TypeScript  │   S3 AWS SDK      │    CSV Export         │
+│  TypeScript  │   S3 SDK          │    CSV Export         │
 ├──────────────┴───────────────────┴───────────────────────┤
 │              MySQL 8.0  +  S3 Storage                    │
 └──────────────────────────────────────────────────────────┘
@@ -107,7 +107,7 @@ cd backend && ./mvnw spring-boot:run       # port 8084
 - Spring Boot 4.0.6 + Java 17
 - Spring Security + JWT (jjwt 0.12.3)
 - Spring Data JPA + Hibernate
-- AWS SDK v2 (S3)
+- S3-compatible SDK (backup.hci.vn)
 - Apache POI (Excel)
 - Lombok + Swagger UI
 
