@@ -1,158 +1,218 @@
+<br>
 <div align="center">
 
-# 🗺️ Mekong WebGIS
+```
+╔══════════════════════════════════════════════════════════════╗
+║                                                              ║
+║         ███╗   ███╗ ███████╗ ██╗  ██╗ ██████╗  ███╗  ██╗  ██████╗  ║
+║         ████╗ ████║ ██╔════╝ ██║ ██╔╝██╔═══██╗ ████╗ ██║ ██╔════╝  ║
+║         ██╔████╔██║ █████╗   █████╔╝ ██║   ██║ ██╔██╗██║ ██║  ██╗  ║
+║         ██║╚██╔╝██║ ██╔══╝   ██╔═██╗ ██║   ██║ ██║╚████║ ██║  ╚██╗ ║
+║         ██║ ╚═╝ ██║ ███████╗ ██║  ██╗╚██████╔╝ ██║ ╚███║ ╚██████╔╝ ║
+║         ╚═╝     ╚═╝ ╚══════╝ ╚═╝  ╚═╝ ╚═════╝  ╚═╝  ╚══╝  ╚═════╝  ║
+║                                                              ║
+║              WebGIS · Giám sát · Dự báo · Phân tích           ║
+║                Đồng bằng sông Cửu Long                       ║
+╚══════════════════════════════════════════════════════════════╝
+```
 
-*Hệ thống WebGIS giám sát khí tượng thủy văn & môi trường Đồng bằng sông Cửu Long*
+![Java](https://img.shields.io/badge/Java-17-ED8B00?style=flat-square&logo=openjdk)
+![Spring Boot](https://img.shields.io/badge/Spring_Boot-4.0-6DB33F?style=flat-square&logo=springboot)
+![Next.js](https://img.shields.io/badge/Next.js-15-000000?style=flat-square&logo=nextdotjs)
+![React](https://img.shields.io/badge/React-19-61DAFB?style=flat-square&logo=react)
+![TypeScript](https://img.shields.io/badge/TypeScript-5.8-3178C6?style=flat-square&logo=typescript)
+![OpenLayers](https://img.shields.io/badge/OpenLayers-10.9-1F6B75?style=flat-square&logo=openlayers)
+![MySQL](https://img.shields.io/badge/MySQL-8.0-4479A1?style=flat-square&logo=mysql)
 
-[![Java](https://img.shields.io/badge/Java-17-ED8B00?style=flat&logo=openjdk)](https://adoptium.net/)
-[![Spring Boot](https://img.shields.io/badge/Spring%20Boot-4.0.6-6DB33F?style=flat&logo=springboot)](https://spring.io/)
-[![Next.js](https://img.shields.io/badge/Next.js-15-000000?style=flat&logo=next.js)](https://nextjs.org/)
-[![React](https://img.shields.io/badge/React-19-61DAFB?style=flat&logo=react)](https://react.dev/)
-[![TypeScript](https://img.shields.io/badge/TypeScript-5.8-3178C6?style=flat&logo=typescript)](https://www.typescriptlang.org/)
-[![OpenLayers](https://img.shields.io/badge/OpenLayers-10.9-1F6B75?style=flat&logo=openlayers)](https://openlayers.org/)
-[![MySQL](https://img.shields.io/badge/MySQL-8.0-4479A1?style=flat&logo=mysql)](https://www.mysql.com/)
+[*Trang chủ →*](https://mekongsaltlab.org)
 
 </div>
 
 ---
 
-## ✨ Tổng quan
+## 🌊 Tổng quan
 
-Mekong WebGIS là nền tảng giám sát và trực quan hóa dữ liệu không gian địa lý cho khu vực Đồng bằng sông Cửu Long. Hệ thống thu thập dữ liệu thời tiết, thủy văn, chất lượng nước từ nhiều nguồn, hiển thị trên bản đồ tương tác với khả năng phân tích theo thời gian thực.
+> **Mekong WebGIS** là nền tảng giám sát & trực quan hóa dữ liệu không gian địa lý,
+> phục vụ quản lý tài nguyên nước, khí tượng thủy văn và môi trường
+> khu vực Đồng bằng sông Cửu Long.
 
----
+<br>
 
-## 🏗️ Kiến trúc
-
-```
-┌──────────────────────────────────────────────────────────┐
-│                    Mekong WebGIS                          │
-├──────────────┬───────────────────┬───────────────────────┤
-│   Frontend   │     Backend       │     Datacenter        │
-│  Next.js 15  │  Spring Boot 4   │    Node.js ESM        │
-│  React 19    │   Java 17         │    MySQL2             │
-│  OpenLayers  │   JWT + Security  │    Cron Scheduler     │
-│  TypeScript  │   S3 SDK          │    CSV Export         │
-├──────────────┴───────────────────┴───────────────────────┤
-│              MySQL 8.0  +  S3 Storage                    │
-└──────────────────────────────────────────────────────────┘
-```
+| 🗺️ Bản đồ tương tác | 📡 Dữ liệu Realtime | 📊 Phân tích chuyên sâu |
+|:---:|:---:|:---:|
+| OpenLayers 10.9 | Ecowitt · Mekong API | Biểu đồ · Thống kê |
+| 8 Base Layers | Mỗi 15 phút | Landuse · Salinity |
+| Timeline · Timelapse | Cảm biến thủy văn | QCVN Standards |
 
 ---
 
-## 🚀 Quick Start
+## ⚡ Quick Start
 
 ```bash
-git clone https://github.com/vanhoangtvu/mekongSL.git
+git clone https://github.com/vanhoangtvu/mekongSL.git Mekong
 cd Mekong
-./manage.sh          # Giao diện quản lý tích hợp
+./manage.sh
+```
+
+```text
+┌─────────────────────────────────────┐
+│         MEKONG MANAGEMENT           │
+│                                     │
+│   [1] Start Backend    :8084        │
+│   [2] Start Frontend   :3004        │
+│   [3] Restart All                   │
+│   [4] Stop All                      │
+│   [5] View Logs                     │
+│                                     │
+└─────────────────────────────────────┘
 ```
 
 ---
 
-## 📦 Cấu trúc
-
-```
-Mekong/
-├── manage.sh                  # CLI quản lý start/stop/restart/logs
-├── frontend/                  # Ứng dụng Next.js (port 3004)
-├── backend/                   # API Spring Boot (port 8084)
-├── datacenter/                # Pipeline thu thập dữ liệu
-├── docs/                      # Tài liệu chi tiết
-└── data/                      # Output data (gitignored)
-```
-
----
-
-## 🎯 Tính năng
-
-| Module | Mô tả |
-|--------|------|
-| 🗺️ **Bản đồ** | 8 base layers, UTM 48N, timeline/timelapse raster |
-| 📊 **Biểu đồ** | Ecowitt weather charts, landuse statistics |
-| 🔍 **Tìm kiếm** | Geo-search sidebar, dataset tree 3 cấp, bbox filter |
-| 💧 **Chất lượng nước** | Import Excel, overlay station, QCVN standards |
-| 📡 **Weather Station** | Realtime Ecowitt popup với sparkline charts |
-| 🔐 **Phân quyền** | 3 roles: USER / DATA_MANAGER / ADMIN |
-| 📰 **Tin tức** | Article CRUD, public blog |
-| ☁️ **S3 Storage** | Upload/Download/Render GeoTIFF, folder management |
-| 📱 **Responsive** | Mobile-first, dark mode, drag & drop |
-
----
-
-## 🛠️ Công nghệ
+## 🏗️ Stack
 
 <details open>
-<summary><b>Frontend</b></summary>
+<summary><b>🖥️ Frontend</b> <sub>Next.js 15 · React 19 · TypeScript 5.8</sub></summary>
 
 ```bash
-cd frontend && npm install && npm run dev   # port 3004
+cd frontend && npm install && npm run dev    # port 3004
 ```
 
-- Next.js 15 App Router
-- React 19 + TypeScript 5.8
-- OpenLayers 10.9 (WebGIS)
-- Recharts + XLSX + Proj4
-- geotiff.js (GeoTIFF parsing)
+> `OpenLayers 10.9` `Recharts` `geotiff.js` `XLSX` `Proj4` `geotiff`
+
+| Chức năng | Mô tả |
+|-----------|-------|
+| 🗺️ MapStage | Bản đồ trung tâm, 8 base layers, UTM 48N |
+| 🕐 Timeline | Điều khiển thời gian giờ/ngày/tháng/năm |
+| 🎬 Timelapse | Phát lại dữ liệu raster theo khung giờ |
+| 📍 Inspector | Click xem giá trị pixel GeoTIFF |
+| 🌡️ Weather | Popup Ecowitt + sparkline charts |
+| 💧 WQ Overlay | Trạm chất lượng nước + QCVN |
+| 🌿 Landuse | Thống kê phân loại sử dụng đất |
+| 🔍 Sidebar | Tìm kiếm dataset tree 3 cấp |
+| 📱 Mobile | Responsive, bottom sheet |
 
 </details>
 
 <details>
-<summary><b>Backend</b></summary>
+<summary><b>⚙️ Backend</b> <sub>Spring Boot 4.0 · Java 17 · MySQL 8.0</sub></summary>
 
 ```bash
-cd backend && ./mvnw spring-boot:run       # port 8084
+cd backend && ./mvnw spring-boot:run          # port 8084
 ```
 
-- Spring Boot 4.0.6 + Java 17
-- Spring Security + JWT (jjwt 0.12.3)
-- Spring Data JPA + Hibernate
-- S3-compatible SDK (backup.hci.vn)
-- Apache POI (Excel)
-- Lombok + Swagger UI
+> `Spring Security` `JWT` `JPA/Hibernate` `Apache POI` `Lombok`
+
+| Module | Endpoints |
+|--------|-----------|
+| 🔐 Auth | `/api/auth/login` `/register` |
+| 👥 Users | `/api/admin/users` CRUD |
+| 📰 Articles | `/api/articles` Blog & News |
+| ☁️ S3 | Upload / Download / List / Delete / Copy / Rename / Folder / Signed URL / Render / Stats |
+| 🗺️ Layers | `/api/gis/layers` Search: bbox, province, station, tag, time |
+| 📂 Datasets | `/api/gis/datasets` CRUD |
+| 📍 Stations | `/api/gis/stations` `/manual-stations` |
+| 💧 WQ | `/api/gis/water-quality` Import Excel, Samples |
+| 📊 Monitoring | `/api/gis/monitoring-data` |
+| 🏷️ Tags | `/api/gis/tags` CRUD + Link |
+| 💾 Backup | `/api/backup` Trigger |
 
 </details>
 
 <details>
-<summary><b>Datacenter</b></summary>
+<summary><b>📡 Datacenter</b> <sub>Node.js ESM · MySQL2 · Cron</sub></summary>
 
 ```bash
 cd datacenter && npm install && node cron-wrapper.mjs
 ```
 
-- Ecowitt API — mỗi 15 phút
-- Mekong API — 5 lần/ngày
-- Auto MySQL upsert + CSV snapshot
+| Nguồn | Tần suất | Dữ liệu | Bảng |
+|-------|----------|---------|------|
+| 🌤️ Ecowitt | 15 phút | Nhiệt độ, ẩm, gió, mưa, UV, bức xạ | `ecowitt` |
+| 🌊 Mekong | 5x/ngày | Salinity, PH, WaterLevel, Alkalinity | `mekong_sensor` `mekong_measurement` |
 
 </details>
 
 ---
 
-## 🔐 Roles
+## 🔐 Phân quyền
 
-| Role | Quyền |
-|------|-------|
-| **USER** | Xem bản đồ, articles, download S3, water-quality |
-| **DATA_MANAGER** | Upload/delete S3, GIS CRUD, station & data management |
-| **ADMIN** | Toàn quyền: users, articles, backup, tất cả endpoint |
-
----
-
-## 📚 Tài liệu
-
-| File | Nội dung |
-|------|----------|
-| [DEPLOYMENT.md](docs/DEPLOYMENT.md) | Hướng dẫn triển khai |
-| [API-AUTH.md](docs/API-AUTH.md) | Xác thực & phân quyền API |
-| [ROLES.md](docs/ROLES.md) | Chi tiết bảng phân quyền |
-| [S3-STORAGE.md](docs/S3-STORAGE.md) | API lưu trữ S3 |
-| [BACKUP-STRATEGY.md](docs/BACKUP-STRATEGY.md) | Chiến lược sao lưu |
-| [SECURITY.md](docs/SECURITY.md) | Bảo mật hệ thống |
+```text
+USER ──────────────> Xem bản đồ · Articles · Download S3 · WQ Data
+  │
+  └── DATA_MANAGER ─> Upload/Delete S3 · GIS CRUD · Import Data
+        │
+        └── ADMIN ──> Users · Backup · Full Access
+```
 
 ---
 
+## 📁 Cấu trúc
+
+```text
+Mekong/
+├── manage.sh                   # CLI quản lý toàn hệ thống
+├── frontend/                   # Next.js 15 App Router
+│   └── src/
+│       ├── app/                # Pages (public, dashboard)
+│       ├── features/map/       # MapStage, Timeline, Sidebar
+│       ├── components/         # UI components
+│       ├── hooks/              # Custom hooks
+│       └── lib/                # Auth, API, Constants
+├── backend/                    # Spring Boot 4.0
+│   └── src/main/java/.../
+│       ├── config/             # Security, S3, DataInit
+│       ├── controller/         # REST API + GIS controllers
+│       ├── service/            # Business logic + GIS services
+│       ├── entity/             # JPA entities + GIS entities
+│       └── repository/         # Spring Data repos
+├── datacenter/                 # Data Pipeline
+│   ├── ecowitt/                # Ecowitt weather fetch
+│   ├── mekong/                 # Mekong sensor fetch
+│   ├── lib/                    # Shared persistence
+│   └── config/                 # Cron schedule
+└── docs/                       # Tài liệu
+```
+
+---
+
+## 📖 Tài liệu
+
+| 📄 | |
+|----|---|
+| [deployment.md](docs/deployment.md) | Hướng dẫn triển khai |
+| [api-auth.md](docs/api-auth.md) | Xác thực & JWT |
+| [roles.md](docs/roles.md) | Bảng phân quyền chi tiết |
+| [s3-storage.md](docs/s3-storage.md) | S3 Storage API |
+| [backup-strategy.md](docs/backup-strategy.md) | Chiến lược sao lưu |
+| [security.md](docs/security.md) | Bảo mật hệ thống |
+| [security-report.md](docs/security-report.md) | Báo cáo đánh giá bảo mật |
+| [data-upload.md](docs/data-upload.md) | Spec upload dữ liệu |
+| [mekong-data-import.md](docs/mekong-data-import.md) | Import dữ liệu Mekong |
+| [monthly-excel-structure.md](datacenter/docs/monthly-excel-structure.md) | Cấu trúc Excel tháng |
+
+---
+
+<br>
 <div align="center">
 
-**Developed by [@vanhoangtvu](https://github.com/vanhoangtvu)**
+```
+╔══════════════════════════════════════════════════════════╗
+║                                                          ║
+║                   Developed with ❤️ by                    ║
+║                                                          ║
+║                  ██╗   ██╗ █████╗ ███╗  ██╗               ║
+║                  ██║   ██║██╔══██╗████╗ ██║               ║
+║                  ╚██╗ ██╔╝███████║██╔██╗██║               ║
+║                   ╚████╔╝ ██╔══██║██║╚████║               ║
+║                    ╚██╔╝  ██║  ██║██║ ╚███║               ║
+║                     ╚═╝   ╚═╝  ╚═╝╚═╝  ╚══╝               ║
+║                                                          ║
+║              github.com/vanhoangtvu                       ║
+║                                                          ║
+╚══════════════════════════════════════════════════════════╝
+```
+
+<sub>© 2026 Mekong WebGIS. All rights reserved.</sub>
 
 </div>

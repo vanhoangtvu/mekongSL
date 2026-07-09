@@ -203,6 +203,8 @@ function TimelineRuler({
 }) {
   const trackRef = useRef<HTMLDivElement>(null);
   const [dragging, setDragging] = useState(false);
+  const [hoverValue, setHoverValue] = useState<number | null>(null);
+  const [hoverX, setHoverX] = useState(0);
   const opacity = isActive ? 1 : isApplicable ? 0.5 : 0.3;
 
   const valueToX = useCallback(
@@ -218,6 +220,21 @@ function TimelineRuler({
       const raw = row.min + ratio * (row.max - row.min);
       if (row.scale === "hour") return Math.round(raw);
       return Math.round(raw);
+    },
+    [row]
+  );
+
+  const handleMouseMove = useCallback(
+    (e: React.MouseEvent) => {
+      if (!trackRef.current) return;
+      const rect = trackRef.current.getBoundingClientRect();
+      const x = e.clientX - rect.left;
+      const ratio = Math.max(0, Math.min(1, x / rect.width));
+      const val = row.scale === "hour"
+        ? Math.round(row.min + ratio * (row.max - row.min))
+        : Math.round(row.min + ratio * (row.max - row.min));
+      setHoverValue(val);
+      setHoverX(ratio * 100);
     },
     [row]
   );
@@ -290,10 +307,18 @@ function TimelineRuler({
           </div>
         )}
 
+        {hoverValue !== null && isActive && (
+          <div className="ttc-hover-bubble" style={{ left: `${hoverX}%` }}>
+            {row.formatSelected(hoverValue)}
+          </div>
+        )}
+
         <div
           className="ttc-ruler-track"
           onClick={trackClick}
           onPointerDown={handlePointerDown}
+          onMouseMove={handleMouseMove}
+          onMouseLeave={() => setHoverValue(null)}
         >
           <svg
             className="ttc-ruler-svg"
