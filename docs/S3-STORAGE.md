@@ -1,171 +1,276 @@
-# 🗄️ S3 Storage Configuration
+# S3 Storage API
 
-## 📋 Thông tin kết nối
+## Thong tin ket noi
 
 - **Endpoint**: https://backup.hci.vn
 - **Bucket**: c01-mekong-prod-01
-- **User**: mekong
-- **Quota**: 1TiB
-- **Role**: owner
-- **Access Key**: <your-access-key>
-- **Secret Key**: <your-secret-key>
-- **Versioning**: Mode Compliance 7 days
+- **Region**: us-east-1
+- **Access**: Path-style (custom S3-compatible endpoint)
+- **Max file size**: 100MB
 
-## 🚀 API Endpoints
+## Cau truc S3 Bucket
+
+```
+c01-mekong-prod-01/
+├── gis-data/                          # GIS raster/vector layers
+│   └── {dataset}/{category}/{year}/{month}/{day}/{time}/{type}/{file}
+├── station-data/                      # Station data files
+│   └── {stationCode}/{parameter}/{year}/{month}/{day}/{time}/{file}
+├── monitoring-data/                   # Monitoring data files
+│   └── {monitoringCode}/{parameter}/{year}/{month}/{day}/{time}/{file}
+├── news-images/                       # Article images
+├── uploads/                           # Auto-generated key uploads
+└── backups/                           # MySQL backups
+```
+
+## API Endpoints
 
 ### 1. Upload File
 ```bash
 POST /api/s3/upload
-Authorization: Bearer <token>
+Authorization: Bearer <token>  # DATA_MANAGER hoac ADMIN
 Content-Type: multipart/form-data
 
-# Example
-curl -X POST http://14.227.143.142:8084/api/s3/upload \
-  -H "Authorization: Bearer <manager_token>" \
-  -F "file=@/path/to/file.pdf"
+Parameters:
+  file:       (required) File to upload
+  key:        (optional) Custom S3 key. Must start with: gis-data/, station-data/, monitoring-data/, news-images/
+  overwrite:  (optional, default: false)
+```
 
-# Upload với key tùy chỉnh
-curl -X POST http://14.227.143.142:8084/api/s3/upload \
-  -H "Authorization: Bearer <manager_token>" \
-  -F "key=uploads/manual/file.pdf" \
-  -F "file=@/path/to/file.pdf"
+**Examples:**
+```bash
+# Upload voi key tu dong (uploads/YYYYMMDD_HHmmss_filename)
+curl -X POST http://localhost:8084/api/s3/upload \
+  -H "Authorization: Bearer $TOKEN" \
+  -F "file=@data.tif"
 
-# Response
+# Upload voi key tuy chinh
+curl -X POST http://localhost:8084/api/s3/upload \
+  -H "Authorization: Bearer $TOKEN" \
+  -F "key=gis-data/hydrology/salinity/2026/raster/map.tif" \
+  -F "file=@map.tif"
+
+# Upload voi overwrite
+curl -X POST "http://localhost:8084/api/s3/upload?overwrite=true" \
+  -H "Authorization: Bearer $TOKEN" \
+  -F "key=gis-data/test.tif" \
+  -F "file=@test.tif"
+```
+
+**Response:**
+```json
 {
-  "key": "uploads/manual/file.pdf",
-  "url": "https://backup.hci.vn/c01-mekong-prod-01/uploads/manual/file.pdf",
+  "key": "gis-data/hydrology/salinity/2026/raster/map.tif",
+  "url": "https://backup.hci.vn/c01-mekong-prod-01/gis-data/hydrology/salinity/2026/raster/map.tif",
   "message": "File uploaded successfully"
 }
 ```
 
 ### 2. Download File
 ```bash
-GET /api/s3/download/{key}
-Authorization: Bearer <token>
+GET /api/s3/download?key={key}
+# PUBLIC - khong can token
 
-# Example
-curl -X GET http://14.227.143.142:8084/api/s3/download/uploads/20260525_183000_file.pdf \
-  -H "Authorization: Bearer <manager_token>" \
-  -o downloaded_file.pdf
+# Hoac dung path variable:
+GET /api/s3/download/{key}
+```
+
+**Example:**
+```bash
+curl "http://localhost:8084/api/s3/download?key=gis-data/salinity.tif" -o output.tif
 ```
 
 ### 3. List Files
 ```bash
-GET /api/s3/list?prefix=uploads/
-Authorization: Bearer <token>
+GET /api/s3/list?prefix={prefix}
 
-# Example
-curl -X GET http://14.227.143.142:8084/api/s3/list?prefix=uploads/ \
-  -H "Authorization: Bearer <manager_token>"
+# gis-data/ prefix: PUBLIC
+# Cac prefix khac: Yeu cau authentication
+```
 
-# Response
+**Example:**
+```bash
+# Public (khong can token)
+curl "http://localhost:8084/api/s3/list?prefix=gis-data/"
+
+# Authenticated
+curl "http://localhost:8084/api/s3/list?prefix=uploads/" \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+**Response:**
+```json
 {
   "files": [
-    {
-      "key": "uploads/20260525_183000_file1.pdf",
-      "size": 12345,
-      "lastModified": "2026-05-25T10:30:00Z"
-    }
+    { "key": "gis-data/raster/salinity_313_900.tif", "size": 1234567, "lastModified": "2026-05-25T10:30:00Z" }
   ],
   "count": 1
 }
 ```
 
-### 4. Delete File
+### 4. List Folders (voi delimiter)
 ```bash
-DELETE /api/s3/delete/{key}
+GET /api/s3/folders?prefix={prefix}
 Authorization: Bearer <token>
 
-# Example
-curl -X DELETE http://14.227.143.142:8084/api/s3/delete/uploads/20260525_183000_file.pdf \
-  -H "Authorization: Bearer <manager_token>"
-
-# Response
+# Response:
 {
-  "message": "File deleted successfully"
+  "folders": ["gis-data/hydrology/", "gis-data/landsat-imagery/"],
+  "files": [{ "key": "...", "size": 123, "lastModified": "..." }],
+  "prefix": "gis-data/"
 }
 ```
 
-### 5. Check File Exists
+### 5. Delete File (hoac Folder)
 ```bash
-GET /api/s3/exists/{key}
-Authorization: Bearer <token>
+DELETE /api/s3/delete?key={key}
+Authorization: Bearer <token>  # DATA_MANAGER hoac ADMIN
 
-# Example
-curl -X GET http://14.227.143.142:8084/api/s3/exists/uploads/20260525_183000_file.pdf \
-  -H "Authorization: Bearer <manager_token>"
-
-# Response
-{
-  "exists": true
-}
+# Neu key ket thuc bang "/" -> xoa de quy toan bo folder
 ```
 
-### 6. Current user / admin endpoints
+**Example:**
 ```bash
-GET /api/account/me
-GET /api/admin/users
-POST /api/admin/users
-PUT /api/admin/users/{id}
-DELETE /api/admin/users/{id}
-```
-
-## 🔒 Bảo mật
-
-- Tất cả endpoints yêu cầu **DATA_MANAGER** role
-- `/api/admin/users` yêu cầu **ADMIN** role
-- Access key và secret key được lưu trong `application.yaml`
-- **Production**: Nên dùng environment variables thay vì hardcode
-
-## 📝 Sử dụng trong code
-
-### Upload file
-```java
-@Autowired
-private S3Service s3Service;
-
-public void uploadFile(MultipartFile file) {
-    String key = s3Service.uploadFile(file);
-    String url = s3Service.getFileUrl(key);
-    System.out.println("File uploaded: " + url);
-}
-```
-
-### Download file
-```java
-InputStream inputStream = s3Service.downloadFile("uploads/file.pdf");
-// Process inputStream
-```
-
-### List files
-```java
-List<String> files = s3Service.listFiles("uploads/");
-files.forEach(System.out::println);
-```
-
-## 🧪 Test kết nối
-
-```bash
-# 1. Login để lấy token
-TOKEN=$(curl -s -X POST http://14.227.143.142:8084/api/auth/login \
-  -H "Content-Type: application/json" \
-  -d '{"username":"manager","password":"manager123"}' | jq -r '.token')
-
-# 2. Test upload
-echo "Test file content" > test.txt
-curl -X POST http://14.227.143.142:8084/api/s3/upload \
-  -H "Authorization: Bearer $TOKEN" \
-  -F "file=@test.txt"
-
-# 3. Test list
-curl -X GET http://14.227.143.142:8084/api/s3/list \
+curl -X DELETE "http://localhost:8084/api/s3/delete?key=uploads/old_file.txt" \
   -H "Authorization: Bearer $TOKEN"
 ```
 
-## ⚙️ Configuration
+**Response:**
+```json
+{ "message": "File deleted successfully" }
+```
+
+### 6. Check File Exists
+```bash
+GET /api/s3/exists?key={key}
+Authorization: Bearer <token>
+
+# Response:
+{ "exists": true }
+```
+
+### 7. Copy File
+```bash
+POST /api/s3/copy
+Authorization: Bearer <token>  # DATA_MANAGER hoac ADMIN
+Content-Type: application/json
+
+{
+  "sourceKey": "gis-data/source.tif",
+  "destinationKey": "gis-data/backup/source.tif"
+}
+```
+
+### 8. Rename File
+```bash
+POST /api/s3/rename
+Authorization: Bearer <token>  # DATA_MANAGER hoac ADMIN
+Content-Type: application/json
+
+{
+  "oldKey": "gis-data/old_name.tif",
+  "newKey": "gis-data/new_name.tif"
+}
+```
+
+### 9. Rename Folder
+```bash
+POST /api/s3/rename-folder
+Authorization: Bearer <token>  # DATA_MANAGER hoac ADMIN
+Content-Type: application/json
+
+{
+  "oldPrefix": "gis-data/old_folder/",
+  "newPrefix": "gis-data/new_folder/"
+}
+```
+
+### 10. Create Folder
+```bash
+POST /api/s3/create-folder
+Authorization: Bearer <token>  # DATA_MANAGER hoac ADMIN
+Content-Type: application/json
+
+{ "path": "gis-data/new-folder/" }
+```
+
+### 11. Generate Signed URL
+```bash
+GET /api/s3/signed-url?key={key}&expires={seconds}
+Authorization: Bearer <token>
+
+# expires: thoi gian het han (giay), mac dinh 3600 (1 gio)
+```
+
+**Response:**
+```json
+{
+  "url": "https://backup.hci.vn/...?X-Amz-...",
+  "expiresAt": "2026-05-25T11:30:00Z",
+  "key": "gis-data/file.tif"
+}
+```
+
+### 12. Render GeoTIFF (Inline)
+```bash
+GET /api/s3/render?key={key}
+# PUBLIC - khong can token
+# Chi cho phep gis-data/ prefix
+# Ho tro HTTP Range requests (cho geotiff.js)
+# Header: Range: bytes=0-1023 -> 206 Partial Content
+```
+
+**Example:**
+```bash
+curl "http://localhost:8084/api/s3/render?key=gis-data/hydrology/salinity/2026/raster/map.tif" \
+  -H "Range: bytes=0-16383"
+```
+
+### 13. Storage Stats
+```bash
+GET /api/s3/stats
+Authorization: Bearer <token>  # DATA_MANAGER hoac ADMIN
+```
+
+**Response:**
+```json
+{
+  "totalSize": 1234567890,
+  "fileCount": 150,
+  "byCategory": {
+    "geotiff": 1000000000,
+    "backup": 200000000,
+    "image": 30000000,
+    "spreadsheet": 4567890,
+    "document": 0,
+    "archive": 0,
+    "data": 0,
+    "other": 0
+  }
+}
+```
+
+## DB Tracking
+
+He thong tu dong theo doi moi file S3 trong bang `s3_object`:
+- Khi upload: tao/cap nhat record (bucket, s3_key, size_bytes, content_type, etag)
+- Khi delete: soft delete (is_deleted = true, deleted_at = NOW())
+- Stats endpoint su dung DB tracking de tinh toan dung luong
+
+## Bao mat
+
+- Upload: Chi DATA_MANAGER+ , key prefix validation
+- Delete/Copy/Rename: Chi DATA_MANAGER+
+- Download: Public
+- Render (GeoTIFF): Public, chi gis-data/ prefix
+- List gis-data/: Public
+- List prefix khac: Authenticated
+- Signed URLs: Authenticated
+- Stats: DATA_MANAGER+
+
+## Configuration
 
 File: `backend/src/main/resources/application.yaml`
-
 ```yaml
 s3:
   endpoint: https://backup.hci.vn
@@ -173,9 +278,10 @@ s3:
   access-key: ${S3_ACCESS_KEY}
   secret-key: ${S3_SECRET_KEY}
   region: us-east-1
+  max-file-size: 104857600  # 100MB
 ```
 
-## 📦 Dependencies
+## Dependencies
 
 ```xml
 <dependency>
@@ -184,10 +290,5 @@ s3:
     <version>2.20.26</version>
 </dependency>
 ```
-
-## 🔄 Object Locking
-
-- **Mode**: Compliance
-- **Duration**: 7 days
-- Files không thể xóa trong vòng 7 ngày sau khi upload
-- Phù hợp cho backup và compliance requirements
+AWS SDK v2 voi S3Client + S3Presigner (signed URLs).
+Path-style access duoc bat cho S3-compatible endpoints.

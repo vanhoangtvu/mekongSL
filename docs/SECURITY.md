@@ -1,187 +1,125 @@
-# 🔒 BẢO MẬT HỆ THỐNG
+# Bao mat he thong
 
-## ✅ Các lớp bảo mật đã triển khai
+## Cac lop bao mat da trien khai
 
 ### 1. Backend Security (Spring Security + JWT)
 
 #### Authentication
-- JWT token với expiration 24h
-- Password hashing với BCrypt
-- Token validation trên mỗi request
+- JWT token voi expiration 24h
+- Password hashing voi BCrypt
+- Token validation tren moi request (JwtAuthenticationFilter)
 
 #### Authorization
-- Role-based access control (RBAC)
-- `@PreAuthorize("hasRole('DATA_MANAGER')")` trên endpoints
-- SecurityFilterChain chặn unauthorized requests
+- 3 role: USER, DATA_MANAGER, ADMIN
+- `@PreAuthorize` annotations tren sensitive endpoints
+- SecurityFilterChain phan quyen chi tiet theo URL pattern + HTTP method
 
 #### Endpoints Protection
 ```java
 // Public endpoints
-/api/auth/register ✅ Public
-/api/auth/login ✅ Public
+/api/auth/**                    => Public
+/api/gis/manual-stations/** GET => Public
+/api/gis/water-quality/**   GET => Public
+/api/articles/public/**     GET => Public
+/api/s3/render                  => Public (chi gis-data/ prefix)
+/api/s3/download                => Public
+/api/s3/list GET (gis-data/)    => Public
 
-// Protected endpoints
-/api/data ⛔ Chỉ DATA_MANAGER
+// DATA_MANAGER+
+/api/data/**                    => hasAnyRole(DATA_MANAGER, ADMIN)
+
+// Authenticated
+Tat ca endpoint con lai          => authenticated()
+
+// Admin only
+/api/admin/users                => @PreAuthorize (trong controller)
 ```
 
 ### 2. Frontend Security
 
-#### Auth Service
+#### Auth Service (lib/auth.ts)
 - Token validation (check expiration)
-- Role checking
-- Secure storage (localStorage với error handling)
+- Role checking (priority: USER < DATA_MANAGER < ADMIN)
+- Secure storage (localStorage)
 - Auto logout khi token expired
+- Landing page routing theo role
 
 #### Route Protection
-- Auth check trên mỗi protected page
-- Token validity check
-- Role verification
-- Redirect nếu không đủ quyền
+- AuthGuard component cho protected routes
+- Triple check: isAuthenticated() + isTokenValid() + hasRole()
+- Redirect /unauthorized khi khong du quyen
+- Redirect /auth khi chua dang nhap
 
-#### Data Page Protection
-```typescript
-// Triple check:
-1. isAuthenticated() - Có đăng nhập?
-2. isTokenValid() - Token còn hạn?
-3. hasRole('DATA_MANAGER') - Có quyền?
-```
+### 3. S3 Security
 
-## 🧪 Test Cases
+- Prefix validation: upload chi chap nhan key bat dau bang `gis-data/`, `station-data/`, `monitoring-data/`, `news-images/`
+- Render endpoint chi cho phep `gis-data/` prefix
+- Signed URLs thay vi public URLs cho GIS data
 
-### ✅ Test 1: User không đăng nhập
+## Test Cases
+
+### Test 1: User khong dang nhap
+Truy cap /data -> Redirect to /auth
+
+### Test 2: USER role try /data
+Login voi user/user123, truy cap /data -> Redirect to /unauthorized
+
+### Test 3: DATA_MANAGER role truy cap /data
+Login voi manager/manager123, truy cap /data -> Cho phep
+
+### Test 4: Token expired
+Token het han (sau 24h), truy cap /data -> Auto logout -> Redirect to /auth
+
+### Test 5: Backend API direct access
 ```bash
-# Truy cập /data
-→ Redirect to /auth
-```
-
-### ✅ Test 2: User role USER
-```bash
-# Login với user/user123
-# Truy cập /data
-→ Redirect to /unauthorized
-```
-
-### ✅ Test 3: User role DATA_MANAGER
-```bash
-# Login với manager/manager123
-# Truy cập /data
-→ ✅ Cho phép truy cập
-```
-
-### ✅ Test 4: Token expired
-```bash
-# Token hết hạn (sau 24h)
-# Truy cập /data
-→ Auto logout → Redirect to /auth
-```
-
-### ✅ Test 5: Backend API direct access
-```bash
-# Không có token
+# Khong co token -> 401/403
 curl http://localhost:8084/api/data
-→ 401 Unauthorized
 
-# Token của USER
+# Token cua USER: try /api/data -> 403 Forbidden
 curl -H "Authorization: Bearer <user_token>" http://localhost:8084/api/data
-→ 403 Forbidden
 
-# Token của DATA_MANAGER
+# Token cua DATA_MANAGER: try /api/data -> 200 OK
 curl -H "Authorization: Bearer <manager_token>" http://localhost:8084/api/data
-→ 200 OK
 ```
 
-## 🔐 Security Best Practices Implemented
+## Security Best Practices Implemented
 
-### ✅ Authentication
-- [x] JWT với secret key mạnh
+### Authentication
+- [x] JWT voi secret key
 - [x] Token expiration (24h)
 - [x] Password hashing (BCrypt)
-- [x] Secure password validation (min 6 chars)
+- [x] Stateless sessions
 
-### ✅ Authorization
-- [x] Role-based access control
-- [x] Route protection
-- [x] API endpoint protection
+### Authorization
+- [x] 3-tier role-based access control
+- [x] Route protection (frontend)
+- [x] API endpoint protection (backend)
+- [x] Method-level security (@PreAuthorize)
 - [x] Frontend + Backend double check
 
-### ✅ Token Management
+### Token Management
 - [x] Token validation (expiration check)
 - [x] Auto logout khi expired
-- [x] Secure storage
-- [x] Token refresh on login
+- [x] Secure localStorage storage
 
-### ✅ Error Handling
-- [x] Không expose sensitive info trong error
-- [x] Generic error messages
-- [x] Proper HTTP status codes
-
-### ✅ CORS
+### CORS
 - [x] Whitelist specific origins
 - [x] Credentials allowed
-- [x] Proper headers
+- [x] Proper headers (Content-Range, Accept-Ranges)
 
-## 🚨 Security Checklist
+### S3
+- [x] Key prefix validation
+- [x] Signed URLs
+- [x] File size limit (100MB)
 
-- [x] Backend API có authentication
-- [x] Backend API có authorization
-- [x] Frontend check auth trước khi render
-- [x] Frontend check role trước khi cho phép truy cập
-- [x] Token có expiration
-- [x] Token được validate
-- [x] Password được hash
-- [x] CORS được cấu hình đúng
-- [x] Error messages không leak info
-- [x] Redirect đúng khi unauthorized
+### Error Handling
+- [x] GlobalExceptionHandler
+- [x] Khong expose sensitive info
+- [x] Proper HTTP status codes
 
-## 📝 Hướng dẫn test
+## Ket luan
 
-### Test với cURL:
-
-```bash
-# 1. Login với manager
-curl -X POST http://localhost:8084/api/auth/login \
-  -H "Content-Type: application/json" \
-  -d '{"username":"manager","password":"manager123"}'
-
-# Copy token từ response
-
-# 2. Truy cập /api/data với token
-curl http://localhost:8084/api/data \
-  -H "Authorization: Bearer <token>"
-
-# 3. Test với user (sẽ bị chặn)
-curl -X POST http://localhost:8084/api/auth/login \
-  -H "Content-Type: application/json" \
-  -d '{"username":"user","password":"user123"}'
-
-curl http://localhost:8084/api/data \
-  -H "Authorization: Bearer <user_token>"
-# → Không có response (403 Forbidden)
-```
-
-### Test với Browser:
-
-1. Mở http://localhost:3004/data (chưa login)
-   - ✅ Redirect to /auth
-
-2. Login với user/user123
-   - ✅ Login thành công
-   - Truy cập /data
-   - ✅ Redirect to /unauthorized
-
-3. Login với manager/manager123
-   - ✅ Login thành công
-   - Truy cập /data
-   - ✅ Hiển thị trang data
-
-4. Xóa token trong localStorage
-   - Refresh /data
-   - ✅ Redirect to /auth
-
-## 🎯 Kết luận
-
-Hệ thống đã được bảo mật ở cả 2 tầng:
-- **Backend**: Spring Security + JWT + Role-based authorization
+He thong da duoc bao mat o ca 3 tang:
+- **Backend**: Spring Security + JWT + 3-tier RBAC
 - **Frontend**: Route guards + Token validation + Role checking
-
-Chỉ user có role `DATA_MANAGER` và token hợp lệ mới truy cập được `/data`.
+- **S3**: Prefix validation + Signed URLs

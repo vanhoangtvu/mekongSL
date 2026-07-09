@@ -1,28 +1,27 @@
-# Cấu trúc Excel Tháng - Mekong Data
+# Cau truc Excel Thang - Mekong Data
 
-## Tổng quan
+## Tong quan
 
-Script `update-mekong-monthly-xlsx.mjs` tạo file Excel theo tháng cho dữ liệu Mekong với cấu trúc thang (cột ngày động).
+Script Tao file Excel theo thang cho du lieu Mekong voi cau truc thang (cot ngay dong). Duoc quan ly qua Next.js API route `/api/mekong-monthly/*`.
 
-## Cấu trúc cột
+## Cau truc cot
 
-### Cột cố định (BASE_COLUMNS)
+### Cot co dinh (BASE_COLUMNS)
 
-| Cột | Mô tả |
+| Cot | Mo ta |
 |-----|-------|
-| MaCamBien | Mã cảm biến (SensorNodeCode hoặc SerialNumber) |
-| Ten | Tên cảm biến (SNShortName, SNDescription, NameLine_1, hoặc SerialNumber) |
-| TinhThanh | Tên tỉnh thành (ProvinceName) |
-| ToaDoX | Kinh độ (Longitude) |
-| ToaDoY | Vĩ độ (Latitude) |
+| MaCamBien | Ma cam bien (SensorNodeCode hoac SerialNumber) |
+| Ten | Ten cam bien (SNShortName, SNDescription, NameLine_1, hoac SerialNumber) |
+| TinhThanh | Ten tinh thanh (ProvinceName) |
+| ToaDoX | Kinh do (Longitude) |
+| ToaDoY | Vi do (Latitude) |
 
-### Cột động (ngày trong tháng)
+### Cot dong (ngay trong thang)
 
-- Format: `DD/MM` (ví dụ: `01/05`, `02/05`, ..., `31/05`)
-- Số lượng cột phụ thuộc vào số ngày trong tháng (28-31 cột)
-- Được tạo tự động bởi `buildDayColumns(year, month)`
+- Format: `DD/MM` (vi du: `01/05`, `02/05`, ..., `31/05`)
+- So luong cot phu thuoc vao so ngay trong thang (28-31 cot)
 
-## Ví dụ cấu trúc
+## Vi du cau truc
 
 ```
 MaCamBien | Ten | TinhThanh | ToaDoX | ToaDoY | 01/05 | 02/05 | 03/05 | ... | 31/05
@@ -31,73 +30,38 @@ TV001     | ... | Tra Vinh  | 106.xx | 9.xx   | 12.5  | 13.2  | 14.1  | ... | 15
 TV002     | ... | Tra Vinh  | 106.xx | 9.xx   | 8.3   | 8.5   | 8.7   | ... | 9.1
 ```
 
-## Metrics được tạo
+## Metrics duoc tao
 
-Mỗi metric tạo 1 file riêng:
+Moi metric tao 1 file rieng:
 
-1. **Salinity** → `mekong-salinity-YYYY-MM.xlsx`
-2. **PH** → `mekong-ph-YYYY-MM.xlsx`
-3. **WaterLevel** → `mekong-waterlevel-YYYY-MM.xlsx`
+1. **Salinity** -> `mekong-salinity-YYYY-MM.xlsx`
+2. **PH** -> `mekong-ph-YYYY-MM.xlsx`
+3. **WaterLevel** -> `mekong-waterlevel-YYYY-MM.xlsx`
 
-## Logic cập nhật
+## API Endpoints (Next.js)
 
-1. Đọc file Excel hiện có (nếu có)
-2. Fetch dữ liệu mới từ Mekong API
-3. Lọc chỉ lấy records có "TV" (Trà Vinh)
-4. Merge dữ liệu theo `MaCamBien`:
-   - Giữ nguyên dữ liệu các ngày cũ
-   - Cập nhật giá trị cho cột ngày hiện tại
-5. Normalize tất cả cột (đảm bảo đủ cột, điền '' nếu thiếu)
-6. Sắp xếp theo `MaCamBien`
-7. Ghi file Excel
-
-## Hàm chính
-
-### `buildDayColumns(year, month)`
-Tạo mảng tên cột cho các ngày trong tháng.
-
-```javascript
-// Tháng 5/2026 (31 ngày)
-buildDayColumns(2026, '05')
-// => ['01/05', '02/05', ..., '31/05']
-```
-
-### `buildColumns(year, month)`
-Kết hợp cột cố định và cột ngày.
-
-```javascript
-buildColumns(2026, '05')
-// => ['MaCamBien', 'Ten', 'TinhThanh', 'ToaDoX', 'ToaDoY', '01/05', '02/05', ..., '31/05']
-```
-
-### `updateMetricFile(options)`
-Cập nhật file Excel cho 1 metric.
-
-**Parameters:**
-- `outputDir`: Thư mục output
-- `year`, `month`: Năm và tháng
-- `dayColumn`: Cột ngày cần cập nhật (format `DD/MM`)
-- `metric`: Object metric `{ key, label, slug }`
-- `records`: Mảng dữ liệu từ API
-
-## Sử dụng
-
+### List files
 ```bash
-# Cập nhật với ngày hiện tại
-node data/mekong/scripts/update-mekong-monthly-xlsx.mjs
+GET /api/mekong-monthly/files
+Authorization: Bearer <token>
+```
 
-# Chỉ định thư mục output
-node data/mekong/scripts/update-mekong-monthly-xlsx.mjs --output-dir data/mekong/output
+### Refresh/Update
+```bash
+POST /api/mekong-monthly/update
+Authorization: Bearer <token>
+```
 
-# Chỉ định ngày cụ thể
-node data/mekong/scripts/update-mekong-monthly-xlsx.mjs --date 2026-05-24
+### Export XLSX
+```bash
+GET /api/mekong-monthly/export?year=2026&month=5&metric=salinity
+Authorization: Bearer <token>
 ```
 
 ## Output
 
-File được tạo tại: `data/mekong/output/mekong-{metric}-{year}-{month}.xlsx`
+File duoc tao va quan ly qua Next.js API routes, su dung thu vien `xlsx` de tao file Excel.
 
-Ví dụ:
-- `data/mekong/output/mekong-salinity-2026-05.xlsx`
-- `data/mekong/output/mekong-ph-2026-05.xlsx`
-- `data/mekong/output/mekong-waterlevel-2026-05.xlsx`
+## Data Source
+
+Du lieu lay tu bang `mekong_sensor` va `mekong_measurement` trong MySQL, duoc thu thap boi `datacenter/mekong/fetch-mekong-data.mjs` tu Mekong API (Rynan Mobile).

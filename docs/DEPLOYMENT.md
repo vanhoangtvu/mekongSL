@@ -1,49 +1,61 @@
-# 🌐 Truy cập qua IP Public
+# Deployment - Truy cap qua IP Public
 
-## 📍 Địa chỉ truy cập
+## Dia chi truy cap
 
 ### Frontend
 ```
-http://14.227.143.142:3004
+http://103.54.251.212:3004
+https://mekongsaltlab.org
+https://www.mekongsaltlab.org
 ```
 
 ### Backend API
 ```
-http://14.227.143.142:8084/api
+http://103.54.251.212:8084/api
 ```
 
-## 🚀 Khởi động hệ thống
+## Khoi dong he thong
 
-### 1. Start Backend
+Dung `manage.sh` de quan ly ca 2 dich vu cung luc:
+
 ```bash
+cd /home/hv/DuAn/Mekong
+./manage.sh
+```
+
+Menu quan ly ho tro:
+- Start/Stop/Restart Backend (port 8084)
+- Start/Stop/Restart Frontend (port 3004)
+- Xem logs backend + frontend
+- Kiem tra status
+- Cau hinh IP
+
+### Hoac khoi dong thu cong:
+
+```bash
+# Backend
 cd /home/hv/DuAn/Mekong/backend
-./start.sh
-
-# Hoặc manual:
 ./mvnw spring-boot:run
-```
+# hoac
+java -jar target/mekongsaltlab-0.0.1-SNAPSHOT.jar
 
-### 2. Start Frontend
-```bash
+# Frontend
 cd /home/hv/DuAn/Mekong/frontend
-./start.sh
-
-# Hoặc manual:
 npm run dev -- -H 0.0.0.0 -p 3004
+# hoac production build:
+npm run build && npm run start
 ```
 
-## ⚙️ Cấu hình đã thay đổi
+## Cau hinh
 
-### Frontend (.env.local)
-```env
-NEXT_PUBLIC_API_URL=http://14.227.143.142:8084/api
-```
-
-### Backend (application.yaml)
-```yaml
-server:
-  port: 8084
-  address: 0.0.0.0  # Listen trên tất cả interfaces
+### Frontend (next.config.mjs)
+```js
+async rewrites() {
+  return [{
+    source: '/api/:path*',
+    destination: `${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8084/api'}/:path*`,
+  }];
+}
 ```
 
 ### Backend CORS (SecurityConfig.java)
@@ -51,83 +63,76 @@ server:
 configuration.setAllowedOrigins(List.of(
     "http://localhost:3004",
     "http://localhost:3000",
-    "http://14.227.143.142:3004",  // ✅ Added
-    "http://14.227.143.142:3000"   // ✅ Added
+    "http://103.54.251.212",
+    "http://103.54.251.212:3004",
+    "http://103.54.251.212:3000",
+    "https://103.54.251.212",
+    "https://mekongsaltlab.org",
+    "https://www.mekongsaltlab.org"
 ));
 ```
 
-## 🔥 Firewall (nếu cần)
+### Backend (application.yaml)
+```yaml
+server:
+  port: 8084
+  address: 0.0.0.0  # Listen tren tat ca interfaces
+```
+
+## Firewall (neu can)
 
 ```bash
-# Mở port 3004 (Frontend)
+# Mo port 3004 (Frontend)
 sudo ufw allow 3004/tcp
 
-# Mở port 8084 (Backend)
+# Mo port 8084 (Backend)
 sudo ufw allow 8084/tcp
 
-# Kiểm tra status
+# Kiem tra status
 sudo ufw status
 ```
 
-## 🧪 Test kết nối
+## Test ket noi
 
 ### Test Backend
 ```bash
-curl http://14.227.143.142:8084/api/auth/login \
+curl http://103.54.251.212:8084/api/auth/login \
   -X POST \
   -H "Content-Type: application/json" \
-  -d '{"username":"manager","password":"manager123"}'
+  -d '{"username":"admin","password":"admin123"}'
 ```
 
 ### Test Frontend
-Mở browser: `http://14.227.143.142:3004`
+Mo browser: `http://103.54.251.212:3004`
 
-## 📝 Lưu ý
+## Luu y
 
-1. **Restart sau khi thay đổi config**
+1. **Restart sau khi thay doi config**: Dung `manage.sh` hoac kill process va start lai
+2. **Check logs**:
    ```bash
-   # Frontend
-   cd frontend
-   ./stop.sh
-   ./start.sh
-   
-   # Backend
-   cd backend
-   pkill -f spring-boot
-   ./start.sh
-   ```
-
-2. **Check logs**
-   ```bash
-   # Frontend
-   tail -f frontend/app.log
-   
-   # Backend
    tail -f backend/backend.log
+   # Frontend logs co trong manage.sh
    ```
-
-3. **Kiểm tra process đang chạy**
+3. **Kiem tra process dang chay**:
    ```bash
-   # Frontend
-   ps aux | grep "next-server"
-   
-   # Backend
-   ps aux | grep "spring-boot"
+   ps aux | grep "next-server\|spring-boot\|mekongsaltlab"
    ```
 
-## 🔒 Bảo mật
+## Bao mat
 
-- Backend đã cấu hình CORS cho IP public
-- JWT token vẫn hoạt động bình thường
-- Phân quyền không thay đổi
+- Backend da cau hinh CORS cho IP public + domain names
+- JWT token van hoat dong binh thuong
+- Phan quyen khong thay doi
+- S3 credentials su dung bien moi truong
 
-## 🌍 Truy cập từ máy khác
+## Truy cap tu may khac
 
-Từ bất kỳ máy nào trong mạng (hoặc internet nếu có public IP):
+Tu bat ky may nao trong mang (hoac internet neu co public IP):
 ```
-http://14.227.143.142:3004
+http://103.54.251.212:3004
 ```
 
-Login với:
+Login voi:
+- **Admin**: admin / admin123
 - **Manager**: manager / manager123
 - **User**: user / user123

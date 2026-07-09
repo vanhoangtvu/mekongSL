@@ -1,17 +1,20 @@
-# 👥 PHÂN QUYỀN HỆ THỐNG
+# Phan quyen he thong
 
-## 🔐 3 ROLES
+## 3 Roles
 
-### 1. USER (Người dùng thường)
-**Quyền hạn:**
-- ✅ Xem bản đồ (/)
-- ✅ Xem thông tin tài khoản hiện tại (`GET /api/account/me`)
-- ✅ Xem danh sách files S3 (`GET /api/s3/list`)
-- ✅ Download files từ S3 (`GET /api/s3/download/{key}`)
-- ✅ Check file exists (`GET /api/s3/exists/{key}`)
-- ❌ KHÔNG truy cập /data
-- ❌ KHÔNG upload/delete S3
-- ❌ KHÔNG backup
+### 1. USER (Nguoi dung thuong)
+**Quyen han:**
+- Xem ban do (/)
+- Xem articles public
+- Download files tu S3
+- Xem danh sach files gis-data (S3 list public)
+- Render GeoTIFF tu S3 (chi gis-data/ prefix)
+- Xem tram manual station (GET public)
+- Xem du lieu chat luong nuoc water quality (GET public)
+- KHONG truy cap /data
+- KHONG upload/delete S3
+- KHONG backup
+- KHONG quan ly users/articles
 
 **Default account:**
 - Username: `user`
@@ -19,16 +22,25 @@
 
 ---
 
-### 2. DATA_MANAGER (Quản lý dữ liệu)
-**Quyền hạn:**
-- ✅ Tất cả quyền của USER
-- ✅ Truy cập trang /data
-- ✅ Query MySQL (`GET /api/mysql`)
-- ✅ Upload files lên S3 (`POST /api/s3/upload`)
-- ✅ Delete files từ S3 (`DELETE /api/s3/delete/{key}`)
-- ✅ Trigger manual backup (`POST /api/backup/trigger`)
-- ✅ Export / refresh monthly Excel files (`GET/POST /api/mekong-monthly/*`)
-- ❌ KHÔNG có quyền admin
+### 2. DATA_MANAGER (Quan ly du lieu)
+**Quyen han:**
+- Tat ca quyen cua USER
+- Truy cap trang /data
+- Upload files len S3 (POST /api/s3/upload)
+- Delete files tu S3 (DELETE /api/s3/delete)
+- Copy/Rename files va folders trong S3
+- Tao folder moi tren S3
+- Tao signed URLs
+- Xem S3 storage stats
+- GIS CRUD endpoints (layers, datasets, stations, folders, tags)
+- Upload layer files, register S3 objects
+- Quan ly manual stations (import Excel)
+- Quan ly water quality (import Excel, Xoa sample)
+- Quan ly monitoring data
+- Quan ly articles (CRUD)
+- Trigger backup
+-Query MySQL, Export Excel
+- KHONG co quyen quan ly users (admin endpoint)
 
 **Default account:**
 - Username: `manager`
@@ -36,12 +48,12 @@
 
 ---
 
-### 3. ADMIN (Quản trị viên)
-**Quyền hạn:**
-- ✅ Tất cả quyền của DATA_MANAGER
-- ✅ Quản lý users (`GET/POST/PUT/DELETE /api/admin/users`)
-- ✅ Xem thông tin tài khoản hiện tại (`GET /api/account/me`)
-- ✅ Quản lý S3 files
+### 3. ADMIN (Quan tri vien)
+**Quyen han:**
+- Tat ca quyen cua DATA_MANAGER
+- Quan ly users (GET/POST/PUT/DELETE /api/admin/users)
+- Xem thong tin tai khoan (/api/account/me)
+- Tat ca CRUD endpoints khong gioi han
 
 **Default account:**
 - Username: `admin`
@@ -49,137 +61,72 @@
 
 ---
 
-## 📊 BẢNG PHÂN QUYỀN CHI TIẾT
+## Bang phan quyen chi tiet
 
 | Endpoint | Method | USER | DATA_MANAGER | ADMIN |
 |----------|--------|------|--------------|-------|
-| `/api/auth/register` | POST | ✅ Public | ✅ Public | ✅ Public |
-| `/api/auth/login` | POST | ✅ Public | ✅ Public | ✅ Public |
-| `/api/account/me` | GET | ❌ | ✅ | ✅ |
-| `/` | GET | ✅ | ✅ | ✅ |
-| `/data` | GET | ❌ | ✅ | ✅ |
-| `/api/mysql` | GET | ❌ | ✅ | ✅ |
-| `/api/s3/list` | GET | ✅ | ✅ | ✅ |
-| `/api/s3/download/{key}` | GET | ✅ | ✅ | ✅ |
-| `/api/s3/exists/{key}` | GET | ✅ | ✅ | ✅ |
-| `/api/s3/upload` | POST | ❌ | ✅ | ✅ |
-| `/api/s3/delete/{key}` | DELETE | ❌ | ✅ | ✅ |
-| `/api/backup/trigger` | POST | ❌ | ✅ | ✅ |
-| `/api/admin/users` | GET/POST | ❌ | ❌ | ✅ |
-| `/api/admin/users/{id}` | PUT/DELETE | ❌ | ❌ | ✅ |
+| `/api/auth/register` | POST | Public | Public | Public |
+| `/api/auth/login` | POST | Public | Public | Public |
+| `/api/gis/manual-stations/**` | GET | Public | Public | Public |
+| `/api/gis/water-quality/**` | GET | Public | Public | Public |
+| `/api/articles/public/**` | GET | Public | Public | Public |
+| `/api/s3/render` | GET | Public | Public | Public |
+| `/api/s3/download` | GET | Public | Public | Public |
+| `/api/s3/list?prefix=gis-data/` | GET | Public | Public | Public |
+| `/swagger-ui/**` | GET | Public | Public | Public |
+| `/api/s3/list (non-gis-data)` | GET | Can auth | Can auth | Can auth |
+| `/api/s3/signed-url` | GET | Can auth | Can auth | Can auth |
+| `/api/s3/exists` | GET | Can auth | Can auth | Can auth |
+| `/api/s3/folders` | GET | Can auth | Can auth | Can auth |
+| `/api/s3/upload` | POST | Ko | Co | Co |
+| `/api/s3/delete` | DELETE | Ko | Co | Co |
+| `/api/s3/copy` | POST | Ko | Co | Co |
+| `/api/s3/rename` | POST | Ko | Co | Co |
+| `/api/s3/rename-folder` | POST | Ko | Co | Co |
+| `/api/s3/create-folder` | POST | Ko | Co | Co |
+| `/api/s3/stats` | GET | Ko | Co | Co |
+| `/api/data/**` | GET | Ko | Co | Co |
+| `/api/gis/layers` (GET) | GET | Can auth | Can auth | Can auth |
+| `/api/gis/layers (POST/PATCH/DELETE)` | WRITE | Ko | Co | Co |
+| `/api/gis/layers/{id}/render` | GET | Can auth | Can auth | Can auth |
+| `/api/gis/datasets` (CRUD) | ALL | Ko | Co | Co |
+| `/api/gis/stations` (CRUD) | ALL | Ko | Co | Co |
+| `/api/gis/folders` (CRUD) | ALL | Ko | Co | Co |
+| `/api/gis/tags` (CRUD) | ALL | Ko | Co | Co |
+| `/api/gis/manual-stations` (POST/PUT/DELETE) | WRITE | Ko | Co | Co |
+| `/api/gis/water-quality` (POST/DELETE) | WRITE | Ko | Co | Co |
+| `/api/articles` (CRUD) | ALL | Ko | Co | Co |
+| `/api/backup` | ALL | Ko | Co | Co |
+| `/api/admin/users` | GET/POST | Ko | Ko | Co |
+| `/api/admin/users/{id}` | PUT/DELETE | Ko | Ko | Co |
 
----
+## Thay doi role
 
-## 🧪 TEST PHÂN QUYỀN
-
-### Test 1: USER xem files (OK)
-```bash
-USER_TOKEN=$(curl -s -X POST http://14.227.143.142:8084/api/auth/login \
-  -H "Content-Type: application/json" \
-  -d '{"username":"user","password":"user123"}' | jq -r '.token')
-
-# Xem danh sách files - OK
-curl http://14.227.143.142:8084/api/s3/list \
-  -H "Authorization: Bearer $USER_TOKEN"
-
-# Download file - OK
-curl http://14.227.143.142:8084/api/s3/download/raster/salinity.tif \
-  -H "Authorization: Bearer $USER_TOKEN" \
-  -o salinity.tif
-```
-
-### Test 2: USER upload (DENIED)
-```bash
-# Upload file - DENIED
-curl -X POST http://14.227.143.142:8084/api/s3/upload \
-  -H "Authorization: Bearer $USER_TOKEN" \
-  -F "file=@test.txt"
-# Expected: HTTP 403 Forbidden
-```
-
-### Test 3: MANAGER upload (OK)
-```bash
-MANAGER_TOKEN=$(curl -s -X POST http://14.227.143.142:8084/api/auth/login \
-  -H "Content-Type: application/json" \
-  -d '{"username":"manager","password":"manager123"}' | jq -r '.token')
-
-# Upload file - OK
-curl -X POST http://14.227.143.142:8084/api/s3/upload \
-  -H "Authorization: Bearer $MANAGER_TOKEN" \
-  -F "file=@test.txt"
-```
-
-### Test 4: ADMIN (OK)
-```bash
-ADMIN_TOKEN=$(curl -s -X POST http://14.227.143.142:8084/api/auth/login \
-  -H "Content-Type: application/json" \
-  -d '{"username":"admin","password":"admin123"}' | jq -r '.token')
-
-# Upload - OK
-curl -X POST http://14.227.143.142:8084/api/s3/upload \
-  -H "Authorization: Bearer $ADMIN_TOKEN" \
-  -F "file=@test.txt"
-
-# Delete - OK
-curl -X DELETE http://14.227.143.142:8084/api/s3/delete/uploads/test.txt \
-  -H "Authorization: Bearer $ADMIN_TOKEN"
-```
-
----
-
-## 🎯 USE CASES
-
-### Use Case 1: Người dùng xem bản đồ
-```
-USER login → Xem bản đồ → Download GeoTIFF từ S3 → Hiển thị trên map
-```
-
-### Use Case 2: Quản lý dữ liệu
-```
-DATA_MANAGER login → Truy cập /data → Query MySQL → Export Excel → Upload lên S3
-```
-
-### Use Case 3: Admin quản lý files
-```
-ADMIN login → Xem tất cả files S3 → Delete files cũ → Upload files mới
-```
-
----
-
-## 🔄 THAY ĐỔI ROLE
-
-### Cách 1: Trực tiếp trong MySQL
+### Cach 1: Truc tiep trong MySQL
 ```sql
--- Thay đổi user thành DATA_MANAGER
+-- Thay doi user thanh DATA_MANAGER
 UPDATE users SET role = 'DATA_MANAGER' WHERE username = 'user';
 
--- Thay đổi manager thành ADMIN
+-- Thay doi manager thanh ADMIN
 UPDATE users SET role = 'ADMIN' WHERE username = 'manager';
 ```
 
-### Cách 2: API endpoint (Future)
-```bash
-# Admin có thể thay đổi role của users khác
-POST /api/admin/users/{id}/role
-Authorization: Bearer <admin_token>
-Body: { "role": "DATA_MANAGER" }
-```
+### Cach 2: Admin endpoint
+Admin co the quan ly users qua `/api/admin/users` endpoints.
 
----
+## Notes
 
-## 📝 NOTES
-
-1. **USER** - Chỉ xem, không sửa
-2. **DATA_MANAGER** - Quản lý dữ liệu và S3
-3. **ADMIN** - Toàn quyền
+1. **USER** - Chi xem, khong sua
+2. **DATA_MANAGER** - Quan ly du lieu va S3, GIS CRUD
+3. **ADMIN** - Toan quyen
 
 **Security:**
-- ✅ JWT token validation
-- ✅ Role-based authorization
-- ✅ @PreAuthorize annotations
-- ✅ Spring Security
+- JWT token validation
+- Role-based authorization (RBAC)
+- `@PreAuthorize` annotations
+- Spring Security stateless sessions
 
 ---
 
-**Cập nhật**: 2026-05-25  
-**Phiên bản**: 2.0 (Added ADMIN role)
+**Cap nhat**: 2026-07-09
+**Phien ban**: 3.0 (Updated with full endpoint permissions)

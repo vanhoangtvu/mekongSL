@@ -1,70 +1,34 @@
 # Upload Data Page Specification
 
-## 1. Mục tiêu
+## 1. Muc tieu
 
-Trang Upload Data cho phép người dùng tải dữ liệu lên hệ thống lưu trữ tập trung của WebGIS.
+Trang Upload Data cho phep nguoi dung tai du lieu len he thong luu tru tap trung cua WebGIS.
 
-Hệ thống quản lý 3 nhóm dữ liệu chính:
+He thong quan ly 3 nhom du lieu chinh:
+- **GIS Data** (raster, vector) -> S3: `gis-data/`
+- **Station Data** (CSV files) -> S3: `station-data/`
+- **Monitoring Data** (CSV files) -> S3: `monitoring-data/`
 
-* GIS Data
-* Station Data
-* Monitoring Data
-
-Người dùng không được phép tự nhập đường dẫn lưu trữ.
-
-Backend sẽ tự động sinh đường dẫn S3 dựa trên metadata người dùng chọn.
+Nguoi dung khong duoc phep tu nhap duong dan luu tru.
+Backend se tu dong sinh duong dan S3 dua tren metadata nguoi dung chon.
 
 ---
 
-# 2. UI Layout
+## 2. Data Group
 
-## Page Structure
+Dropdown options:
+- GIS Data
+- Station Data
+- Monitoring Data
 
-```text
----------------------------------------------------
-| Upload Data                                      |
----------------------------------------------------
-
-[Data Group]
-
-(Dynamic Form)
-
-[Description]
-
-[Upload File]
-
-[Upload Button]
----------------------------------------------------
-```
+Khi thay doi Data Group, form ben duoi se thay doi tuong ung.
 
 ---
 
-# 3. Data Group
-
-Control:
-
-```text
-Dropdown
-```
-
-Options:
-
-```text
-GIS Data
-Station Data
-Monitoring Data
-```
-
-Khi thay đổi Data Group, form bên dưới sẽ thay đổi tương ứng.
-
----
-
-# 4. GIS Data Upload Form
-
-## Fields
+## 3. GIS Data Upload Form
 
 | Field       | Type       | Required |
-| ----------- | ---------- | -------- |
+|-------------|-----------|----------|
 | Dataset     | Select     | Yes      |
 | Category    | Select     | Yes      |
 | Year        | Select     | Yes      |
@@ -75,117 +39,51 @@ Khi thay đổi Data Group, form bên dưới sẽ thay đổi tương ứng.
 | Description | TextArea   | No       |
 | File        | Upload     | Yes      |
 
----
+### Dataset Tree (based on datasets.ts)
 
-## Dataset Tree
+#### Landsat Imagery
+- Band 1, Band 2, Band 3, Band 4, Band 5, Band 6, Band 7
+- Composite (RGB)
 
-### Landsat Imagery
+#### Administration
+- Province, Community, Hamlet
 
-```text
-Dry Season
-Wet Season
-```
+#### Baseline Environment
+- Landuse Planning
+- Soil Type
+- Water Body
+- Channel System (River, Canal, Sluice, Pump Station, Dike & Embankments, Irrigation)
+- Ground Water Storage
+- Road
+- Landuse Classification (Aquaculture, Rice-Shrimp, Perennial Crops, Residential Land, Coconut Garden, Vegetable Crops, Rice Cultivation)
+- Salinity Intrusion
 
-### Administration
+#### Ecology
+- Biodiversity, Vegetation Index, Habitat Mapping, Species Distribution, Mangroves
 
-```text
-Province
-Community
-Hamlet
-```
+#### Flooding Modeling
+- Flooding Modeling
 
-### Flooding Modeling
+#### Hydrology
+- Salinity (hourly)
+- Tidal (hourly)
+- pH (hourly)
 
-```text
-Flooding Modeling
-```
+### Data Type
+- Raster
+- Vector
 
-### Hydrology
+### File Validation
 
-```text
-Salinity Monitoring
-Water Temperature Monitoring
-PH Monitoring
-```
-
-### Water Quality
-
-```text
-Surface Water
-Ground Water
-```
-
-### Ecology
-
-```text
-Biodiversity
-Vegetation Index
-Habitat Mapping
-Species Distribution
-Mangroves
-```
-
-### Baseline Environment
-
-```text
-Landuse Planning
-Soil Type
-Water Body
-Channel System
-Ground Water Storage
-Road
-Landuse Classification
-Salinity Intrusion
-```
+**Raster:** `.tif`, `.tiff`
+**Vector:** `.geojson`, `.shp`, `.kml`, `.gpkg`, `.zip`
 
 ---
 
-## Data Type
-
-Options:
-
-```text
-Raster
-Vector
-```
-
----
-
-## File Validation
-
-### Raster
-
-Allowed:
-
-```text
-.tif
-.tiff
-.cog
-.png
-.jpg
-.jpeg
-```
-
-### Vector
-
-Allowed:
-
-```text
-.geojson
-.shp
-.kml
-.gpkg
-.zip
-```
-
----
-
-# 5. Station Data Upload Form
-
-## Fields
+## 4. Station Data Upload Form
 
 | Field       | Type       | Required |
-| ----------- | ---------- | -------- |
+|-------------|-----------|----------|
 | Station     | Select     | Yes      |
 | Parameter   | Select     | Yes      |
 | Date        | DatePicker | Yes      |
@@ -193,168 +91,92 @@ Allowed:
 | Description | TextArea   | No       |
 | CSV File    | Upload     | Yes      |
 
----
-
-## Parameter Examples
-
-```text
-pH
-Salinity
-Temperature
-DO
-Water Level
-Flow
-```
+**Parameter Examples:** pH, Salinity, Temperature, DO, Water Level, Flow
+**File:** Only `.csv`
 
 ---
 
-## File Validation
-
-Only:
-
-```text
-.csv
-```
-
----
-
-# 6. Monitoring Data Upload Form
-
-## Fields
+## 5. Monitoring Data Upload Form
 
 | Field              | Type       | Required |
-| ------------------ | ---------- | -------- |
-| Monitoring Station | Select     | Yes      |
-| Parameter          | Select     | Yes      |
-| Date               | DatePicker | Yes      |
-| Time               | TimePicker | Yes      |
-| Description        | TextArea   | No       |
-| CSV File           | Upload     | Yes      |
+|---------------------|-----------|----------|
+| Monitoring Station  | Select     | Yes      |
+| Parameter           | Select     | Yes      |
+| Date                | DatePicker | Yes      |
+| Time                | TimePicker | Yes      |
+| Description         | TextArea   | No       |
+| CSV File            | Upload     | Yes      |
+
+**Parameter Examples:** Salinity, Temperature, pH, Water Level
+**File:** Only `.csv`
 
 ---
 
-## Parameter Examples
+## 6. Water Quality Upload (Special)
 
-```text
-Salinity
-Temperature
-pH
-Water Level
+Upload Excel file chua du lieu chat luong nuoc:
+
+| Field      | Type       | Required |
+|------------|-----------|----------|
+| File       | Upload (.xlsx, .xls) | Yes |
+| SampleDate | DatePicker | Yes      |
+| Overwrite  | Checkbox   | No       |
+| Notes      | TextArea   | No       |
+
+Endpoint: `POST /api/gis/water-quality/preview` (preview truoc khi import)
+Endpoint: `POST /api/gis/water-quality/import` (import chinh thuc)
+
+---
+
+## 7. Backend Generated Storage Path
+
+### GIS Data
 ```
-
----
-
-# 7. Upload Component
-
-Features:
-
-* Drag & Drop
-* Browse File
-* Multiple File Upload
-* Upload Progress
-* Cancel Upload
-* Retry Upload
-
----
-
-## Upload Status
-
-```text
-Uploading...
-Completed
-Failed
-Cancelled
+gis-data/{dataset-slug}/{category-slug}/{year}/{month}/{day}/{time}/{type}/{filename}
 ```
+Vi du: `gis-data/hydrology/salinity/2026/05/30/12-00/raster/salinity.tif`
+
+### Station Data
+```
+station-data/{stationCode}/{parameter}/{year}/{month}/{day}/{time}/{filename}
+```
+Vi du: `station-data/station-001/salinity/2026/05/30/12-00/data.csv`
+
+### Monitoring Data
+```
+monitoring-data/{monitoringCode}/{parameter}/{year}/{month}/{day}/{time}/{filename}`
+```
+Vi du: `monitoring-data/monitor-001/salinity/2026/05/30/12-00/data.csv`
 
 ---
 
-# 8. Metadata Preview
-
-Hiển thị metadata trước khi upload.
-
-Example:
-
-```json
-{
-  "dataGroup": "GIS_DATA",
-  "dataset": "HYDROLOGY",
-  "category": "SALINITY_MONITORING",
-  "year": 2026,
-  "month": 5,
-  "day": 30,
-  "time": "12:00",
-  "fileType": "RASTER"
-}
-```
-
----
-
-# 9. Backend Generated Storage Path
-
-Người dùng không nhìn thấy phần này.
-
-Ví dụ:
-
-## GIS Data
-
-```text
-gis-data/hydrology/salinity-monitoring/2026/05/30/12-00/raster/file.tif
-```
-
-## Station Data
-
-```text
-station-data/station-001/salinity/2026/05/30/12-00/data.csv
-```
-
-## Monitoring Data
-
-```text
-monitoring-data/monitor-001/salinity/2026/05/30/12-00/data.csv
-```
-
----
-
-# 10. User Experience Requirements
-
-## Required
-
-* Responsive Design
-* Dark Mode Support
-* Upload Progress Bar
-* Validation Before Upload
-* Drag & Drop Upload
-* File Size Display
-* Upload Success Notification
-* Upload Error Notification
-
----
-
-# 11. Recommended Tech Stack
+## 8. Tech Stack (Thuc te)
 
 Frontend:
-
-```text
-Next.js
-TypeScript
-TailwindCSS
-Shadcn/UI
-React Hook Form
-Zod
-TanStack Query
-```
-
-Upload:
-
-```text
-S3 Presigned URL
-Multipart Upload
-```
+- Next.js 15 (App Router)
+- React 19 + TypeScript 5.8
+- OpenLayers 10.9 (ban do)
+- CSS modules (inline styles)
 
 Backend:
+- Spring Boot 4.0.6 + Java 17
+- MySQL 8.0 (database: `mekong`)
+- S3-compatible storage (backup.hci.vn, bucket: c01-mekong-prod-01)
+- AWS SDK v2 cho S3 operations
 
-```text
-Spring Boot
-PostgreSQL
-MinIO / S3 Storage
-```
+Upload:
+- Multipart upload qua S3Controller
+- Signed URLs cho download
+- DB tracking qua `s3_object` table
+
+---
+
+## 9. User Experience Requirements
+
+- Responsive Design
+- Dark Mode Support (localStorage theme)
+- Upload Progress Bar
+- Validation Before Upload
+- Drag & Drop Upload
+- File Size Display
+- Upload Success/Error Notification

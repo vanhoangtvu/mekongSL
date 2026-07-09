@@ -1,72 +1,66 @@
-# 💾 BACKUP STRATEGY
+# Backup Strategy
 
-## 📊 Phân chia lưu trữ
+## Phan chia luu tru
 
-### MySQL (Server) - Dữ liệu thô
-- ✅ Bảng `mekong` - Dữ liệu từ Mekong API
-- ✅ Bảng `ecowitt` - Dữ liệu từ Ecowitt API  
-- ✅ Bảng `users` - User accounts
-- ✅ Query nhanh, real-time access
+### MySQL (Server) - Du lieu tho
+- Bang `mekong_sensor` - Metadata cam bien Mekong
+- Bang `mekong_measurement` - Du lieu do dac (Salinity, PH, WaterLevel, Alkalinity)
+- Bang `ecowitt` - Du lieu thoi tiet Ecowitt
+- Bang `users` - User accounts
+- Bang `articles` - Tin tuc/bai viet
+- Bang GIS metadata: `layer`, `dataset`, `s3_object`, `layer_object`, `tag`, `tag_link`, `layer_folder`
+- Bang `manual_station`, `water_quality_sample`, `water_quality_parameter`
+- Query nhanh, real-time access
 
 ### S3 (backup.hci.vn) - Files & Backup
-- ✅ **Raster layers** - GeoTIFF files (.tif, .tfw)
-- ✅ **MySQL backups** - Daily automated backup
-- ✅ **User uploads** - Documents, images
+- **GIS Data**: GeoTIFF layers, world files (.tif, .tfw) trong `gis-data/`
+- **Station Data**: CSV files trong `station-data/`
+- **Monitoring Data**: CSV files trong `monitoring-data/`
+- **News Images**: Anh bai viet trong `news-images/`
+- **User uploads**: Documents, images trong `uploads/`
+- **MySQL backups**: Daily automated backup trong `backups/`
 
----
-
-## 🔄 Backup tự động
-
-### Scheduled Job
-```java
-@Scheduled(cron = "0 0 0 * * ?") // Mỗi ngày lúc 00:00
-public void backupMysqlToS3() {
-    1. Export MySQL → SQL file
-    2. Compress → GZIP
-    3. Upload to S3 → backups/mysql/20260525_000000_mekong.sql.gz
-    4. Delete local files
-}
-```
-
-### Cron Schedule
-- **Daily**: 00:00 (midnight)
-- **Retention**: 
-  - Daily backups: 7 days
-  - Weekly backups: 4 weeks  
-  - Monthly backups: 12 months
-
----
-
-## 📁 Cấu trúc S3
+## Cau truc S3 thuc te
 
 ```
 c01-mekong-prod-01/
-├── raster/                           # GeoTIFF layers
-│   ├── salinity/
-│   │   ├── salinity_313_900.tif     # Raster data
-│   │   └── salinity_313_900.tfw     # World file
-│   ├── temperature/
-│   └── water_level/
-│
-├── backups/                          # MySQL backups
-│   └── mysql/
-│       ├── 20260525_000000_mekong.sql.gz
-│       ├── 20260526_000000_mekong.sql.gz
-│       └── manual_20260525_120000_mekong.sql.gz
-│
-└── uploads/                          # User files
-    ├── 20260525_183000_report.pdf
-    └── 20260525_183100_data.xlsx
+├── gis-data/                          # GIS raster/vector layers
+│   ├── landsat-imagery/               # Landsat bands
+│   ├── hydrology/                     # Salinity, Tidal, pH
+│   │   └── salinity/{year}/{month}/{day}/{time}/raster/
+│   ├── baseline-environment/          # Landuse, soil, water body...
+│   │   └── landuse-classification/{class}/{year}/raster/
+│   └── ...
+├── station-data/                      # Data files theo station
+│   └── {stationCode}/{parameter}/{year}/{month}/{day}/{time}/
+├── monitoring-data/                   # Monitoring data files
+│   └── {monitoringCode}/{parameter}/{year}/{month}/{day}/{time}/
+├── news-images/                       # Anh cho articles
+├── uploads/                           # User upload files
+└── backups/                           # MySQL database backups
 ```
 
----
+## S3 Operations
 
-## 🚀 API Endpoints
+He thong ho tro day du cac thao tac S3:
+- **Upload**: Upload file voi key tuy chinh hoac tu dong, kiem tra kich thuoc va trung lap
+- **Download**: Download file, ho tro HTTP Range requests
+- **List**: Liet ke files va folders (voi delimiter)
+- **Delete**: Xoa file don le hoac folder de quy
+- **Copy**: Sao chep file trong bucket
+- **Rename**: Doi ten file (copy + delete)
+- **Rename Folder**: Doi ten toan bo folder (copy + delete tung object)
+- **Create Folder**: Tao folder (zero-byte placeholder object)
+- **Signed URLs**: Tao presigned GET URLs voi thoi han tuy chinh
+- **Render**: Phuc vu GeoTIFF inline (chi gis-data/ prefix), ho tro Range requests cho geotiff.js
+- **Stats**: Thong ke dung luong theo category (geotiff, backup, spreadsheet, image, document, archive, data)
+
+## API Endpoints
 
 ### Trigger manual backup
 ```bash
 POST /api/backup/trigger
-Authorization: Bearer <manager_token>
+Authorization: Bearer <token>
 
 # Response
 {
@@ -75,21 +69,25 @@ Authorization: Bearer <manager_token>
 }
 ```
 
-### Upload raster layer
+### Upload file
 ```bash
 POST /api/s3/upload
-Authorization: Bearer <manager_token>
+Authorization: Bearer <token>
 Content-Type: multipart/form-data
 
-# Upload GeoTIFF
-curl -X POST http://14.227.143.142:8084/api/s3/upload \
+# Upload voi key tu dong
+curl -X POST http://localhost:8084/api/s3/upload \
   -H "Authorization: Bearer $TOKEN" \
-  -F "file=@salinity_map.tif"
+  -F "file=@data.tif"
+
+# Upload voi key tuy chinh (phai co prefix hop le: gis-data/, station-data/, monitoring-data/, news-images/)
+curl -X POST http://localhost:8084/api/s3/upload \
+  -H "Authorization: Bearer $TOKEN" \
+  -F "key=gis-data/hydrology/salinity/2026/raster/salinity.tif" \
+  -F "file=@salinity.tif"
 ```
 
----
-
-## 🔧 Configuration
+## Configuration
 
 ### application.yaml
 ```yaml
@@ -104,57 +102,29 @@ s3:
   bucket: c01-mekong-prod-01
   access-key: ${S3_ACCESS_KEY}
   secret-key: ${S3_SECRET_KEY}
+  region: us-east-1
+  max-file-size: 104857600  # 100MB
 ```
 
----
+## Dependencies
 
-## 📊 Storage Estimate
+- AWS SDK v2 (`software.amazon.awssdk:s3:2.20.26`)
+- S3Presigner cho signed URLs
+- Path-style access cho S3-compatible endpoints
 
-### MySQL (Server)
-- Mekong data: ~100 MB/month
-- Ecowitt data: ~50 MB/month
-- Users: ~1 MB
-- **Total**: ~150 MB/month
+## Loi ich
 
-### S3 (Backup)
-- Daily backups: ~150 MB × 7 days = ~1 GB
-- Raster layers: ~2 GB (one-time)
-- User uploads: ~500 MB/month
-- **Total**: ~3.5 GB
-
----
-
-## 🧪 Test Backup
-
-```bash
-# 1. Login
-TOKEN=$(curl -s -X POST http://14.227.143.142:8084/api/auth/login \
-  -H "Content-Type: application/json" \
-  -d '{"username":"manager","password":"manager123"}' | jq -r '.token')
-
-# 2. Trigger manual backup
-curl -X POST http://14.227.143.142:8084/api/backup/trigger \
-  -H "Authorization: Bearer $TOKEN"
-
-# 3. List backups
-curl -X GET http://14.227.143.142:8084/api/s3/list?prefix=backups/mysql/ \
-  -H "Authorization: Bearer $TOKEN"
-```
-
----
-
-## ✅ Lợi ích
-
-1. **MySQL** - Dữ liệu thô, query nhanh
-2. **S3 Raster** - GeoTIFF layers cho map
+1. **MySQL** - Du lieu tho, query nhanh
+2. **S3 Raster** - GeoTIFF layers cho map, phuc vu qua signed URLs
 3. **S3 Backup** - Disaster recovery
-4. **Automated** - Không cần can thiệp thủ công
-5. **Compliance** - Object locking 7 days
+4. **S3 DB Tracking** - `s3_object` table theo doi moi file tren S3
+5. **Soft Delete** - Xoa logic thay vi xoa cung trong DB
+6. **Category Stats** - Thong ke dung luong theo loai file
 
 ---
 
-**Kiến trúc này tối ưu cho:**
-- ⚡ Performance (MySQL)
-- 💾 Storage (S3)
-- 🔒 Security (Backup)
-- 💰 Cost-effective
+**Kien truc nay toi uu cho:**
+- Performance (MySQL + S3 presigned URLs)
+- Storage (S3 object storage)
+- Security (JWT auth + prefix validation)
+- Cost-effective

@@ -1,3 +1,5 @@
+export type TimeScale = "year" | "day" | "hour";
+
 export type DatasetItem = {
   id: string;
   name: string;
@@ -8,6 +10,7 @@ export type DatasetItem = {
   gisData?: boolean;
   group?: "gis" | "station" | "monitoring";
   type?: string;
+  timeScale?: TimeScale;
 };
 
 export const DATASETS: DatasetItem[] = [
@@ -18,14 +21,14 @@ export const DATASETS: DatasetItem[] = [
     slug: "landsat-imagery",
     group: "gis",
     children: [
-      { id: "landsat-b1", name: "Band 1", slug: "band-1", type: "raster" },
-      { id: "landsat-b2", name: "Band 2", slug: "band-2", type: "raster" },
-      { id: "landsat-b3", name: "Band 3", slug: "band-3", type: "raster" },
-      { id: "landsat-b4", name: "Band 4", slug: "band-4", type: "raster" },
-      { id: "landsat-b5", name: "Band 5", slug: "band-5", type: "raster" },
-      { id: "landsat-b6", name: "Band 6", slug: "band-6", type: "raster" },
-      { id: "landsat-b7", name: "Band 7", slug: "band-7", type: "raster" },
-      { id: "landsat-rgb", name: "Composite (RGB)", slug: "rgb", type: "raster" },
+      { id: "landsat-b1", name: "Band 1", slug: "band-1", type: "raster", timeScale: "year" },
+      { id: "landsat-b2", name: "Band 2", slug: "band-2", type: "raster", timeScale: "year" },
+      { id: "landsat-b3", name: "Band 3", slug: "band-3", type: "raster", timeScale: "year" },
+      { id: "landsat-b4", name: "Band 4", slug: "band-4", type: "raster", timeScale: "year" },
+      { id: "landsat-b5", name: "Band 5", slug: "band-5", type: "raster", timeScale: "year" },
+      { id: "landsat-b6", name: "Band 6", slug: "band-6", type: "raster", timeScale: "year" },
+      { id: "landsat-b7", name: "Band 7", slug: "band-7", type: "raster", timeScale: "year" },
+      { id: "landsat-rgb", name: "Composite (RGB)", slug: "rgb", type: "raster", timeScale: "year" },
     ],
   },
   {
@@ -34,9 +37,9 @@ export const DATASETS: DatasetItem[] = [
     slug: "administration",
     group: "gis",
     children: [
-      { id: "admin-province", name: "Province", slug: "province", source: "GIS website Vinh Long", scale: "Province scale" },
-      { id: "admin-community", name: "Community", slug: "community", scale: "Province scale" },
-      { id: "admin-hamlet", name: "Hamlet", slug: "hamlet", scale: "Province scale" },
+      { id: "admin-province", name: "Province", slug: "province", source: "GIS website Vinh Long", scale: "Province scale", timeScale: "year" },
+      { id: "admin-community", name: "Community", slug: "community", scale: "Province scale", timeScale: "year" },
+      { id: "admin-hamlet", name: "Hamlet", slug: "hamlet", scale: "Province scale", timeScale: "year" },
     ],
   },
   {
@@ -45,41 +48,41 @@ export const DATASETS: DatasetItem[] = [
     slug: "baseline-environment",
     group: "gis",
     children: [
-      { id: "baseline-landuse-plan", name: "Landuse Planning", slug: "landuse-planning", scale: "Province, Community" },
-      { id: "baseline-soil", name: "Soil Type", slug: "soil-type", scale: "Province" },
-      { id: "baseline-waterbody", name: "Water Body", slug: "water-body", scale: "Province" },
+      { id: "baseline-landuse-plan", name: "Landuse Planning", slug: "landuse-planning", scale: "Province, Community", timeScale: "year" },
+      { id: "baseline-soil", name: "Soil Type", slug: "soil-type", scale: "Province", timeScale: "year" },
+      { id: "baseline-waterbody", name: "Water Body", slug: "water-body", scale: "Province", timeScale: "year" },
       {
         id: "baseline-channel",
         name: "Channel System",
         slug: "channel-system",
         scale: "Province",
         children: [
-          { id: "channel-system/river", name: "River", slug: "river" },
-          { id: "channel-system/canal", name: "Canal", slug: "canal" },
-          { id: "channel-system/sluice", name: "Sluice", slug: "sluice" },
-          { id: "channel-system/pump-station", name: "Pump Station", slug: "pump-station" },
-          { id: "channel-system/dike-embankments", name: "Dike & Embankments", slug: "dike-embankments" },
-          { id: "channel-system/irrigation", name: "Irrigation", slug: "irrigation" },
+          { id: "channel-system/river", name: "River", slug: "river", timeScale: "year" },
+          { id: "channel-system/canal", name: "Canal", slug: "canal", timeScale: "year" },
+          { id: "channel-system/sluice", name: "Sluice", slug: "sluice", timeScale: "year" },
+          { id: "channel-system/pump-station", name: "Pump Station", slug: "pump-station", timeScale: "year" },
+          { id: "channel-system/dike-embankments", name: "Dike & Embankments", slug: "dike-embankments", timeScale: "year" },
+          { id: "channel-system/irrigation", name: "Irrigation", slug: "irrigation", timeScale: "year" },
         ],
       },
-      { id: "baseline-groundwater", name: "Ground Water Storage", slug: "ground-water-storage", scale: "Province" },
-      { id: "baseline-road", name: "Road", slug: "road", scale: "Province" },
+      { id: "baseline-groundwater", name: "Ground Water Storage", slug: "ground-water-storage", scale: "Province", timeScale: "year" },
+      { id: "baseline-road", name: "Road", slug: "road", scale: "Province", timeScale: "year" },
       {
         id: "baseline-landuse-class",
         name: "Landuse Classification",
         slug: "landuse-classification",
         source: "Landsat GIS Interpretation",
         children: [
-          { id: "landuse-classification/aquaculture", name: "Aquaculture and Water Surface Lands" },
-          { id: "landuse-classification/rice-shrimp", name: "Rice-to-shrimp conversion area or Intensive shrimp farming" },
-          { id: "landuse-classification/perennial-crops", name: "Perennial crops, Fruit Orchards and Mangrove Forests" },
-          { id: "landuse-classification/residential-land", name: "Residential Land and Sandy Ridge Land" },
-          { id: "landuse-classification/coconut-garden", name: "Coconut Plantation, mix garden" },
-          { id: "landuse-classification/vegetable-crops", name: "Vegetable and Upland Crop Area" },
-          { id: "landuse-classification/rice-cultivation", name: "Rice Cultivation Zone" },
+          { id: "landuse-classification/aquaculture", name: "Aquaculture and Water Surface Lands", timeScale: "year" },
+          { id: "landuse-classification/rice-shrimp", name: "Rice-to-shrimp conversion area or Intensive shrimp farming", timeScale: "year" },
+          { id: "landuse-classification/perennial-crops", name: "Perennial crops, Fruit Orchards and Mangrove Forests", timeScale: "year" },
+          { id: "landuse-classification/residential-land", name: "Residential Land and Sandy Ridge Land", timeScale: "year" },
+          { id: "landuse-classification/coconut-garden", name: "Coconut Plantation, mix garden", timeScale: "year" },
+          { id: "landuse-classification/vegetable-crops", name: "Vegetable and Upland Crop Area", timeScale: "year" },
+          { id: "landuse-classification/rice-cultivation", name: "Rice Cultivation Zone", timeScale: "year" },
         ],
       },
-      { id: "baseline-salinity", name: "Salinity Intrusion", slug: "salinity-intrusion", source: "Province/Other Dataset" },
+      { id: "baseline-salinity", name: "Salinity Intrusion", slug: "salinity-intrusion", source: "Province/Other Dataset", timeScale: "year" },
     ],
   },
   {
@@ -88,11 +91,11 @@ export const DATASETS: DatasetItem[] = [
     slug: "ecology",
     group: "gis",
     children: [
-      { id: "ecology-biodiversity", name: "Biodiversity", slug: "biodiversity", scale: "Province" },
-      { id: "ecology-vegetation", name: "Vegetation Index", slug: "vegetation-index", source: "Landsat GIS Interpretation" },
-      { id: "ecology-habitat", name: "Habitat Mapping", slug: "habitat-mapping", scale: "Province" },
-      { id: "ecology-species", name: "Species Distribution", slug: "species-distribution" },
-      { id: "ecology-mangroves", name: "Mangroves", slug: "mangroves", source: "Landsat GIS Interpretation" },
+      { id: "ecology-biodiversity", name: "Biodiversity", slug: "biodiversity", scale: "Province", timeScale: "year" },
+      { id: "ecology-vegetation", name: "Vegetation Index", slug: "vegetation-index", source: "Landsat GIS Interpretation", timeScale: "year" },
+      { id: "ecology-habitat", name: "Habitat Mapping", slug: "habitat-mapping", scale: "Province", timeScale: "year" },
+      { id: "ecology-species", name: "Species Distribution", slug: "species-distribution", timeScale: "year" },
+      { id: "ecology-mangroves", name: "Mangroves", slug: "mangroves", source: "Landsat GIS Interpretation", timeScale: "year" },
     ],
   },
   {
@@ -100,6 +103,7 @@ export const DATASETS: DatasetItem[] = [
     name: "Flooding Modeling",
     slug: "flooding-modeling",
     group: "gis",
+    timeScale: "year",
   },
   {
     id: "hydrology",
@@ -107,9 +111,9 @@ export const DATASETS: DatasetItem[] = [
     slug: "hydrology",
     group: "gis",
     children: [
-      { id: "hydro-salinity", name: "Salinity", slug: "salinity", type: "raster" },
-      { id: "hydro-temp", name: "Tidal", slug: "tidal", type: "raster" },
-      { id: "hydro-ph", name: "pH", slug: "ph", type: "raster" },
+      { id: "hydro-salinity", name: "Salinity", slug: "salinity", type: "raster", timeScale: "hour" },
+      { id: "hydro-temp", name: "Tidal", slug: "tidal", type: "raster", timeScale: "hour" },
+      { id: "hydro-ph", name: "pH", slug: "ph", type: "raster", timeScale: "hour" },
     ],
   },
   // ── Station Data ──────────────────────────────────────────
@@ -118,6 +122,7 @@ export const DATASETS: DatasetItem[] = [
     name: "Weather",
     slug: "weather",
     group: "station",
+    timeScale: "year",
   },
   // ── Monitoring Data ───────────────────────────────────────
   {
@@ -126,8 +131,8 @@ export const DATASETS: DatasetItem[] = [
     slug: "water-quality",
     group: "monitoring",
     children: [
-      { id: "wq-surface", name: "Surface Water", slug: "surface-water", scale: "Province scale" },
-      { id: "wq-ground", name: "Ground Water", slug: "ground-water", scale: "Province scale" },
+      { id: "wq-surface", name: "Surface Water", slug: "surface-water", scale: "Province scale", timeScale: "year" },
+      { id: "wq-ground", name: "Ground Water", slug: "ground-water", scale: "Province scale", timeScale: "year" },
     ],
   },
 ];
@@ -185,6 +190,10 @@ export function getRootDataset(childId: string): DatasetItem | undefined {
     if (!parent) return current;
     current = parent;
   }
+}
+
+export function getTimeScale(datasetId: string): TimeScale {
+  return getDatasetById(datasetId)?.timeScale || "year";
 }
 
 export function buildGisS3Path(

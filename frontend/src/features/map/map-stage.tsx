@@ -16,12 +16,13 @@ import Point from "ol/geom/Point";
 import { Style, Circle, Fill, Stroke, Text } from "ol/style";
 import proj4 from "proj4";
 import { register } from "ol/proj/proj4";
-import { DATASETS, getRootDataset, getDatasetSlug, getParentDataset, getDatasetById } from "../../lib/constants/datasets";
+import { DATASETS, getRootDataset, getDatasetSlug, getParentDataset, getDatasetById, getTimeScale, type TimeScale } from "../../lib/constants/datasets";
 import { ECOWITT_DEVICES, type EcowittDevice } from "../../lib/constants/data-sources";
 import { useS3DatasetLayers } from "./useS3DatasetLayers";
 import type { ManualStation } from "../../lib/admin-api";
 import { listWaterQualitySamples, getWaterQualitySample, getBackendAdminUrl, listS3Files, type WaterQualitySampleDto } from "../../lib/admin-api";
 import { MapPin, Activity, Image, Calendar, X, Play, Pause, SkipForward, SkipBack, Layers, Clock, Map as MapIcon } from "lucide-react";
+import { TemporalTimelineControl } from "./temporal-timeline-control";
 
 // Register UTM 48N projection
 proj4.defs("EPSG:32648", "+proj=utm +zone=48 +datum=WGS84 +units=m +no_defs");
@@ -1131,6 +1132,84 @@ export const MapStage = React.memo(function MapStage({ startDateTime, endDateTim
   const timelapseSupported = !hasAppliedDatasets || (appliedDatasets ?? []).every(d => 
     HYDROLOGY_IDS.has(d.id) || IGNORE_TIMELAPSE_BLOCKERS.has(d.id)
   );
+
+  // ── Temporal Timeline Control state ──
+  // activeScale follows the top-most layer (last in appliedDatasets).
+  // Manual override by clicking a row is allowed, but adding/removing
+  // datasets resets the override.
+  const [scaleOverride, setScaleOverride] = useState<TimeScale | null>(null);
+
+  const activeTemporalScale = useMemo<TimeScale>(() => {
+    if (scaleOverride) return scaleOverride;
+    if (!appliedDatasets?.length) return "hour";
+    const top = appliedDatasets[appliedDatasets.length - 1];
+    return getTimeScale(top.id);
+  }, [appliedDatasets, scaleOverride]);
+
+  useEffect(() => {
+    setScaleOverride(null);
+  }, [appliedDatasets]);
+
+  const handleTemporalScaleChange = useCallback((scale: TimeScale) => {
+    setScaleOverride(scale);
+  }, []);
+
+  const temporalYearValue = useMemo(() => {
+    const d = timelineDate ? new Date(timelineDate + "T00:00:00") : new Date();
+    return d.getFullYear();
+  }, [timelineDate]);
+
+  const temporalDayValue = useMemo(() => {
+    if (!timelineDate) return "01-01";
+    const parts = timelineDate.split("-");
+    return `${parts[1] || "01"}-${parts[2] || "01"}`;
+  }, [timelineDate]);
+
+  const temporalHourValue = useMemo(() => {
+    if (!timeSlot) return "0";
+    return `${parseInt(timeSlot.split("-")[0] || "0", 10)}`;
+  }, [timeSlot]);
+
+  const temporalApplicableScales = useMemo<TimeScale[]>(() => {
+    if (!appliedDatasets?.length) return ["year", "day", "hour"];
+    const scales = new Set<TimeScale>();
+    for (const d of appliedDatasets) scales.add(getTimeScale(d.id));
+    return Array.from(scales);
+  }, [appliedDatasets]);
+
+  const handleTemporalYearChange = useCallback((year: number) => {
+    const newDate = `${year}-${temporalDayValue.replace("-", "-")}`;
+    setTimelineDate(newDate);
+    setTimeSlot(`${temporalHourValue.padStart(2, "0")}-00`);
+  }, [temporalDayValue, temporalHourValue]);
+
+  const handleTemporalDayChange = useCallback((month: number, day: number) => {
+    const newDate = `${temporalYearValue}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+    setTimelineDate(newDate);
+    setTimeSlot(`${temporalHourValue.padStart(2, "0")}-00`);
+  }, [temporalYearValue, temporalHourValue]);
+
+  const handleTemporalHourChange = useCallback((hour: number) => {
+    setTimeSlot(`${String(hour).padStart(2, "0")}-00`);
+  }, []);
+
+  const handleTemporalPlayPause = useCallback(() => {
+    if (isTimelinePlaying) {
+      setIsTimelinePlaying(false);
+    } else {
+      setPbStartDate("");
+      setPbEndDate("");
+      setPbError("");
+      setShowPlaybackPicker(true);
+    }
+  }, [isTimelinePlaying]);
+
+  const handleTemporalTimeLapse = useCallback(() => {
+    setPbStartDate("");
+    setPbEndDate("");
+    setPbError("");
+    setShowPlaybackPicker(true);
+  }, []);
 
   const s3Result = useS3DatasetLayers(
     appliedDatasets, mapRef,
@@ -2575,175 +2654,25 @@ export const MapStage = React.memo(function MapStage({ startDateTime, endDateTim
             )}
           </div>
 
-          {/* Top Control Bar (Timeline & Playback) */}
+          {/* Top Control Bar — Temporal Timeline */}
           <div className="map-top-bar">
-            {showTimeline && !isTimelinePlaying && (
-              <div 
-                className="map-timeline-container" 
-                data-unit-mode={timelineData.mode} 
-                title="Timeline control"
-                onMouseLeave={() => setHoverTime(null)}
-
-              >
-                {hoverTime && (
-                  <div 
-                    className="map-timeline-tooltip"
-                    style={{ 
-                      left: `${tooltipPos.x}px`, 
-                      top: `${tooltipPos.y}px`,
-                      position: 'absolute',
-                      zIndex: 100
-                    }}
-                  >
-                    {hoverTime}
-                  </div>
-                )}
-                <div className="map-timeline-header">
-                  <div className="map-timeline-unit-control">
-                    <button 
-                      className={`map-timeline-unit-toggle ${showUnitMenu ? 'is-active' : ''}`}
-                      onClick={() => setShowUnitMenu(!showUnitMenu)}
-                      title="Select timeline unit"
-                      type="button"
-                    >
-                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                        <path d="M4 21v-7"></path>
-                        <path d="M4 10V3"></path>
-                        <path d="M12 21v-9"></path>
-                        <path d="M12 8V3"></path>
-                        <path d="M20 21v-5"></path>
-                        <path d="M20 12V3"></path>
-                        <line x1="1" y1="14" x2="7" y2="14"></line>
-                        <line x1="9" y1="8" x2="15" y2="8"></line>
-                        <line x1="17" y1="16" x2="23" y2="16"></line>
-                      </svg>
-                      <span className="unit-label-current">{timelineUnitOptions.find(o => o.value === timelineUnitMode)?.label}</span>
-                    </button>
-
-                    {showUnitMenu && (
-                      <div className="map-timeline-unit-dropdown">
-                        {timelineUnitOptions.map((option) => (
-                          <button
-                            key={option.value}
-                            className={`map-timeline-unit-option ${timelineUnitMode === option.value ? "is-active" : ""}`}
-                            onClick={() => {
-                              setTimelineUnitMode(option.value);
-                              setShowUnitMenu(false);
-                            }}
-                            type="button"
-                          >
-                            {option.label}
-                          </button>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                </div>
-                
-                <div 
-                  ref={scrollerRef}
-                  className="map-timeline-scroller" 
-                  onClick={(event) => event.stopPropagation()}
-                  onMouseMove={(e) => {
-                    const containerRect = e.currentTarget.parentElement?.getBoundingClientRect();
-                    if (!containerRect) return;
-
-                    const rect = e.currentTarget.getBoundingClientRect();
-                    const x = e.clientX - rect.left;
-                    const ratio = Math.max(0, Math.min(1, x / rect.width));
-                    const index = Math.round(ratio * (timelineUnits.length - 1));
-                    const unit = timelineUnits[index];
-
-                    if (unit) {
-                      setHoverTime(unit.label);
-                      setHoverPos({
-                        x: e.clientX - containerRect.left,
-                        y: e.clientY - containerRect.top - 25,
-                      });
-                    }
-                  }}
-                  onTouchMove={(e) => {
-                    const containerRect = e.currentTarget.parentElement?.getBoundingClientRect();
-                    if (!containerRect) return;
-
-                    const rect = e.currentTarget.getBoundingClientRect();
-                    const touch = e.touches[0];
-                    if (!touch) return;
-                    const x = touch.clientX - rect.left;
-                    const ratio = Math.max(0, Math.min(1, x / rect.width));
-                    const index = Math.round(ratio * (timelineUnits.length - 1));
-                    const unit = timelineUnits[index];
-
-                    if (unit) {
-                      setHoverTime(unit.label);
-                      setHoverPos({
-                        x: touch.clientX - containerRect.left,
-                        y: touch.clientY - containerRect.top - 25,
-                      });
-                    }
-                  }}
-                  onTouchEnd={() => setHoverTime(null)}
-                >
-                  <div className="map-timeline-inner">
-                    <div className="map-timeline-track-wrap">
-                      <input
-                        className="map-timeline-slider"
-                        max={Math.max(0, timelineUnits.length - 1)}
-                        min="0"
-                        onChange={(event) => setTimelineIndex(Number(event.target.value))}
-                        style={{
-                          "--timeline-fill": `${(timelineIndex / Math.max(1, timelineUnits.length - 1)) * 100}%`,
-                        } as CSSProperties}
-                        type="range"
-                        value={timelineIndex}
-                      />
-                    </div>
-                    <div className="map-timeline-ticks">
-                      {timelineUnits.map((unit, index) => (
-                        <span
-                          key={unit.value}
-                          data-label={unit.label}
-                          data-major={unit.isMajor ? "true" : "false"}
-                          className={`map-timeline-tick ${index === timelineIndex ? "is-active" : ""}`}
-                        />
-                      ))}
-                    </div>
-                  </div>
-                </div>
-              </div>
+            {!isTimelinePlaying && (
+              <TemporalTimelineControl
+                activeScale={activeTemporalScale}
+                yearValue={temporalYearValue}
+                dayValue={temporalDayValue}
+                hourValue={temporalHourValue}
+                applicableScales={temporalApplicableScales}
+                onYearChange={handleTemporalYearChange}
+                onDayChange={handleTemporalDayChange}
+                onHourChange={handleTemporalHourChange}
+                onScaleChange={handleTemporalScaleChange}
+                onPlayPause={handleTemporalPlayPause}
+                onTimeLapse={handleTemporalTimeLapse}
+                isPlaying={isTimelinePlaying}
+                isMobile={isMobile}
+              />
             )}
-
-            {/* Time-Lapse Button & Dropdown Control */}
-            <div className="map-playback-control" style={{ position: "relative" }}>
-              <button
-                className="map-playback-btn"
-                onClick={timelapseSupported ? handleOpenPlayback : undefined}
-                type="button"
-                title={timelapseSupported ? "Time-lapse map animation" : "Timeline only applies to Hydrology data (Salinity, Tidal, pH)"}
-                style={!timelapseSupported ? { opacity: 0.45, cursor: "not-allowed" } : undefined}
-              >
-                <Play size={14} fill="currentColor" />
-                <span>Time-Lapse</span>
-              </button>
-              {!timelapseSupported && hasAppliedDatasets && (
-                <div style={{
-                  position: "absolute",
-                  bottom: "calc(100% + 6px)",
-                  right: 0,
-                  background: "#1e293b",
-                  color: "#f8fafc",
-                  fontSize: "0.72rem",
-                  borderRadius: "6px",
-                  padding: "5px 9px",
-                  whiteSpace: "nowrap",
-                  pointerEvents: "none",
-                  boxShadow: "0 2px 8px rgba(0,0,0,0.25)",
-                  zIndex: 600,
-                }}>
-                  ⚠ Timeline không áp dụng cho layer này
-                </div>
-              )}
-            </div>
           </div>
 
           {/* Base Layer Switcher */}
