@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://14.227.143.142:8084/api';
+const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://123.22.61.134:8084/api';
 
 export async function GET(request: NextRequest) {
   const key = request.nextUrl.searchParams.get('key');

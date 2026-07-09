@@ -2,7 +2,7 @@ import { authService } from './auth';
 import { DEFAULT_DATA_SOURCE, type DataSourceKey } from './constants/data-sources';
 import type { DataRecord } from './utils/record-utils';
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://14.227.143.142:8084/api';
+const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://123.22.61.134:8084/api';
 export { API_URL };
 
 export type AdminRole = 'USER' | 'DATA_MANAGER' | 'ADMIN';

@@ -8,7 +8,7 @@ export const metadata: Metadata = {
   description: "Cập nhật các tin tức, sự kiện và thông báo mới nhất từ hệ thống WebGIS.",
 };
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://14.227.143.142:8084/api";
+const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://123.22.61.134:8084/api";
 
 interface NewsArticle {
   id: number;
