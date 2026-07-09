@@ -23,6 +23,7 @@ import type { ManualStation } from "../../lib/admin-api";
 import { listWaterQualitySamples, getWaterQualitySample, getBackendAdminUrl, listS3Files, type WaterQualitySampleDto } from "../../lib/admin-api";
 import { MapPin, Activity, Image, Calendar, X, Play, Pause, SkipForward, SkipBack, Layers, Clock, Map as MapIcon } from "lucide-react";
 import { TemporalTimelineControl } from "./temporal-timeline-control";
+import { useLanduseYearlyStats } from "./useLanduseYearlyStats";
 
 // Register UTM 48N projection
 proj4.defs("EPSG:32648", "+proj=utm +zone=48 +datum=WGS84 +units=m +no_defs");
@@ -276,6 +277,7 @@ type MapStageProps = {
   onEndDateTimeChange?: (val: string) => void;
   waterQualityStations?: ManualStation[];
   isMobile?: boolean;
+  hoveredDatasetId?: string | null;
 };
 
 function parseDateTimeLocal(value: string) {
@@ -438,6 +440,12 @@ function translateLegendLabel(label: string): string {
 
 function isLanduseLayer(key: string): boolean {
   return key.startsWith("landuse-classification/");
+}
+
+function normalizeLanduseKey(key: string): string {
+  let id = key.split("__")[0];
+  id = id.replace(/-(raster|vector)$/, "");
+  return id;
 }
 
 // ---------------------------------------------------------------------------
@@ -926,7 +934,7 @@ function EcowittStationPopup({
   );
 }
 
-export const MapStage = React.memo(function MapStage({ startDateTime, endDateTime, appliedDatasets, onRemoveDataset, onAddDataset, onStartDateTimeChange, onEndDateTimeChange, waterQualityStations, isMobile }: MapStageProps) {
+export const MapStage = React.memo(function MapStage({ startDateTime, endDateTime, appliedDatasets, onRemoveDataset, onAddDataset, onStartDateTimeChange, onEndDateTimeChange, waterQualityStations, isMobile, hoveredDatasetId }: MapStageProps) {
   // console.log("[MapStage] render", { datasets: appliedDatasets, single: (appliedDatasets?.length ?? 0) === 1 });
   const mapContainerRef = useRef<HTMLDivElement | null>(null);
   const scrollerRef = useRef<HTMLDivElement | null>(null);
@@ -951,43 +959,69 @@ export const MapStage = React.memo(function MapStage({ startDateTime, endDateTim
   const pendingStationRef = useRef<{ type: 'wq'; id: number; st: ManualStation } | { type: 'ecowitt'; id: string } | null>(null);
   const skipZoomRef = useRef(false);
   const overlayVisibilityRef = useRef<Record<string, boolean> | null>(null);
+  const pointermoveThrottleRef = useRef<number>(0);
+  const pointermoveRafRef = useRef<ReturnType<typeof requestAnimationFrame> | null>(null);
 
-  const [landuseStats, setLanduseStats] = useState<Record<string, { areaHa: number; percentage: number } | null>>({});
-  const landuseStatsCache = useRef<Record<string, { areaHa: number; percentage: number } | null | undefined>>({});
+  const [landuseStats, setLanduseStats] = useState<Record<string, { areaHa: number; percentage: number; classPixels?: number } | null>>({});
+  const landuseStatsCache = useRef<Record<string, { areaHa: number; percentage: number; classPixels?: number } | null | undefined>>({});
   const landuseStatsLoading = useRef<Record<string, boolean>>({});
 
+  const [activeLuId, setActiveLuId] = useState<string | null>(null);
+  const luYearly = useLanduseYearlyStats(activeLuId);
+  const [isInspectorCollapsed, setIsInspectorCollapsed] = useState(false);
+
   const computeLanduseStats = useCallback(async (layerKey: string, proxyUrl: string) => {
-    if (landuseStatsLoading.current[layerKey]) return;
-    const cached = landuseStatsCache.current[layerKey];
+    const normalizedKey = normalizeLanduseKey(layerKey);
+    if (landuseStatsLoading.current[normalizedKey]) return;
+    const cached = landuseStatsCache.current[normalizedKey];
     if (cached !== undefined) {
-      setLanduseStats(prev => ({ ...prev, [layerKey]: cached }));
+      setLanduseStats(prev => ({ ...prev, [normalizedKey]: cached }));
       return;
     }
-    landuseStatsLoading.current[layerKey] = true;
+    landuseStatsLoading.current[normalizedKey] = true;
     try {
       const fullUrl = proxyUrl.startsWith("http") ? proxyUrl : `${window.location.origin}${proxyUrl}`;
       const tiff = await fromUrl(fullUrl);
       const image = await tiff.getImage();
       const data = await image.readRasters();
-      const band = data[0] as Float32Array | Int16Array | Uint8Array;
-      const resolution = image.getResolution();
-      const pixelAreaM2 = resolution[0] * resolution[1];
+      if (!data || data.length === 0) {
+        landuseStatsCache.current[normalizedKey] = null;
+        return;
+      }
+      const band = data[0];
+      if (!band || band.length === 0) {
+        landuseStatsCache.current[normalizedKey] = null;
+        return;
+      }
+      const rawNodata = image.getGDALNoData();
+      const nodata = rawNodata !== null && rawNodata !== undefined
+        ? Number(rawNodata)
+        : undefined;
+      const imgW = image.getWidth();
+      const imgH = image.getHeight();
+      const pixelAreaM2 = (93600 / imgW) * (64800 / imgH);
       let classPixels = 0;
       const totalPixels = band.length;
       for (let i = 0; i < band.length; i++) {
-        if (band[i] !== 0 && band[i] !== -9999) classPixels++;
+        const v = band[i];
+        if (v === 0) continue;
+        if (nodata !== undefined && !Number.isNaN(nodata) && v === nodata) continue;
+        if (v === -9999) continue;
+        classPixels++;
       }
       const areaHa = (classPixels * pixelAreaM2) / 10000;
       const percentage = totalPixels > 0 ? (classPixels / totalPixels) * 100 : 0;
-      const stats = { areaHa, percentage };
-      landuseStatsCache.current[layerKey] = stats;
-      setLanduseStats(prev => ({ ...prev, [layerKey]: stats }));
+      const stats = { areaHa, percentage, classPixels };
+      landuseStatsCache.current[normalizedKey] = stats;
+      setLanduseStats(prev => ({ ...prev, [normalizedKey]: stats }));
     } catch {
-      landuseStatsCache.current[layerKey] = null;
+      landuseStatsCache.current[normalizedKey] = null;
     } finally {
-      delete landuseStatsLoading.current[layerKey];
+      delete landuseStatsLoading.current[normalizedKey];
     }
   }, []);
+
+
 
   const hideOverlays = useCallback(() => {
     if (overlayVisibilityRef.current) return; // already saved
@@ -1193,6 +1227,50 @@ export const MapStage = React.memo(function MapStage({ startDateTime, endDateTim
     setTimeSlot(`${String(hour).padStart(2, "0")}-00`);
   }, []);
 
+  // Load stats for hovered landuse dataset from sidebar
+  useEffect(() => {
+    if (!hoveredDatasetId || !isLanduseLayer(hoveredDatasetId)) {
+      // Restore activeLuId when not hovering a sidebar item
+      const lKeys = Object.keys(pixelValues).filter(isLanduseLayer);
+      if (lKeys.length > 0) {
+        let id = lKeys[0].split("__")[0];
+        id = id.replace(/-(raster|vector)$/, "");
+        setActiveLuId(id);
+      } else {
+        const appliedLu = appliedDatasets?.find(d => isLanduseLayer(d.id));
+        if (appliedLu) {
+          setActiveLuId(appliedLu.id);
+        } else {
+          setActiveLuId(null);
+        }
+      }
+      return;
+    }
+
+    let active = true;
+    const loadHoveredStats = async () => {
+      try {
+        const prefix = `gis-data/baseline-environment/${hoveredDatasetId}/${temporalYearValue}/`;
+        const res = await listS3Files(prefix);
+        if (!active) return;
+        const tifFile = res.files.find(f => f.key?.match(/\.tiff?$/i));
+        if (tifFile && tifFile.key) {
+          const proxyUrl = `/api/tif?key=${encodeURIComponent(tifFile.key)}`;
+          await computeLanduseStats(hoveredDatasetId, proxyUrl);
+        }
+      } catch (err) {
+        console.warn("[map:hoverStats]", err);
+      }
+    };
+
+    setActiveLuId(hoveredDatasetId);
+    void loadHoveredStats();
+
+    return () => {
+      active = false;
+    };
+  }, [hoveredDatasetId, temporalYearValue, computeLanduseStats, pixelValues, appliedDatasets]);
+
   const handleTemporalPlayPause = useCallback(() => {
     if (isTimelinePlaying) {
       setIsTimelinePlaying(false);
@@ -1240,6 +1318,16 @@ export const MapStage = React.memo(function MapStage({ startDateTime, endDateTim
       computeLanduseStats(key, layerInfo.proxyUrl);
     }
   }, [pixelValues, computeLanduseStats]);
+
+  useEffect(() => {
+    const lKeys = Object.keys(pixelValues).filter(isLanduseLayer);
+    console.log("[map:luEffect] pixelValues landuse keys:", lKeys);
+    if (!lKeys.length) { setActiveLuId(null); return; }
+    let id = lKeys[0].split("__")[0];
+    id = id.replace(/-(raster|vector)$/, "");
+    console.log("[map:luEffect] setting activeLuId:", id);
+    setActiveLuId(function(prev) { return prev === id ? prev : id; });
+  }, [pixelValues]);
 
   // Merge layerRefs for inspector and other tools
   const layerRefs = useMemo(() => {
@@ -1885,8 +1973,6 @@ export const MapStage = React.memo(function MapStage({ startDateTime, endDateTim
 
       // Desktop: real-time pixel inspection on hover
       if (!isMobileRef.current) {
-        setMouseCoords(coordinate as [number, number]);
-
         const hoveredFeature = map.forEachFeatureAtPixel(evt.pixel, (f) => f as Feature | undefined);
         const hoveredDeviceId = hoveredFeature?.get("deviceId") as string | undefined;
         if (hoveredDeviceId) {
@@ -1894,6 +1980,44 @@ export const MapStage = React.memo(function MapStage({ startDateTime, endDateTim
         } else {
           map.getTargetElement().style.cursor = "";
         }
+
+        const now = performance.now();
+        if (now - pointermoveThrottleRef.current < 80) {
+          if (pointermoveRafRef.current) cancelAnimationFrame(pointermoveRafRef.current);
+          pointermoveRafRef.current = requestAnimationFrame(() => {
+            pointermoveRafRef.current = null;
+            pointermoveThrottleRef.current = performance.now();
+            const layers = layerRefs.current;
+            const collected: Record<string, number> = {};
+            let firstValue: number | null = null;
+            if (layers && typeof layers === 'object') {
+              const visibleLayers = Object.entries(layers)
+                .filter(([, layer]) => layer.getVisible())
+                .sort((a, b) => (b[1].getZIndex?.() ?? 0) - (a[1].getZIndex?.() ?? 0));
+              for (const [key, layer] of visibleLayers) {
+                try {
+                  if (!('getData' in layer)) continue;
+                  if (!renderedLayersRef.current[key]) continue;
+                  const buf = (layer as import("ol/layer/WebGLTile").default).getData(evt.pixel);
+                  if (buf && !(buf instanceof DataView) && buf.length > 0) {
+                    const val = buf[0];
+                    const info = renderedLayersRef.current[key];
+                    if (val !== 0 && val !== (info as { nodata?: number }).nodata) {
+                      collected[key] = val;
+                      if (firstValue === null) firstValue = val;
+                    }
+                  }
+                } catch { /* skip layer */ }
+              }
+            }
+            setPixelValues(collected);
+            setPixelValue(firstValue);
+          });
+          setMouseCoords(coordinate as [number, number]);
+          return;
+        }
+        pointermoveThrottleRef.current = now;
+        setMouseCoords(coordinate as [number, number]);
 
         const layers = layerRefs.current;
         const collected: Record<string, number> = {};
@@ -2831,94 +2955,286 @@ export const MapStage = React.memo(function MapStage({ startDateTime, endDateTim
           </div>
         )}
 
-        {Object.keys(pixelValues).length > 0 && mouseCoords !== null && (
+        {((Object.keys(pixelValues).length > 0 && mouseCoords !== null) || (hoveredDatasetId && isLanduseLayer(hoveredDatasetId))) && (
           <div className={`geo-map-inspector ${isMobile ? 'geo-map-inspector--mobile' : ''}`}>
-            <div className="geo-map-inspector-header">
-              <div className="geo-map-inspector-indicator" />
-              <span>Map Inspector</span>
-              {isMobile && (
+            {/* Header */}
+            <div 
+              className="geo-map-inspector-header"
+              style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', cursor: 'pointer', padding: '12px 16px' }}
+              onClick={() => setIsInspectorCollapsed(!isInspectorCollapsed)}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <div className="geo-map-inspector-indicator" />
+                <span style={{ fontWeight: '700', fontSize: '0.92rem', color: '#0f172a', textTransform: 'none', letterSpacing: 'normal' }}>Map Inspector</span>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                 <button
                   type="button"
-                  onClick={() => { setPixelValues({}); setMouseCoords(null); }}
-                  style={{ marginLeft: 'auto', background: 'none', border: 'none', cursor: 'pointer', color: '#64748b', padding: '2px 4px' }}
-                  aria-label="Close inspector"
+                  style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#64748b', display: 'flex', alignItems: 'center', padding: '2px' }}
+                  aria-label={isInspectorCollapsed ? "Expand inspector" : "Collapse inspector"}
                 >
-                  <X size={16} />
+                  <span style={{ fontSize: '0.72rem' }}>{isInspectorCollapsed ? "▼" : "▲"}</span>
                 </button>
-              )}
-            </div>
-            <div className="geo-map-inspector-body">
-              <div className="geo-map-inspector-row">
-                <span className="geo-map-inspector-label">UTM (48N):</span>
-                <span className="geo-map-inspector-val">
-                  {(() => {
-                    const lonLat = toLonLat(mouseCoords);
-                    const utm = transform(lonLat, 'EPSG:4326', 'EPSG:32648');
-                    return `${Math.round(utm[0])} m E, ${Math.round(utm[1])} m N`;
-                  })()}
-                </span>
+                {isMobile && (
+                  <button
+                    type="button"
+                    onClick={(e) => { e.stopPropagation(); setPixelValues({}); setMouseCoords(null); }}
+                    style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#64748b', display: 'flex', alignItems: 'center', padding: '2px' }}
+                    aria-label="Close inspector"
+                  >
+                    <X size={16} />
+                  </button>
+                )}
               </div>
-              {Object.entries(pixelValues).map(([key, val]) => {
-                const layerInfo = renderedLayers[key];
-                if (!layerInfo) return null;
-                const label = translateLegendLabel(layerInfo.name);
-                const unitMatch = label.match(/\(([^)]+)\)/);
-                const HYDRO_UNITS: Record<string, string> = {
-                  "hydro-salinity": "ppt",
-                  "hydro-temp": "cm",
-                  "hydro-ph": "",
-                };
-                const hydroPrefix = Object.keys(HYDRO_UNITS).find(p => key.startsWith(p));
-                const unit = hydroPrefix ? HYDRO_UNITS[hydroPrefix] : (unitMatch ? unitMatch[1] : "");
-                const isExpanded = inspectorExpandedKey === key;
-                const s3Key = layerInfo.type === "raster" || layerInfo.type === "vector" ? layerInfo.proxyUrl : "";
-                const dateMatch = s3Key.match(/\/(\d{4})\/(\d{2})\/(\d{2})\//);
-                const dateStr = dateMatch ? `${dateMatch[1]}-${dateMatch[2]}-${dateMatch[3]}` : null;
-                const luStats = isLanduseLayer(key) ? landuseStats[key] : undefined;
-                const statsLoading = isLanduseLayer(key) && landuseStatsLoading.current[key];
-                return (
-                  <div key={key} className="geo-map-inspector-layer">
-                    <button
-                      className="geo-map-inspector-layer-btn"
-                      type="button"
-                      onClick={() => setInspectorExpandedKey(isExpanded ? null : key)}
-                    >
-                      <span className={`geo-map-inspector-layer-name${isLanduseLayer(key) ? ' geo-map-inspector-layer-name--wrap' : ''}`}>{layerInfo.name}</span>
-                      {!isLanduseLayer(key) && (
-                        <span className="geo-map-inspector-val value-highlight">
-                          {val.toFixed(2)}{unit ? ` ${unit}` : ""}
-                        </span>
-                      )}
-                      <span className="geo-map-inspector-chevron">{isExpanded ? "▲" : "▼"}</span>
-                    </button>
-                    {isLanduseLayer(key) && (
-                      <div className="geo-map-inspector-landuse-stats">
-                        {statsLoading && !luStats && <span className="geo-map-inspector-label">Computing...</span>}
-                        {luStats && (
-                          <>
-                            <div><span className="geo-map-inspector-label">Area (ha):</span> {luStats.areaHa.toLocaleString(undefined, { maximumFractionDigits: 0 })}</div>
-                            <div><span className="geo-map-inspector-label">Landuse (%):</span> {luStats.percentage.toFixed(1)}%</div>
-                          </>
-                        )}
-                      </div>
-                    )}
-                    {isExpanded && (
-                      <div className="geo-map-inspector-detail">
-                        {dateStr && <div><span className="geo-map-inspector-label">Date:</span> {dateStr}</div>}
-                        {luStats && (
-                          <>
-                            <div><span className="geo-map-inspector-label">Area:</span> {luStats.areaHa.toLocaleString(undefined, { maximumFractionDigits: 0 })} ha</div>
-                            <div><span className="geo-map-inspector-label">Coverage:</span> {luStats.percentage.toFixed(1)}%</div>
-                          </>
-                        )}
-                        <div><span className="geo-map-inspector-label">Layer key:</span> {key}</div>
-                        <div><span className="geo-map-inspector-label">Type:</span> {layerInfo.type}</div>
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
             </div>
+
+            {/* Body */}
+            {!isInspectorCollapsed && (
+              <div className="geo-map-inspector-body">
+                {/* UTM row */}
+                <div className="geo-map-inspector-row" style={{ paddingBottom: '4px' }}>
+                  <span className="geo-map-inspector-label" style={{ fontWeight: 600, fontSize: '0.78rem' }}>UTM (48N)</span>
+                  <span className="geo-map-inspector-val" style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', fontSize: '0.82rem', fontWeight: 700, color: '#0f172a', gap: '2px' }}>
+                    {mouseCoords ? (() => {
+                      const lonLat = toLonLat(mouseCoords);
+                      const utm = transform(lonLat, 'EPSG:4326', 'EPSG:32648');
+                      return (
+                        <>
+                          <span>{Math.round(utm[0]).toLocaleString()} m E</span>
+                          <span>{Math.round(utm[1]).toLocaleString()} m N</span>
+                        </>
+                      );
+                    })() : (
+                      <>
+                        <span>— m E</span>
+                        <span>— m N</span>
+                      </>
+                    )}
+                  </span>
+                </div>
+
+                {/* Divider */}
+                <div style={{ height: '1px', background: '#e2e8f0', margin: '8px 0' }} />
+
+                {(() => {
+                  // Merge actual and virtual hovered entries
+                  const inspectorEntries = [...Object.entries(pixelValues)];
+                  if (hoveredDatasetId && isLanduseLayer(hoveredDatasetId)) {
+                    const isAlreadyIn = inspectorEntries.some(([k]) => k.startsWith(hoveredDatasetId));
+                    if (!isAlreadyIn) {
+                      inspectorEntries.push([hoveredDatasetId, 1]);
+                    }
+                  }
+
+                  return inspectorEntries.map(([key, val]) => {
+                    let layerInfo = renderedLayers[key] || renderedLayersRef.current[key];
+                    let displayName = "";
+                    if (layerInfo) {
+                      displayName = layerInfo.name;
+                    } else {
+                      const ds = getDatasetById(key);
+                      if (ds) {
+                        displayName = `${ds.name} (${temporalYearValue})`;
+                      } else {
+                        return null;
+                      }
+                    }
+
+                    const label = translateLegendLabel(displayName);
+                    const unitMatch = label.match(/\(([^)]+)\)/);
+                    const HYDRO_UNITS: Record<string, string> = {
+                      "hydro-salinity": "ppt",
+                      "hydro-temp": "cm",
+                      "hydro-ph": "",
+                    };
+                    const hydroPrefix = Object.keys(HYDRO_UNITS).find(p => key.startsWith(p));
+                    const unit = hydroPrefix ? HYDRO_UNITS[hydroPrefix] : (unitMatch ? unitMatch[1] : "");
+                    const isExpanded = inspectorExpandedKey === key;
+                    const s3Key = (layerInfo && (layerInfo.type === "raster" || layerInfo.type === "vector")) ? layerInfo.proxyUrl : "";
+                    const dateMatch = s3Key.match(/\/(\d{4})\/(\d{2})\/(\d{2})\//);
+                    const dateStr = dateMatch ? `${dateMatch[1]}-${dateMatch[2]}-${dateMatch[3]}` : null;
+                    
+                    const isLu = isLanduseLayer(key);
+                    const luStats = isLu ? landuseStats[normalizeLanduseKey(key)] : undefined;
+                    const statsLoading = isLu && landuseStatsLoading.current[normalizeLanduseKey(key)];
+
+                    return (
+                      <div key={key} className="geo-map-inspector-layer">
+                        {isLu ? (
+                          <>
+                            {/* Title Category */}
+                            <div style={{ fontSize: '0.72rem', color: '#94a3b8', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '2px' }}>
+                              Landuse Classification
+                            </div>
+                            
+                            {/* Layer name toggle */}
+                            <button
+                              className="geo-map-inspector-layer-btn"
+                              type="button"
+                              onClick={() => setInspectorExpandedKey(isExpanded ? null : key)}
+                              style={{
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'space-between',
+                                width: '100%',
+                                background: 'none',
+                                border: 'none',
+                                cursor: 'pointer',
+                                padding: '4px 0',
+                                textAlign: 'left'
+                              }}
+                            >
+                              <span style={{
+                                fontSize: '0.88rem',
+                                fontWeight: '700',
+                                color: '#0f172a',
+                                lineHeight: '1.35',
+                                flex: 1,
+                                paddingRight: '8px'
+                              }}>
+                                {displayName}
+                              </span>
+                              <span style={{ fontSize: '0.8rem', color: '#64748b', transition: 'transform 0.2s', transform: isExpanded ? 'rotate(180deg)' : 'none' }}>▼</span>
+                            </button>
+
+                            {/* Stats */}
+                            {statsLoading && !luStats && (
+                              <div style={{ fontSize: '0.8rem', color: '#94a3b8', padding: '8px 0', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                <div style={{ width: '12px', height: '12px', borderRadius: '50%', border: '2px solid rgba(59,130,246,0.2)', borderTopColor: '#3b82f6', animation: 'geo-map-spin 0.8s linear infinite' }} />
+                                <span>Computing stats...</span>
+                              </div>
+                            )}
+
+                            {luStats && (
+                              <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', marginTop: '6px', fontSize: '0.82rem' }}>
+                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                  <span style={{ color: '#64748b', fontWeight: 500 }}>Area (ha)</span>
+                                  <span style={{ fontWeight: '700', color: '#0f172a' }}>
+                                    ~{luStats.areaHa.toLocaleString(undefined, { maximumFractionDigits: 0 })} ha
+                                  </span>
+                                </div>
+                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                  <span style={{ color: '#64748b', fontWeight: 500 }}>Landuse (%)</span>
+                                  <span style={{ fontWeight: '700', color: '#0f172a' }}>
+                                    {luStats.percentage.toFixed(1)}%
+                                  </span>
+                                </div>
+                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                  <span style={{ color: '#64748b', fontWeight: 500 }}>Total Pixels</span>
+                                  <span style={{ fontWeight: '700', color: '#0f172a' }}>
+                                    {luStats.classPixels ? luStats.classPixels.toLocaleString() : '—'} pixels
+                                  </span>
+                                </div>
+                              </div>
+                            )}
+
+                            <div style={{ marginTop: 6, padding: "4px 0", fontSize: "0.6rem", color: "#94a3b8", borderTop: "1px solid #e2e8f0" }}>
+                              DEBUG: activeLuId={activeLuId} luYearly={luYearly ? luYearly.length + "yrs" : "null"}
+                            </div>
+                            {luYearly && luYearly.length > 1 && (
+                              <div className="geo-map-inspector-chart-container" style={{ marginTop: '16px', borderTop: '1px solid #f1f5f9', paddingTop: '12px' }}>
+                                <div style={{ fontSize: '0.72rem', color: '#64748b', marginBottom: '8px', fontWeight: 600 }}>Area by Year</div>
+                                {(() => { console.log("[chart] cur:", temporalYearValue, "years:", luYearly.map(d => d.year), "areaHa:", luYearly.map(d => d.areaHa)); return null; })()}
+                                <div style={{ display: 'flex', gap: 6 }}>
+                                  <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'space-between', height: 70, fontSize: '0.58rem', color: '#94a3b8', textAlign: 'right', paddingTop: 0, paddingBottom: 14, minWidth: 28 }}>
+                                    {(() => {
+                                      const vals = luYearly.map(d => d.areaHa);
+                                      const rawMax = Math.max(...vals, 1);
+                                      const niceCeil = (() => {
+                                        if (rawMax <= 0) return 1;
+                                        const exp = Math.floor(Math.log10(rawMax));
+                                        const base = Math.pow(10, exp);
+                                        const norm = rawMax / base;
+                                        const nice = norm <= 1 ? 1 : norm <= 2 ? 2 : norm <= 5 ? 5 : 10;
+                                        return nice * base;
+                                      })();
+                                      const fmt = (v: number) => v >= 1e6 ? (v/1e6).toFixed(1)+'M' : v >= 1000 ? (v/1000).toFixed(0)+'K' : v.toFixed(0);
+                                      return [niceCeil, niceCeil*0.75, niceCeil*0.5, niceCeil*0.25, 0].map((v, i) => <span key={i}>{fmt(v)}</span>);
+                                    })()}
+                                  </div>
+                                  <div style={{ flex: 1, position: 'relative' }}>
+                                    {(() => {
+                                      const vals = luYearly.map(d => d.areaHa);
+                                      const rawMax = Math.max(...vals, 1);
+                                      const niceCeil = (() => {
+                                        if (rawMax <= 0) return 1;
+                                        const exp = Math.floor(Math.log10(rawMax));
+                                        const base = Math.pow(10, exp);
+                                        const norm = rawMax / base;
+                                        const nice = norm <= 1 ? 1 : norm <= 2 ? 2 : norm <= 5 ? 5 : 10;
+                                        return nice * base;
+                                      })();
+                                      const cur = temporalYearValue;
+                                      const years = luYearly.map(d => d.year);
+                                      const latestYear = years[years.length - 1];
+                                      return (
+                                        <>
+                                          <div style={{ display: 'flex', alignItems: 'flex-end', gap: 3, height: 70, padding: '0 2px' }}>
+                                            {luYearly.map(d => {
+                                              const h = Math.max(4, 2 + (d.areaHa / niceCeil) * 56);
+                                              const isCur = Number(d.year) === Number(cur)
+                                                || (years.every(y => Number(y) !== Number(cur)) && Number(d.year) === Number(latestYear));
+                                              return (
+                                                <div key={d.year} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3 }} title={`${d.year}: ${d.areaHa.toLocaleString()} ha` + (isCur ? ' (current)' : '')}>
+                                                  <div style={{ width: '100%', maxWidth: 28, height: h, borderRadius: '4px 4px 0 0', background: isCur ? '#f59e0b' : '#3b82f6', border: isCur ? '1px solid #d97706' : '1px solid #2563eb' }} />
+                                                  <span style={{ fontSize: '0.58rem', color: isCur ? '#d97706' : '#64748b', fontWeight: isCur ? 700 : 500 }}>{d.year}</span>
+                                                </div>
+                                              );
+                                            })}
+                                          </div>
+                                          <div style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 14, display: 'flex', flexDirection: 'column', justifyContent: 'space-between', pointerEvents: 'none' }}>
+                                            {[0,1,2,3,4].map(i => <div key={i} style={{ borderTop: '1px solid #f1f5f9', width: '100%', height: 0 }} />)}
+                                          </div>
+                                        </>
+                                      );
+                                    })()}
+                                  </div>
+                                </div>
+                            </div>
+                            )}
+
+                            {activeLuId && !luYearly && (
+                              <div style={{ marginTop: 8, padding: "6px 0", fontSize: "0.75rem", color: "#94a3b8", textAlign: "center" }}>
+                                Loading yearly data...
+                              </div>
+                            )}
+
+                            {activeLuId && luYearly && luYearly.length <= 1 && (
+                              <div style={{ marginTop: 8, padding: "4px 0", fontSize: "0.72rem", color: "#94a3b8", textAlign: "center" }}>
+                                {luYearly.length === 0 ? "No yearly data found in S3" : "Only 1 year of data"}
+                              </div>
+                            )}
+                          </>
+                        ) : (
+                          // Non-landuse simple layer
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '6px 0' }}>
+                            <span className="geo-map-inspector-layer-name" style={{ color: '#475569', fontSize: '0.8rem', fontWeight: 600 }}>{displayName}</span>
+                            <span className="geo-map-inspector-val value-highlight" style={{ fontSize: '0.85rem', fontWeight: 700, color: '#2563eb' }}>
+                              {val.toFixed(2)}{unit ? ` ${unit}` : ""}
+                            </span>
+                          </div>
+                        )}
+
+                        {/* Extra detail metadata if expanded */}
+                        {isExpanded && (
+                          <div className="geo-map-inspector-detail" style={{ background: '#f8fafc', padding: '8px', borderRadius: '6px', marginTop: '6px', fontSize: '0.72rem', color: '#475569', gap: '4px' }}>
+                            {dateStr && <div><span className="geo-map-inspector-label" style={{ fontWeight: 600 }}>Date:</span> {dateStr}</div>}
+                            {luStats && (
+                              <>
+                                <div><span className="geo-map-inspector-label" style={{ fontWeight: 600 }}>Area:</span> {luStats.areaHa.toLocaleString(undefined, { maximumFractionDigits: 0 })} ha</div>
+                                <div><span className="geo-map-inspector-label" style={{ fontWeight: 600 }}>Coverage:</span> {luStats.percentage.toFixed(1)}%</div>
+                              </>
+                            )}
+                            <div><span className="geo-map-inspector-label" style={{ fontWeight: 600 }}>Layer key:</span> {key}</div>
+                            {layerInfo && <div><span className="geo-map-inspector-label" style={{ fontWeight: 600 }}>Type:</span> {layerInfo.type}</div>}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  });
+                })()}
+              </div>
+            )}
           </div>
         )}
       </div>
@@ -3235,6 +3551,7 @@ export const MapStage = React.memo(function MapStage({ startDateTime, endDateTim
     prevProps.onRemoveDataset === nextProps.onRemoveDataset &&
     prevProps.onAddDataset === nextProps.onAddDataset &&
     prevProps.onStartDateTimeChange === nextProps.onStartDateTimeChange &&
-    prevProps.onEndDateTimeChange === nextProps.onEndDateTimeChange
+    prevProps.onEndDateTimeChange === nextProps.onEndDateTimeChange &&
+    prevProps.hoveredDatasetId === nextProps.hoveredDatasetId
   );
 });

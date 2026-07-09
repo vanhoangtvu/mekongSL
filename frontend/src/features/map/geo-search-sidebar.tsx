@@ -13,6 +13,7 @@ type GeoSearchSidebarProps = {
   isMobile?: boolean;
   isSidebarOpen?: boolean;
   onClose?: () => void;
+  onHoverDataset?: (id: string | null) => void;
 };
 
 type SearchTabsProps = {
@@ -56,6 +57,7 @@ export function GeoSearchSidebar({
   isMobile,
   isSidebarOpen,
   onClose,
+  onHoverDataset,
 }: GeoSearchSidebarProps) {
   const [expandedCategories, setExpandedCategories] = useState<Set<string>>(new Set());
   const [selectedLayers, setSelectedLayers] = useState<Record<string, ("raster" | "vector")[]>>({});
@@ -287,7 +289,11 @@ export function GeoSearchSidebar({
                     <div className="geo-dataset-children">
                       {category.children.map((child) => (
                         <div key={child.id}>
-                          <div className="geo-dataset-child-wrap">
+                          <div
+                            className="geo-dataset-child-wrap"
+                            onMouseEnter={() => !child.children && onHoverDataset?.(child.id)}
+                            onMouseLeave={() => !child.children && onHoverDataset?.(null)}
+                          >
                             {child.children ? (
                               <>
                                 <button
@@ -338,7 +344,12 @@ export function GeoSearchSidebar({
                           {child.children && expandedCategories.has(child.id) && (
                             <div className="geo-dataset-grandchildren">
                               {child.children.map(grandchild => (
-                                <div key={grandchild.id} className="geo-dataset-child-wrap">
+                                <div
+                                  key={grandchild.id}
+                                  className="geo-dataset-child-wrap"
+                                  onMouseEnter={() => onHoverDataset?.(grandchild.id)}
+                                  onMouseLeave={() => onHoverDataset?.(null)}
+                                >
                                   <label className="geo-dataset-child">
                                     <input
                                       type="checkbox"

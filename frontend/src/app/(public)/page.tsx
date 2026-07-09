@@ -32,6 +32,7 @@ export default function PublicHomePage() {
   const [endDateTime, setEndDateTime] = useState(getDefaultRange().end);
   const [hasExplicitRange, setHasExplicitRange] = useState(false);
   const [appliedDatasets, setAppliedDatasets] = useState<Array<{ id: string; type: string }>>([]);
+  const [hoveredDatasetId, setHoveredDatasetId] = useState<string | null>(null);
   const [wqStations, setWqStations] = useState<ManualStation[]>([]);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [isMobile, setIsMobile] = useState(false);
@@ -120,10 +121,11 @@ export default function PublicHomePage() {
               isMobile={isMobile}
               isSidebarOpen={isSidebarOpen}
               onClose={() => setIsSidebarOpen(false)}
+              onHoverDataset={setHoveredDatasetId}
             />
           </ResizablePanel>
           <div className="geo-panel">
-            <MapStage startDateTime={startDateTime} endDateTime={endDateTime} appliedDatasets={appliedDatasets} onRemoveDataset={handleRemoveDataset} onAddDataset={handleAddDataset} hasExplicitRange={hasExplicitRange} onStartDateTimeChange={handleStartDateTimeChange} onEndDateTimeChange={handleEndDateTimeChange} waterQualityStations={wqStations} isMobile={isMobile} />
+            <MapStage startDateTime={startDateTime} endDateTime={endDateTime} appliedDatasets={appliedDatasets} onRemoveDataset={handleRemoveDataset} onAddDataset={handleAddDataset} hasExplicitRange={hasExplicitRange} onStartDateTimeChange={handleStartDateTimeChange} onEndDateTimeChange={handleEndDateTimeChange} waterQualityStations={wqStations} isMobile={isMobile} hoveredDatasetId={hoveredDatasetId} />
           </div>
         </div>
       </main>
