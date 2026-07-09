@@ -11,6 +11,7 @@ FE_LOG="$FRONTEND_DIR/app.log"
 BE_PORT=8084
 FE_PORT=3004
 ENV_FILE="$FRONTEND_DIR/.env.local"
+FE_MODE_FILE="$FRONTEND_DIR/.frontend.mode"
 
 GREEN='\033[0;32m'; YELLOW='\033[1;33m'; RED='\033[0;31m'; CYAN='\033[0;36m'; BOLD='\033[1m'; NC='\033[0m'
 
@@ -36,6 +37,20 @@ get_mem() {
   is_pid_running "$pid" || { echo "N/A"; return; }
   local mem=$(ps -o rss= -p "$pid" 2>/dev/null | tr -d ' ')
   [[ -n "$mem" ]] && echo "$(( mem / 1024 )) MB" || echo "N/A"
+}
+
+get_frontend_mode() {
+  local pid=$1
+  if [[ -z "$pid" ]]; then
+    [[ -f "$FE_MODE_FILE" ]] && cat "$FE_MODE_FILE" && return
+    echo "---"; return
+  fi
+  local cmd=$(ps -o args= -p "$pid" 2>/dev/null || true)
+  if echo "$cmd" | grep -q "next dev"; then echo "Dev"
+  elif echo "$cmd" | grep -q "next start"; then echo "Prod"
+  else
+    [[ -f "$FE_MODE_FILE" ]] && cat "$FE_MODE_FILE" || echo "---"
+  fi
 }
 
 get_current_ip() {
@@ -161,10 +176,11 @@ display_line() {
   
   local col2_pid=$(pad_visual "${pid:----}" 8)
   local col3_port=$(pad_visual "${port:-0}" 8)
-  local col4_up=$(pad_visual "${up:-N/A}" 18)
-  local col5_mem=$(pad_visual "${mem:-N/A}" 14)
+  local col4_mode=$(pad_visual "$6" 6)
+  local col5_up=$(pad_visual "${up:-N/A}" 14)
+  local col6_mem=$(pad_visual "${mem:-N/A}" 10)
   
-  print_line_left "  $col1_bullet${BOLD}$col1_name${NC} │ $col2_pid │ $col3_port │ $col4_up │ $col5_mem"
+  print_line_left "  $col1_bullet${BOLD}$col1_name${NC} │ $col2_pid │ $col3_port │ $col4_mode │ $col5_up │ $col6_mem"
 }
 
 print_status() {
@@ -177,6 +193,7 @@ print_status() {
   local be_port=$(get_port "$be_pid" "$BE_PORT") fe_port=$(get_port "$fe_pid" "$FE_PORT")
   local be_up=$(get_uptime "$be_pid") fe_up=$(get_uptime "$fe_pid")
   local be_mem=$(get_mem "$be_pid") fe_mem=$(get_mem "$fe_pid")
+  local fe_mode=$(get_frontend_mode "$fe_pid")
 
   print_line_left "  ${BOLD}TRẠNG THÁI HỆ THỐNG${NC}"
   print_line_left "" "─"
@@ -184,13 +201,14 @@ print_status() {
   local header_col1="    $(pad_visual "Dịch vụ" 12)"
   local header_col2=$(pad_visual "PID" 8)
   local header_col3=$(pad_visual "Cổng" 8)
-  local header_col4=$(pad_visual "Uptime" 18)
-  local header_col5=$(pad_visual "RAM" 14)
-  print_line_left "${BOLD}$header_col1 │ $header_col2 │ $header_col3 │ $header_col4 │ $header_col5${NC}"
+  local header_col4=$(pad_visual "Mode" 6)
+  local header_col5=$(pad_visual "Uptime" 14)
+  local header_col6=$(pad_visual "RAM" 10)
+  print_line_left "${BOLD}$header_col1 │ $header_col2 │ $header_col3 │ $header_col4 │ $header_col5 │ $header_col6${NC}"
   print_line_left "" "─"
 
-  display_line "Backend"  "$be_pid" "$be_port" "$be_up" "$be_mem"
-  display_line "Frontend" "$fe_pid" "$fe_port" "$fe_up" "$fe_mem"
+  display_line "Backend"  "$be_pid" "$be_port" "$be_up" "$be_mem" "---"
+  display_line "Frontend" "$fe_pid" "$fe_port" "$fe_up" "$fe_mem" "$fe_mode"
   print_line_left "" "─"
   
   if [[ -n "$current_ip" ]]; then
@@ -204,10 +222,11 @@ print_menu() {
   print_line_left "  ${BOLD}MENU CHỨC NĂNG${NC}"
   print_line_left "" "─"
   print_menu_row "1" "Khởi động backend"       "6" "Build & Restart backend"
-  print_menu_row "2" "Khởi động frontend"      "7" "Xem log backend"
-  print_menu_row "3" "Dừng backend"           "8" "Xem log frontend"
-  print_menu_row "4" "Dừng frontend"          "9" "Đổi IP"
-  print_menu_row "5" "Restart tất cả"         "0" "Thoát"
+  print_menu_row "2" "FE Dev mode"             "7" "Xem log backend"
+  print_menu_row "3" "FE Production mode"      "8" "Xem log frontend"
+  print_menu_row "4" "Dừng backend"           "9" "Đổi IP"
+  print_menu_row "5" "Dừng frontend"         "0" "Thoát"
+  print_menu_row "0" "Thoát"               "A" "Restart tất cả"
 }
 
 pause() {
@@ -258,7 +277,32 @@ start_frontend() {
     sleep 1
     grep -q "Ready" "$FE_LOG" 2>/dev/null && break
   done
+  echo "dev" > "$FE_MODE_FILE"
   echo -e "  ${GREEN}✓ Frontend khởi động (PID: $pid, port $FE_PORT)${NC}"
+}
+
+start_frontend_prod() {
+  is_running "$FE_PID_FILE" && { echo -e "  ${YELLOW}Frontend đang chạy (PID: $(get_pid "$FE_PID_FILE"))${NC}"; return 0; }
+  echo -e "  ${YELLOW}→ Build frontend...${NC}"
+  cd "$FRONTEND_DIR"
+  npm run build 2>&1 | tail -5 || {
+    echo -e "  ${RED}✗ Build thất bại${NC}"
+    cd "$SCRIPT_DIR"
+    return 1
+  }
+  echo -e "  ${YELLOW}→ Khởi động frontend production...${NC}"
+  > "$FE_LOG"
+  nohup npm run start > "$FE_LOG" 2>&1 &
+  local pid=$!
+  disown "$pid" 2>/dev/null || true
+  echo "$pid" > "$FE_PID_FILE"
+  cd "$SCRIPT_DIR"
+  for _ in {1..10}; do
+    sleep 1
+    grep -q "Ready\|Listening" "$FE_LOG" 2>/dev/null && break
+  done
+  echo "prod" > "$FE_MODE_FILE"
+  echo -e "  ${GREEN}✓ Frontend production khởi động (PID: $pid, port $FE_PORT)${NC}"
 }
 
 stop_backend() {
@@ -270,7 +314,7 @@ stop_backend() {
 stop_frontend() {
   local pid=$(get_pid "$FE_PID_FILE")
   stop_pid_graceful "$pid" "Frontend"
-  rm -f "$FE_PID_FILE"
+  rm -f "$FE_PID_FILE" "$FE_MODE_FILE"
 }
 
 rebuild_backend() {
@@ -341,18 +385,19 @@ trap cleanup INT TERM
 while true; do
   print_dashboard
 
-  echo -ne "  ${BOLD}Chọn chức năng [0-9]:${NC} "
+  echo -ne "  ${BOLD}Chọn chức năng [0-9/A]:${NC} "
   read choice || true
   case "$choice" in
     1) start_backend; pause ;;
     2) start_frontend; pause ;;
-    3) stop_backend; pause ;;
-    4) stop_frontend; pause ;;
-    5) stop_backend || true; stop_frontend || true; sleep 1; start_backend || true; start_frontend || true; pause ;;
+    3) start_frontend_prod; pause ;;
+    4) stop_backend; pause ;;
+    5) stop_frontend; pause ;;
     6) rebuild_backend; pause ;;
     7) view_log "$BE_LOG" "backend" ;;
     8) view_log "$FE_LOG" "frontend" ;;
     9) change_ip; pause ;;
+    A|a) stop_backend || true; stop_frontend || true; sleep 1; start_backend || true; start_frontend || true; pause ;;
     0) cleanup ;;
     *) echo -e "  ${RED}Lựa chọn không hợp lệ${NC}"; sleep 1 ;;
   esac
