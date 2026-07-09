@@ -1,4 +1,5 @@
 import { NextRequest } from 'next/server';
+import { API_URL } from './api';
 
 export type AppRole = 'USER' | 'DATA_MANAGER' | 'ADMIN';
 
@@ -13,7 +14,7 @@ export interface AccountResponse {
 }
 
 function getBackendUrl() {
-  return process.env.NEXT_PUBLIC_API_URL || 'http://123.22.61.134:8084/api';
+  return API_URL;
 }
 
 function getBearerToken(request: NextRequest) {

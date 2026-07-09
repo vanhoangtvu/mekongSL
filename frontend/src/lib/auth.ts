@@ -24,13 +24,13 @@ export interface AuthResponse {
   role: string;
 }
 
+import { API_URL } from './api';
+
 const ROLE_PRIORITY: Record<string, number> = {
   USER: 0,
   DATA_MANAGER: 1,
   ADMIN: 2,
 };
-
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8084/api';
 
 class AuthService {
   private readonly STORAGE_KEY = 'auth';
