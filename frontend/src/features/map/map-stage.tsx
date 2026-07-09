@@ -2963,12 +2963,12 @@ export const MapStage = React.memo(function MapStage({ startDateTime, endDateTim
                       <span className="geo-map-inspector-chevron">{isExpanded ? "▲" : "▼"}</span>
                     </button>
                     {isLanduseLayer(key) && (
-                      <div className="geo-map-inspector-landuse-stats" style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                      <div className="geo-map-inspector-landuse-stats">
                         {statsLoading && !luStats && <span className="geo-map-inspector-label">Computing...</span>}
                         {luStats && (
                           <>
-                            <span className="geo-map-inspector-val"><span className="geo-map-inspector-label">Area(ha):</span> {luStats.areaHa.toLocaleString(undefined, { maximumFractionDigits: 0 })}</span>
-                            <span className="geo-map-inspector-val"><span className="geo-map-inspector-label">Landuse (%):</span> {luStats.percentage.toFixed(1)}%</span>
+                            <div><span className="geo-map-inspector-label">Area (ha):</span> {luStats.areaHa.toLocaleString(undefined, { maximumFractionDigits: 0 })}</div>
+                            <div><span className="geo-map-inspector-label">Landuse (%):</span> {luStats.percentage.toFixed(1)}%</div>
                           </>
                         )}
                       </div>
