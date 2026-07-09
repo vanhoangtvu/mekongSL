@@ -234,6 +234,7 @@ print_status() {
   local be_up=$(get_uptime "$be_pid") fe_up=$(get_uptime "$fe_pid")
   local be_mem=$(get_mem "$be_pid") fe_mem=$(get_mem "$fe_pid")
   local fe_mode=$(get_frontend_mode "$fe_pid")
+  local current_ip=$(get_current_ip)
 
   print_line_left "  ${BOLD}TRẠNG THÁI HỆ THỐNG${NC}"
   print_line_left "" "─"
