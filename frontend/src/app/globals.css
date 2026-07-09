@@ -1753,10 +1753,9 @@ html[data-theme="light"] .geo-map-inspector-layer {
 }
 .geo-map-inspector-landuse-stats {
   display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 2px;
-  padding: 1px 0 2px 8px;
+  align-items: center;
+  gap: 4px;
+  padding: 1px 0 2px 24px;
   font-size: 0.78rem;
 }
 html[data-theme="light"] .geo-map-inspector-layer-name {
