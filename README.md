@@ -1,20 +1,9 @@
 <br>
 <div align="center">
 
-```
-╔══════════════════════════════════════════════════════════════╗
-║                                                              ║
-║         ███╗   ███╗ ███████╗ ██╗  ██╗ ██████╗  ███╗  ██╗  ██████╗  ║
-║         ████╗ ████║ ██╔════╝ ██║ ██╔╝██╔═══██╗ ████╗ ██║ ██╔════╝  ║
-║         ██╔████╔██║ █████╗   █████╔╝ ██║   ██║ ██╔██╗██║ ██║  ██╗  ║
-║         ██║╚██╔╝██║ ██╔══╝   ██╔═██╗ ██║   ██║ ██║╚████║ ██║  ╚██╗ ║
-║         ██║ ╚═╝ ██║ ███████╗ ██║  ██╗╚██████╔╝ ██║ ╚███║ ╚██████╔╝ ║
-║         ╚═╝     ╚═╝ ╚══════╝ ╚═╝  ╚═╝ ╚═════╝  ╚═╝  ╚══╝  ╚═════╝  ║
-║                                                              ║
-║              WebGIS · Giám sát · Dự báo · Phân tích           ║
-║                Đồng bằng sông Cửu Long                       ║
-╚══════════════════════════════════════════════════════════════╝
-```
+# 🌊 Mekong WebGIS
+
+*WebGIS · Giám sát · Dự báo · Phân tích · Đồng bằng sông Cửu Long*
 
 ![Java](https://img.shields.io/badge/Java-17-ED8B00?style=flat-square&logo=openjdk)
 ![Spring Boot](https://img.shields.io/badge/Spring_Boot-4.0-6DB33F?style=flat-square&logo=springboot)
@@ -196,18 +185,8 @@ Mekong/
 <br>
 <div align="center">
 
-```
-╔══════════════════════════════════════════════════════════╗
-║                                                          ║
-║                   Developed with ❤️ by                    ║
-║                                                          ║
-║                  hoangtvu                                 ║
-║                                                          ║
-║              github.com/vanhoangtvu                       ║
-║                                                          ║
-╚══════════════════════════════════════════════════════════╝
-```
+<sub>Developed with ❤️ by **hoangtvu** · [github.com/vanhoangtvu](https://github.com/vanhoangtvu)</sub>
 
-<sub>© 2026 Mekong WebGIS. All rights reserved.</sub>
+<sub>© 2026 Mekong WebGIS</sub>
 
 </div>
