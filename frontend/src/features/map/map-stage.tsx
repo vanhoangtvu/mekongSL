@@ -327,6 +327,10 @@ function resolveTimelineMode(startDate: Date, endDate: Date, preferredMode: Time
     return "hour4";
   }
 
+  if (diffDays < 180) {
+    return "day";
+  }
+
   return "month";
 }
 
@@ -367,6 +371,26 @@ function buildTimelineUnits(startDate: Date, endDate: Date, mode: TimelineResolv
           isMajor: h === 0,
         });
       }
+      cur.setDate(cur.getDate() + 1);
+    }
+    return { mode, units };
+  }
+
+  if (mode === "day") {
+    const units: TimelineUnit[] = [];
+    const cur = new Date(startDate);
+    cur.setHours(0, 0, 0, 0);
+    while (cur <= endDate) {
+      const yyyy = cur.getFullYear();
+      const mm = String(cur.getMonth() + 1).padStart(2, "0");
+      const dd = String(cur.getDate()).padStart(2, "0");
+      const dayOfWeek = cur.getDay();
+      const isMonday = dayOfWeek === 1;
+      units.push({
+        label: `${dd}/${mm}${isMonday ? ` (T${yyyy})` : ""}`,
+        value: `${yyyy}-${mm}-${dd}T00:00`,
+        isMajor: isMonday,
+      });
       cur.setDate(cur.getDate() + 1);
     }
     return { mode, units };
