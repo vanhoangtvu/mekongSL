@@ -216,6 +216,9 @@ print_status() {
   else
     print_line_left "  ${BOLD}IP hiện tại:${NC} ${YELLOW}Chưa cấu hình${NC}"
   fi
+  if [[ ! -f "$SCRIPT_DIR/.env" ]]; then
+    print_line_left "  ${RED}⚠ Thiếu file .env (S3, API keys)${NC}"
+  fi
 }
 
 print_menu() {
@@ -237,6 +240,9 @@ pause() {
 start_backend() {
   is_running "$BE_PID_FILE" && { echo -e "  ${YELLOW}Backend đang chạy (PID: $(get_pid "$BE_PID_FILE"))${NC}"; return 0; }
   echo -e "  ${YELLOW}→ Khởi động backend...${NC}"
+  if [[ -f "$SCRIPT_DIR/.env" ]]; then
+    set -a; source "$SCRIPT_DIR/.env"; set +a
+  fi
   cd "$BACKEND_DIR"
   local jar=$(ls target/*.jar 2>/dev/null | head -1)
   if [[ -z "$jar" ]]; then
