@@ -155,17 +155,11 @@ public class S3Service {
      * Download file from S3
      */
     public InputStream downloadFile(String key) {
-        try {
-            GetObjectRequest getObjectRequest = GetObjectRequest.builder()
-                    .bucket(bucketName)
-                    .key(key)
-                    .build();
-            
-            return s3Client.getObject(getObjectRequest);
-        } catch (S3Exception e) {
-            log.error("Failed to download file from S3: {}", e.getMessage());
-            throw new RuntimeException("Failed to download file: " + e.getMessage());
-        }
+        GetObjectRequest getObjectRequest = GetObjectRequest.builder()
+                .bucket(bucketName)
+                .key(key)
+                .build();
+        return s3Client.getObject(getObjectRequest);
     }
 
     /**
@@ -173,18 +167,13 @@ public class S3Service {
      * Returns the S3 response stream which includes metadata like content length.
      */
     public ResponseInputStream<GetObjectResponse> downloadFileRange(String key, String range) {
-        try {
-            GetObjectRequest.Builder builder = GetObjectRequest.builder()
-                    .bucket(bucketName)
-                    .key(key);
-            if (range != null && !range.isEmpty()) {
-                builder.range(range);
-            }
-            return s3Client.getObject(builder.build());
-        } catch (S3Exception e) {
-            log.error("Failed to download file range from S3: {}", e.getMessage());
-            throw new RuntimeException("Failed to download file: " + e.getMessage());
+        GetObjectRequest.Builder builder = GetObjectRequest.builder()
+                .bucket(bucketName)
+                .key(key);
+        if (range != null && !range.isEmpty()) {
+            builder.range(range);
         }
+        return s3Client.getObject(builder.build());
     }
     
     /**

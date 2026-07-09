@@ -6,9 +6,18 @@ Hệ thống WebGIS hiển thị dữ liệu khí tượng thủy văn vùng Đ�
 
 ```
 Mekong/
-├── frontend/          # Next.js 15 + React 19 + OpenLayers
-├── datacenter/        # Data pipeline scripts (Node.js)
-└── data/              # Output data (gitignored)
+├── manage.sh           # Quản lý hệ thống (start/stop/restart/logs)
+├── frontend/           # Next.js 15 + React 19 + OpenLayers
+├── backend/            # Spring Boot API (Java 21)
+├── datacenter/         # Data pipeline scripts (Node.js)
+├── docs/               # Tài liệu dự án
+└── data/               # Output data (gitignored)
+```
+
+## Quick Start
+
+```bash
+./manage.sh
 ```
 
 ## Frontend
@@ -25,6 +34,13 @@ cd frontend
 npm install
 npm run dev  # Port 3004
 ```
+
+## Backend
+
+**Tech stack:**
+- Spring Boot 4 + Java 21
+- MySQL 8
+- JWT Authentication
 
 ## Datacenter
 
@@ -64,7 +80,15 @@ cp .env.example .env
 1. **Mekong API** - Dữ liệu thủy văn từ Rynan Mobile
 2. **Ecowitt API** - Dữ liệu khí tượng từ trạm Ecowitt
 
+## Tài liệu
+
+Xem thêm trong thư mục `docs/`:
+- `DEPLOYMENT.md` - Hướng dẫn triển khai
+- `API-AUTH.md` - API Authentication
+- `ROLES.md` - Phân quyền người dùng
+- `S3-STORAGE.md` - S3 Storage
+- `BACKUP-STRATEGY.md` - Chiến lược backup
+
 ## License
 
 Private project - EVA Team
-# mekongSL

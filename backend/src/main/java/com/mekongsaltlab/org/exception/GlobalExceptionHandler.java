@@ -10,6 +10,9 @@ import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 
+import software.amazon.awssdk.services.s3.model.NoSuchKeyException;
+import software.amazon.awssdk.services.s3.model.S3Exception;
+
 import java.util.HashMap;
 import java.util.Map;
 
@@ -45,9 +48,22 @@ public class GlobalExceptionHandler {
                 .body(Map.of("error", ex.getMessage()));
     }
     
+    @ExceptionHandler(NoSuchKeyException.class)
+    public ResponseEntity<Map<String, String>> handleS3NoSuchKey(NoSuchKeyException ex) {
+        return ResponseEntity.status(HttpStatus.NOT_FOUND)
+                .body(Map.of("error", "File not found: " + ex.getMessage()));
+    }
+
+    @ExceptionHandler(S3Exception.class)
+    public ResponseEntity<Map<String, String>> handleS3Exception(S3Exception ex) {
+        int status = ex.statusCode() >= 400 ? ex.statusCode() : HttpStatus.BAD_GATEWAY.value();
+        return ResponseEntity.status(status)
+                .body(Map.of("error", "S3 error: " + ex.getMessage()));
+    }
+
     @ExceptionHandler(RuntimeException.class)
     public ResponseEntity<Map<String, String>> handleRuntimeException(RuntimeException ex) {
-        return ResponseEntity.badRequest()
+        return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
                 .body(Map.of("error", ex.getMessage()));
     }
     

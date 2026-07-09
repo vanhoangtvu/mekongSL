@@ -351,10 +351,17 @@ public class S3Controller {
                     return totalLength;
                 }
             });
+        } catch (software.amazon.awssdk.services.s3.model.NoSuchKeyException e) {
+            System.err.println("[RenderFile] File not found: " + e.getMessage());
+            return ResponseEntity.status(404).body(Map.of("error", "File not found: " + key));
+        } catch (software.amazon.awssdk.services.s3.model.S3Exception e) {
+            System.err.println("[RenderFile] S3 error: " + e.getMessage());
+            int status = e.statusCode() >= 400 ? e.statusCode() : 502;
+            return ResponseEntity.status(status).body(Map.of("error", "S3 error: " + e.getMessage()));
         } catch (Exception e) {
-            System.err.println("[RenderFile] Error rendering file: " + e.getMessage());
+            System.err.println("[RenderFile] Internal error: " + e.getMessage());
             e.printStackTrace();
-            return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
+            return ResponseEntity.status(500).body(Map.of("error", e.getMessage()));
         }
     }
 

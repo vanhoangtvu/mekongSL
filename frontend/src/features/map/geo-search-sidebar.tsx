@@ -57,7 +57,7 @@ export function GeoSearchSidebar({
   isSidebarOpen,
   onClose,
 }: GeoSearchSidebarProps) {
-  const [expandedCategories, setExpandedCategories] = useState<Set<string>>(new Set(["landsat"]));
+  const [expandedCategories, setExpandedCategories] = useState<Set<string>>(new Set());
   const [selectedLayers, setSelectedLayers] = useState<Record<string, ("raster" | "vector")[]>>({});
   const [showTypePicker, setShowTypePicker] = useState<string | null>(null);
   const [appliedCount, setAppliedCount] = useState(0);

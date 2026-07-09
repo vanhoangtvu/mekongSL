@@ -38,5 +38,6 @@ Thumbs.db
 # IDE
 .vscode/
 .idea/
+.kiro/
 *.swp
 *.swo

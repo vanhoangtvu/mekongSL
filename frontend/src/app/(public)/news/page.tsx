@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { Metadata } from "next";
+import { API_URL } from "@/lib/api";
 import { AppHeader } from "../../../components/layout/app-header";
 import { AppFooter } from "../../../components/layout/app-footer";
 
@@ -7,8 +8,6 @@ export const metadata: Metadata = {
   title: "Tin tức & Cập nhật - WebGIS",
   description: "Cập nhật các tin tức, sự kiện và thông báo mới nhất từ hệ thống WebGIS.",
 };
-
-const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://123.22.61.134:8084/api";
 
 interface NewsArticle {
   id: number;
