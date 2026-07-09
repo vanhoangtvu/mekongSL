@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import { fromUrl } from "geotiff";
 import TileLayer from "ol/layer/Tile";
 import VectorLayer from "ol/layer/Vector";
 import Map from "ol/Map";
@@ -950,6 +951,43 @@ export const MapStage = React.memo(function MapStage({ startDateTime, endDateTim
   const skipZoomRef = useRef(false);
   const overlayVisibilityRef = useRef<Record<string, boolean> | null>(null);
 
+  const [landuseStats, setLanduseStats] = useState<Record<string, { areaHa: number; percentage: number } | null>>({});
+  const landuseStatsCache = useRef<Record<string, { areaHa: number; percentage: number } | null | undefined>>({});
+  const landuseStatsLoading = useRef<Record<string, boolean>>({});
+
+  const computeLanduseStats = useCallback(async (layerKey: string, proxyUrl: string) => {
+    if (landuseStatsLoading.current[layerKey]) return;
+    const cached = landuseStatsCache.current[layerKey];
+    if (cached !== undefined) {
+      setLanduseStats(prev => ({ ...prev, [layerKey]: cached }));
+      return;
+    }
+    landuseStatsLoading.current[layerKey] = true;
+    try {
+      const fullUrl = proxyUrl.startsWith("http") ? proxyUrl : `${window.location.origin}${proxyUrl}`;
+      const tiff = await fromUrl(fullUrl);
+      const image = await tiff.getImage();
+      const data = await image.readRasters();
+      const band = data[0] as Float32Array | Int16Array | Uint8Array;
+      const resolution = image.getResolution();
+      const pixelAreaM2 = resolution[0] * resolution[1];
+      let classPixels = 0;
+      const totalPixels = band.length;
+      for (let i = 0; i < band.length; i++) {
+        if (band[i] !== 0 && band[i] !== -9999) classPixels++;
+      }
+      const areaHa = (classPixels * pixelAreaM2) / 10000;
+      const percentage = totalPixels > 0 ? (classPixels / totalPixels) * 100 : 0;
+      const stats = { areaHa, percentage };
+      landuseStatsCache.current[layerKey] = stats;
+      setLanduseStats(prev => ({ ...prev, [layerKey]: stats }));
+    } catch {
+      landuseStatsCache.current[layerKey] = null;
+    } finally {
+      delete landuseStatsLoading.current[layerKey];
+    }
+  }, []);
+
   const hideOverlays = useCallback(() => {
     if (overlayVisibilityRef.current) return; // already saved
     const layers = layerRefs.current;
@@ -1114,6 +1152,15 @@ export const MapStage = React.memo(function MapStage({ startDateTime, endDateTim
   // Keep a ref so the pointermove closure (created once) can read current renderedLayers
   const renderedLayersRef = useRef(effectiveRenderedLayers);
   useEffect(() => { renderedLayersRef.current = effectiveRenderedLayers; }, [effectiveRenderedLayers]);
+
+  useEffect(() => {
+    for (const key of Object.keys(pixelValues)) {
+      if (!isLanduseLayer(key)) continue;
+      const layerInfo = renderedLayersRef.current[key];
+      if (!layerInfo || layerInfo.type !== "raster") continue;
+      computeLanduseStats(key, layerInfo.proxyUrl);
+    }
+  }, [pixelValues, computeLanduseStats]);
 
   // Merge layerRefs for inspector and other tools
   const layerRefs = useMemo(() => {
@@ -2895,10 +2942,11 @@ export const MapStage = React.memo(function MapStage({ startDateTime, endDateTim
                 const hydroPrefix = Object.keys(HYDRO_UNITS).find(p => key.startsWith(p));
                 const unit = hydroPrefix ? HYDRO_UNITS[hydroPrefix] : (unitMatch ? unitMatch[1] : "");
                 const isExpanded = inspectorExpandedKey === key;
-                // Extract date from S3 key if available
                 const s3Key = layerInfo.type === "raster" || layerInfo.type === "vector" ? layerInfo.proxyUrl : "";
                 const dateMatch = s3Key.match(/\/(\d{4})\/(\d{2})\/(\d{2})\//);
                 const dateStr = dateMatch ? `${dateMatch[1]}-${dateMatch[2]}-${dateMatch[3]}` : null;
+                const luStats = isLanduseLayer(key) ? landuseStats[key] : undefined;
+                const statsLoading = isLanduseLayer(key) && landuseStatsLoading.current[key];
                 return (
                   <div key={key} className="geo-map-inspector-layer">
                     <button
@@ -2914,9 +2962,26 @@ export const MapStage = React.memo(function MapStage({ startDateTime, endDateTim
                       )}
                       <span className="geo-map-inspector-chevron">{isExpanded ? "▲" : "▼"}</span>
                     </button>
+                    {isLanduseLayer(key) && (
+                      <div className="geo-map-inspector-landuse-stats" style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                        {statsLoading && !luStats && <span className="geo-map-inspector-label">Computing...</span>}
+                        {luStats && (
+                          <>
+                            <span className="geo-map-inspector-val"><span className="geo-map-inspector-label">Area(ha):</span> {luStats.areaHa.toLocaleString(undefined, { maximumFractionDigits: 0 })}</span>
+                            <span className="geo-map-inspector-val"><span className="geo-map-inspector-label">Landuse (%):</span> {luStats.percentage.toFixed(1)}%</span>
+                          </>
+                        )}
+                      </div>
+                    )}
                     {isExpanded && (
                       <div className="geo-map-inspector-detail">
                         {dateStr && <div><span className="geo-map-inspector-label">Date:</span> {dateStr}</div>}
+                        {luStats && (
+                          <>
+                            <div><span className="geo-map-inspector-label">Area:</span> {luStats.areaHa.toLocaleString(undefined, { maximumFractionDigits: 0 })} ha</div>
+                            <div><span className="geo-map-inspector-label">Coverage:</span> {luStats.percentage.toFixed(1)}%</div>
+                          </>
+                        )}
                         <div><span className="geo-map-inspector-label">Layer key:</span> {key}</div>
                         <div><span className="geo-map-inspector-label">Type:</span> {layerInfo.type}</div>
                       </div>

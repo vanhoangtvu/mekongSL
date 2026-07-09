@@ -1751,6 +1751,13 @@ html[data-theme="light"] .geo-map-inspector-layer {
   word-break: break-word;
   line-height: 1.35;
 }
+.geo-map-inspector-landuse-stats {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 1px 0 2px 24px;
+  font-size: 0.78rem;
+}
 html[data-theme="light"] .geo-map-inspector-layer-name {
   color: #1e293b;
 }

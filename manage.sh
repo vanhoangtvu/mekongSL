@@ -319,6 +319,12 @@ start_frontend() {
   if is_pid_running "$(get_pid "$FE_PID_FILE")"; then
     echo -e "  ${YELLOW}Frontend đang chạy (PID: $(get_pid "$FE_PID_FILE"))${NC}"; return 0
   fi
+  local prev_mode=""
+  [[ -f "$FE_MODE_FILE" ]] && prev_mode=$(cat "$FE_MODE_FILE")
+  if [[ "$prev_mode" == "prod" ]]; then
+    echo -e "  ${YELLOW}→ Dọn cache production cũ để chạy dev...${NC}"
+    rm -rf "$FRONTEND_DIR/.next"
+  fi
   echo -e "  ${YELLOW}→ Khởi động frontend...${NC}"
   cd "$FRONTEND_DIR"
   > "$FE_LOG"
@@ -338,9 +344,14 @@ start_frontend() {
 
 start_frontend_prod() {
   sync_pid_file "$FE_PID_FILE" "$FE_PORT"
-  if is_pid_running "$(get_pid "$FE_PID_FILE")"; then
-    echo -e "  ${YELLOW}Frontend đang chạy (PID: $(get_pid "$FE_PID_FILE"))${NC}"; return 0
+  local running_pid=$(get_pid "$FE_PID_FILE")
+  if is_pid_running "$running_pid"; then
+    echo -e "  ${YELLOW}→ Dừng frontend hiện tại (PID: $running_pid)...${NC}"
+    stop_frontend
+    sleep 1
   fi
+  echo -e "  ${YELLOW}→ Dọn cache build cũ...${NC}"
+  rm -rf "$FRONTEND_DIR/.next"
   echo -e "  ${YELLOW}→ Build frontend...${NC}"
   cd "$FRONTEND_DIR"
   npm run build 2>&1 | tail -5 || {
@@ -371,8 +382,13 @@ stop_backend() {
 }
 
 stop_frontend() {
-  local pid=$(get_pid "$FE_PID_FILE")
+  local pid=$(find_fe_pid)
+  [[ -z "$pid" ]] && pid=$(get_pid "$FE_PID_FILE")
   stop_pid_graceful "$pid" "Frontend"
+  local extra_pid=$(find_pid_by_port "$FE_PORT")
+  if [[ -n "$extra_pid" ]] && [[ "$extra_pid" != "$pid" ]]; then
+    stop_pid_graceful "$extra_pid" "Frontend (extra)"
+  fi
   rm -f "$FE_PID_FILE" "$FE_MODE_FILE"
 }
 
