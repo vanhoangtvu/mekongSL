@@ -32,7 +32,7 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    const blob = await res.blob();
+    const data = await res.arrayBuffer();
     const responseHeaders: Record<string, string> = {
       'Content-Type': res.headers.get('content-type') || 'image/tiff',
       'Cache-Control': 'no-store, no-cache, must-revalidate',
@@ -48,7 +48,7 @@ export async function GET(request: NextRequest) {
       responseHeaders['Content-Length'] = contentLength;
     }
 
-    return new NextResponse(blob, {
+    return new NextResponse(data, {
       status: res.status,
       headers: responseHeaders,
     });
