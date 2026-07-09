@@ -17,7 +17,32 @@ GREEN='\033[0;32m'; YELLOW='\033[1;33m'; RED='\033[0;31m'; CYAN='\033[0;36m'; BO
 
 get_pid() { [[ -f "$1" ]] && cat "$1" || echo ""; }
 is_pid_running() { local p=$1; [[ -n "$p" ]] && kill -0 "$p" 2>/dev/null; }
-is_running() { local p=$(get_pid "$1"); is_pid_running "$p"; }
+
+find_pid_by_port() {
+  local port=$1
+  ss -tlnp 2>/dev/null | grep ":$port " | grep -oP 'pid=\K[0-9]+' | head -1
+}
+
+find_fe_pid() {
+  local pid=$(find_pid_by_port "$FE_PORT")
+  if [[ -n "$pid" ]]; then echo "$pid"; return; fi
+  # fallback: t? file PID và ki?m tra process tree
+  local file_pid=$(get_pid "$FE_PID_FILE")
+  if is_pid_running "$file_pid"; then
+    local child=$(pgrep -P "$file_pid" 2>/dev/null | head -1)
+    if is_pid_running "$child"; then echo "$child"; return; fi
+    echo "$file_pid"; return
+  fi
+  echo ""
+}
+
+find_be_pid() {
+  local pid=$(find_pid_by_port "$BE_PORT")
+  if [[ -n "$pid" ]]; then echo "$pid"; return; fi
+  local file_pid=$(get_pid "$BE_PID_FILE")
+  if is_pid_running "$file_pid"; then echo "$file_pid"; return; fi
+  echo ""
+}
 
 get_uptime() {
   local pid=$1
@@ -42,15 +67,20 @@ get_mem() {
 get_frontend_mode() {
   local pid=$1
   if [[ -z "$pid" ]]; then
-    [[ -f "$FE_MODE_FILE" ]] && cat "$FE_MODE_FILE" && return
-    echo "---"; return
+    [[ -f "$FE_MODE_FILE" ]] && cat "$FE_MODE_FILE" || echo "---"
+    return
   fi
   local cmd=$(ps -o args= -p "$pid" 2>/dev/null || true)
-  if echo "$cmd" | grep -q "next dev"; then echo "Dev"
-  elif echo "$cmd" | grep -q "next start"; then echo "Prod"
-  else
-    [[ -f "$FE_MODE_FILE" ]] && cat "$FE_MODE_FILE" || echo "---"
+  if echo "$cmd" | grep -q "next dev"; then echo "Dev"; return; fi
+  if echo "$cmd" | grep -q "next start"; then echo "Prod"; return; fi
+  # check parent chain
+  local ppid=$(ps -o ppid= -p "$pid" 2>/dev/null | tr -d ' ')
+  if [[ -n "$ppid" ]] && [[ "$ppid" != "1" ]]; then
+    cmd=$(ps -o args= -p "$ppid" 2>/dev/null || true)
+    if echo "$cmd" | grep -q "next dev"; then echo "Dev"; return; fi
+    if echo "$cmd" | grep -q "next start"; then echo "Prod"; return; fi
   fi
+  [[ -f "$FE_MODE_FILE" ]] && cat "$FE_MODE_FILE" || echo "---"
 }
 
 get_current_ip() {
@@ -71,6 +101,14 @@ get_port() {
     done
   fi
   echo "${port:-$default_port}"
+}
+
+sync_pid_file() {
+  local pid_file=$1 port=$2
+  local actual=$(find_pid_by_port "$port")
+  if [[ -n "$actual" ]]; then
+    echo "$actual" > "$pid_file"
+  fi
 }
 
 stop_pid_graceful() {
@@ -184,11 +222,13 @@ display_line() {
 }
 
 print_status() {
+  sync_pid_file "$BE_PID_FILE" "$BE_PORT"
+  sync_pid_file "$FE_PID_FILE" "$FE_PORT"
   local be_pid=$(get_pid "$BE_PID_FILE") fe_pid=$(get_pid "$FE_PID_FILE")
-  local current_ip=$(get_current_ip)
 
-  is_pid_running "$be_pid" || be_pid=""
-  is_pid_running "$fe_pid" || fe_pid=""
+  local be_real=$(find_be_pid) fe_real=$(find_fe_pid)
+  [[ -n "$be_real" ]] && be_pid="$be_real"
+  [[ -n "$fe_real" ]] && fe_pid="$fe_real"
 
   local be_port=$(get_port "$be_pid" "$BE_PORT") fe_port=$(get_port "$fe_pid" "$FE_PORT")
   local be_up=$(get_uptime "$be_pid") fe_up=$(get_uptime "$fe_pid")
@@ -238,7 +278,10 @@ pause() {
 }
 
 start_backend() {
-  is_running "$BE_PID_FILE" && { echo -e "  ${YELLOW}Backend đang chạy (PID: $(get_pid "$BE_PID_FILE"))${NC}"; return 0; }
+  sync_pid_file "$BE_PID_FILE" "$BE_PORT"
+  if is_pid_running "$(get_pid "$BE_PID_FILE")"; then
+    echo -e "  ${YELLOW}Backend đang chạy (PID: $(get_pid "$BE_PID_FILE"))${NC}"; return 0
+  fi
   echo -e "  ${YELLOW}→ Khởi động backend...${NC}"
   if [[ -f "$SCRIPT_DIR/.env" ]]; then
     set -a; source "$SCRIPT_DIR/.env"; set +a
@@ -266,11 +309,15 @@ start_backend() {
     sleep 1
     grep -q "Started" "$BE_LOG" 2>/dev/null && break
   done
-  echo -e "  ${GREEN}✓ Backend khởi động (PID: $pid)${NC}"
+  sync_pid_file "$BE_PID_FILE" "$BE_PORT"
+  echo -e "  ${GREEN}✓ Backend khởi động (PID: $(get_pid "$BE_PID_FILE"))${NC}"
 }
 
 start_frontend() {
-  is_running "$FE_PID_FILE" && { echo -e "  ${YELLOW}Frontend đang chạy (PID: $(get_pid "$FE_PID_FILE"))${NC}"; return 0; }
+  sync_pid_file "$FE_PID_FILE" "$FE_PORT"
+  if is_pid_running "$(get_pid "$FE_PID_FILE")"; then
+    echo -e "  ${YELLOW}Frontend đang chạy (PID: $(get_pid "$FE_PID_FILE"))${NC}"; return 0
+  fi
   echo -e "  ${YELLOW}→ Khởi động frontend...${NC}"
   cd "$FRONTEND_DIR"
   > "$FE_LOG"
@@ -284,11 +331,15 @@ start_frontend() {
     grep -q "Ready" "$FE_LOG" 2>/dev/null && break
   done
   echo "dev" > "$FE_MODE_FILE"
-  echo -e "  ${GREEN}✓ Frontend khởi động (PID: $pid, port $FE_PORT)${NC}"
+  sync_pid_file "$FE_PID_FILE" "$FE_PORT"
+  echo -e "  ${GREEN}✓ Frontend dev khởi động (PID: $(get_pid "$FE_PID_FILE"), port $FE_PORT)${NC}"
 }
 
 start_frontend_prod() {
-  is_running "$FE_PID_FILE" && { echo -e "  ${YELLOW}Frontend đang chạy (PID: $(get_pid "$FE_PID_FILE"))${NC}"; return 0; }
+  sync_pid_file "$FE_PID_FILE" "$FE_PORT"
+  if is_pid_running "$(get_pid "$FE_PID_FILE")"; then
+    echo -e "  ${YELLOW}Frontend đang chạy (PID: $(get_pid "$FE_PID_FILE"))${NC}"; return 0
+  fi
   echo -e "  ${YELLOW}→ Build frontend...${NC}"
   cd "$FRONTEND_DIR"
   npm run build 2>&1 | tail -5 || {
@@ -308,7 +359,8 @@ start_frontend_prod() {
     grep -q "Ready\|Listening" "$FE_LOG" 2>/dev/null && break
   done
   echo "prod" > "$FE_MODE_FILE"
-  echo -e "  ${GREEN}✓ Frontend production khởi động (PID: $pid, port $FE_PORT)${NC}"
+  sync_pid_file "$FE_PID_FILE" "$FE_PORT"
+  echo -e "  ${GREEN}✓ Frontend production khởi động (PID: $(get_pid "$FE_PID_FILE"), port $FE_PORT)${NC}"
 }
 
 stop_backend() {
