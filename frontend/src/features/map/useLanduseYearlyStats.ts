@@ -206,6 +206,7 @@ export function useLanduseYearlyStats(landuseKey: string | null) {
 
     return () => {
       cancelled = true;
+      fetchingRef.current = false;
     };
   }, [landuseKey]);
 

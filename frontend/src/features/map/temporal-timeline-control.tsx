@@ -428,7 +428,7 @@ function TimelineRuler({
                   y1={BASELINE - HALF_MAJOR}
                   x2={valueToScreen(v) * 10}
                   y2={BASELINE + HALF_MAJOR}
-                  stroke={Math.abs(v - def.value) < 0.1 ? "#2f65b0" : isActive ? "#64748b" : "#94a3b8"}
+                  stroke={Math.abs(v - def.value) < 0.1 ? "#2563eb" : isActive ? "#64748b" : "#94a3b8"}
                   strokeWidth={isActive ? 2 : 0.8}
                   shapeRendering="crispEdges"
                 />
@@ -500,7 +500,7 @@ function TimelineRuler({
                   y1={0}
                   x2={selectedX * 10}
                   y2={48}
-                  stroke="#2f65b0"
+                  stroke="#2563eb"
                   strokeWidth={4}
                   strokeOpacity={0.18}
                   shapeRendering="crispEdges"
@@ -511,7 +511,7 @@ function TimelineRuler({
                   y1={0}
                   x2={selectedX * 10}
                   y2={48}
-                  stroke="#2f65b0"
+                  stroke="#2563eb"
                   strokeWidth={2.5}
                   shapeRendering="crispEdges"
                 />
@@ -521,6 +521,25 @@ function TimelineRuler({
             )}
           </svg>
         </div>
+
+        {/* Major Tick Labels */}
+        {isActive && (
+          <div className="ttc-ruler-labels">
+            {def.majorTicks.map((v) => {
+              if (!isInView(v)) return null;
+              const isLabelActive = Math.abs(v - def.value) < 0.1;
+              return (
+                <span
+                  key={`lbl-${v}`}
+                  className={`ttc-ruler-label ${isLabelActive ? "ttc-ruler-label--active" : ""}`}
+                  style={{ left: `${valueToScreen(v)}%` }}
+                >
+                  {def.formatTick(v)}
+                </span>
+              );
+            })}
+          </div>
+        )}
 
         {isActive && (
           <div className="ttc-range-hint">
