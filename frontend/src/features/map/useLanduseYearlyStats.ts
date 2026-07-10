@@ -11,16 +11,27 @@ const UTM48N_WIDTH_M = UTM48N_EXTENT_M.xMax - UTM48N_EXTENT_M.xMin;
 const UTM48N_HEIGHT_M = UTM48N_EXTENT_M.yMax - UTM48N_EXTENT_M.yMin;
 
 const API_BASE = "/api/gis";
+const META_YEAR = 0;
+
+type MetaInfo = { totalYears: number; maxYear: number } | null;
 
 const _sessionCache = new Map<string, YearStat[]>();
 
-async function fetchCachedStats(landuseKey: string): Promise<YearStat[]> {
+async function fetchCachedStats(landuseKey: string): Promise<{ stats: YearStat[]; meta: MetaInfo }> {
   try {
     const res = await fetch(`${API_BASE}/landuse-yearly-stats?key=${encodeURIComponent(landuseKey)}`);
-    if (!res.ok) return [];
-    return await res.json();
+    if (!res.ok) return { stats: [], meta: null };
+    const data: YearStat[] = await res.json();
+    const metaRow = data.find(s => s.year === META_YEAR);
+    const stats = data.filter(s => s.year !== META_YEAR);
+    let meta: MetaInfo = null;
+    if (metaRow) {
+      const encoded = Math.round(metaRow.areaHa);
+      meta = { totalYears: Math.floor(encoded / 10000), maxYear: encoded % 10000 };
+    }
+    return { stats, meta };
   } catch {
-    return [];
+    return { stats: [], meta: null };
   }
 }
 
@@ -32,6 +43,11 @@ async function saveStat(landuseKey: string, year: number, areaHa: number): Promi
       body: JSON.stringify({ landuseKey, year, areaHa }),
     });
   } catch { /* best-effort */ }
+}
+
+async function saveMeta(landuseKey: string, totalYears: number, maxYear: number): Promise<void> {
+  const encoded = totalYears * 10000 + maxYear;
+  await saveStat(landuseKey, META_YEAR, encoded);
 }
 
 async function computeArea(key: string): Promise<number | null> {
@@ -116,25 +132,50 @@ export function useLanduseYearlyStats(landuseKey: string | null) {
     let cancelled = false;
 
     (async () => {
-      let cached = await fetchCachedStats(landuseKey);
+      const { stats: mysqlStats, meta } = await fetchCachedStats(landuseKey);
       if (cancelled) { fetchingRef.current = false; return; }
 
-      if (cached.length === 0) {
-        const sc2 = _sessionCache.get(landuseKey);
-        if (sc2) { cached = sc2; }
+      // If session cache was populated during fetch (race), use it
+      const sc2 = _sessionCache.get(landuseKey);
+      if (sc2) {
+        if (cancelled) { fetchingRef.current = false; return; }
+        setStats(sc2);
+        fetchingRef.current = false;
+        return;
       }
 
-      const s3Years = await listYearsOnS3(landuseKey);
+      // Check if MySQL has complete data (from previous session)
+      let s3Years = new Map<number, string>();
+      let needsS3Listing = true;
+
+      if (meta !== null && mysqlStats.length >= meta.totalYears) {
+        const currentYear = new Date().getFullYear();
+        const likelyComplete = meta.maxYear >= currentYear - 2;
+        if (likelyComplete) {
+          // MySQL has all data → skip S3 listing
+          s3Years = new Map();
+          needsS3Listing = false;
+          mysqlStats.forEach(s => s3Years.set(s.year, ""));
+        }
+      }
+
+      if (needsS3Listing) {
+        s3Years = await listYearsOnS3(landuseKey);
+      }
       if (cancelled) { fetchingRef.current = false; return; }
 
-      const cachedYears = new Set(cached.map(s => s.year));
+      const cachedYears = new Set(mysqlStats.map(s => s.year));
       const newYears: Array<{ year: number; s3Key: string }> = [];
+      let s3MaxYear = 0;
 
       for (const [year, s3Key] of s3Years) {
+        if (year > s3MaxYear) s3MaxYear = year;
         if (!cachedYears.has(year)) {
           newYears.push({ year, s3Key });
         }
       }
+
+      const result = [...mysqlStats];
 
       if (newYears.length > 0) {
         console.log("[lu:yearly] computing", newYears.length, "new years:", newYears.map(n => n.year));
@@ -143,16 +184,23 @@ export function useLanduseYearlyStats(landuseKey: string | null) {
           const ha = await computeArea(ny.s3Key);
           if (ha !== null) {
             const areaHa = Math.round(ha);
-            cached.push({ year: ny.year, areaHa });
+            result.push({ year: ny.year, areaHa });
             saveStat(landuseKey, ny.year, areaHa);
           }
         }
       }
 
       if (cancelled) { fetchingRef.current = false; return; }
-      cached.sort((a, b) => a.year - b.year);
-      _sessionCache.set(landuseKey, cached);
-      setStats(cached);
+      result.sort((a, b) => a.year - b.year);
+
+      // Save metadata so future fetches can skip S3 listing
+      if (s3Years.size > 0) {
+        const maxYear = s3MaxYear > 0 ? s3MaxYear : (result.length > 0 ? result[result.length - 1].year : 0);
+        saveMeta(landuseKey, s3Years.size, maxYear);
+      }
+
+      _sessionCache.set(landuseKey, result);
+      setStats(result);
       fetchingRef.current = false;
     })();
 

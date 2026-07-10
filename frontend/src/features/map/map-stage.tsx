@@ -934,7 +934,7 @@ function EcowittStationPopup({
   );
 }
 
-export const MapStage = React.memo(function MapStage({ startDateTime, endDateTime, appliedDatasets, onRemoveDataset, onAddDataset, onStartDateTimeChange, onEndDateTimeChange, waterQualityStations, isMobile, hoveredDatasetId }: MapStageProps) {
+export const MapStage = React.memo(function MapStage({ startDateTime, endDateTime, appliedDatasets, onRemoveDataset, onAddDataset, onStartDateTimeChange, onEndDateTimeChange, waterQualityStations, isMobile }: MapStageProps) {
   // console.log("[MapStage] render", { datasets: appliedDatasets, single: (appliedDatasets?.length ?? 0) === 1 });
   const mapContainerRef = useRef<HTMLDivElement | null>(null);
   const scrollerRef = useRef<HTMLDivElement | null>(null);
@@ -1226,34 +1226,6 @@ export const MapStage = React.memo(function MapStage({ startDateTime, endDateTim
   const handleTemporalHourChange = useCallback((hour: number) => {
     setTimeSlot(`${String(hour).padStart(2, "0")}-00`);
   }, []);
-
-  // Load stats for hovered landuse dataset from sidebar
-  useEffect(() => {
-    if (!hoveredDatasetId || !isLanduseLayer(hoveredDatasetId)) return;
-
-    let active = true;
-    const loadHoveredStats = async () => {
-      try {
-        const prefix = `gis-data/baseline-environment/${hoveredDatasetId}/${temporalYearValue}/`;
-        const res = await listS3Files(prefix);
-        if (!active) return;
-        const tifFile = res.files.find(f => f.key?.match(/\.tiff?$/i));
-        if (tifFile && tifFile.key) {
-          const proxyUrl = `/api/tif?key=${encodeURIComponent(tifFile.key)}`;
-          await computeLanduseStats(hoveredDatasetId, proxyUrl);
-        }
-      } catch (err) {
-        console.warn("[map:hoverStats]", err);
-      }
-    };
-
-    setActiveLuId(hoveredDatasetId);
-    void loadHoveredStats();
-
-    return () => {
-      active = false;
-    };
-  }, [hoveredDatasetId, temporalYearValue, computeLanduseStats]);
 
   const handleTemporalTimeLapse = useCallback(() => {
     setPbStartDate("");
