@@ -12,12 +12,13 @@ const UTM48N_HEIGHT_M = UTM48N_EXTENT_M.yMax - UTM48N_EXTENT_M.yMin;
 
 const API_BASE = "/api/gis";
 
+const _sessionCache = new Map<string, YearStat[]>();
+
 async function fetchCachedStats(landuseKey: string): Promise<YearStat[]> {
   try {
     const res = await fetch(`${API_BASE}/landuse-yearly-stats?key=${encodeURIComponent(landuseKey)}`);
     if (!res.ok) return [];
-    const data: Array<{ year: number; areaHa: number }> = await res.json();
-    return data;
+    return await res.json();
   } catch {
     return [];
   }
@@ -30,7 +31,7 @@ async function saveStat(landuseKey: string, year: number, areaHa: number): Promi
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ landuseKey, year, areaHa }),
     });
-  } catch { /* silent */ }
+  } catch { /* best-effort */ }
 }
 
 async function computeArea(key: string): Promise<number | null> {
@@ -94,24 +95,37 @@ async function listYearsOnS3(luKey: string): Promise<Map<number, string>> {
 
 export function useLanduseYearlyStats(landuseKey: string | null) {
   const [stats, setStats] = useState<YearStat[] | null>(null);
-  const loadingRef = useRef(false);
+  const fetchingRef = useRef(false);
 
   useEffect(() => {
     if (!landuseKey) {
       setStats(null);
-      loadingRef.current = false;
+      fetchingRef.current = false;
       return;
     }
 
+    const sc = _sessionCache.get(landuseKey);
+    if (sc) {
+      setStats(sc);
+      return;
+    }
+
+    if (fetchingRef.current) return;
+    fetchingRef.current = true;
+
     let cancelled = false;
-    loadingRef.current = true;
 
     (async () => {
-      const cached = await fetchCachedStats(landuseKey);
-      if (cancelled) return;
+      let cached = await fetchCachedStats(landuseKey);
+      if (cancelled) { fetchingRef.current = false; return; }
+
+      if (cached.length === 0) {
+        const sc2 = _sessionCache.get(landuseKey);
+        if (sc2) { cached = sc2; }
+      }
 
       const s3Years = await listYearsOnS3(landuseKey);
-      if (cancelled) return;
+      if (cancelled) { fetchingRef.current = false; return; }
 
       const cachedYears = new Set(cached.map(s => s.year));
       const newYears: Array<{ year: number; s3Key: string }> = [];
@@ -125,20 +139,21 @@ export function useLanduseYearlyStats(landuseKey: string | null) {
       if (newYears.length > 0) {
         console.log("[lu:yearly] computing", newYears.length, "new years:", newYears.map(n => n.year));
         for (const ny of newYears) {
-          if (cancelled) return;
+          if (cancelled) { fetchingRef.current = false; return; }
           const ha = await computeArea(ny.s3Key);
           if (ha !== null) {
             const areaHa = Math.round(ha);
             cached.push({ year: ny.year, areaHa });
-            await saveStat(landuseKey, ny.year, areaHa);
+            saveStat(landuseKey, ny.year, areaHa);
           }
         }
       }
 
-      if (cancelled) return;
+      if (cancelled) { fetchingRef.current = false; return; }
       cached.sort((a, b) => a.year - b.year);
+      _sessionCache.set(landuseKey, cached);
       setStats(cached);
-      loadingRef.current = false;
+      fetchingRef.current = false;
     })();
 
     return () => {

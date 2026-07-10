@@ -1229,23 +1229,7 @@ export const MapStage = React.memo(function MapStage({ startDateTime, endDateTim
 
   // Load stats for hovered landuse dataset from sidebar
   useEffect(() => {
-    if (!hoveredDatasetId || !isLanduseLayer(hoveredDatasetId)) {
-      // Restore activeLuId when not hovering a sidebar item
-      const lKeys = Object.keys(pixelValues).filter(isLanduseLayer);
-      if (lKeys.length > 0) {
-        let id = lKeys[0].split("__")[0];
-        id = id.replace(/-(raster|vector)$/, "");
-        setActiveLuId(id);
-      } else {
-        const appliedLu = appliedDatasets?.find(d => isLanduseLayer(d.id));
-        if (appliedLu) {
-          setActiveLuId(appliedLu.id);
-        } else {
-          setActiveLuId(null);
-        }
-      }
-      return;
-    }
+    if (!hoveredDatasetId || !isLanduseLayer(hoveredDatasetId)) return;
 
     let active = true;
     const loadHoveredStats = async () => {
@@ -1269,7 +1253,7 @@ export const MapStage = React.memo(function MapStage({ startDateTime, endDateTim
     return () => {
       active = false;
     };
-  }, [hoveredDatasetId, temporalYearValue, computeLanduseStats, pixelValues, appliedDatasets]);
+  }, [hoveredDatasetId, temporalYearValue, computeLanduseStats]);
 
   const handleTemporalTimeLapse = useCallback(() => {
     setPbStartDate("");
@@ -1311,12 +1295,18 @@ export const MapStage = React.memo(function MapStage({ startDateTime, endDateTim
   useEffect(() => {
     const lKeys = Object.keys(pixelValues).filter(isLanduseLayer);
     console.log("[map:luEffect] pixelValues landuse keys:", lKeys);
-    if (!lKeys.length) { setActiveLuId(null); return; }
+    if (!lKeys.length) return;
     let id = lKeys[0].split("__")[0];
     id = id.replace(/-(raster|vector)$/, "");
     console.log("[map:luEffect] setting activeLuId:", id);
     setActiveLuId(function(prev) { return prev === id ? prev : id; });
   }, [pixelValues]);
+
+  useEffect(() => {
+    if (!appliedDatasets?.length) { setActiveLuId(null); return; }
+    const hasLu = appliedDatasets.some(d => isLanduseLayer(d.id));
+    if (!hasLu) setActiveLuId(null);
+  }, [appliedDatasets]);
 
   // Merge layerRefs for inspector and other tools
   const layerRefs = useMemo(() => {

@@ -350,7 +350,10 @@ function TimelineRuler({
     [isActive, def, onChange]
   );
 
-  const isInView = (v: number) => v >= viewRef.current.start && v <= viewRef.current.end;
+  const isInView = (v: number) => {
+    const pad = (viewRef.current.end - viewRef.current.start) * 0.5;
+    return v >= viewRef.current.start - pad && v <= viewRef.current.end + pad;
+  };
 
   const majorH = isActive ? 40 : 10;
   const midH = isActive ? 28 : 7;
