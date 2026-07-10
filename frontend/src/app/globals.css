@@ -2442,52 +2442,28 @@ html[data-theme="dark"] .map-timeline-tick::after {
   min-width: 0;
   max-width: 78%;
   background: #ffffff;
-  border: 1px solid #d8e1ec;
+  border: 1px solid #cbd5e1;
   border-radius: 10px;
   padding: 0;
-  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.06);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
   display: flex;
   flex-direction: column;
-  overflow: hidden;
   align-self: center;
-}
-
-.ttc-header {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 5px 10px;
-  border-bottom: 1px solid #e8ecf1;
-  background: #f8fafc;
-  color: #475569;
-  font-size: 0.7rem;
-  font-weight: 600;
-  flex-shrink: 0;
-}
-
-.ttc-header-label {
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-  margin-right: auto;
-}
-
-.ttc-header-actions {
-  display: flex;
-  gap: 4px;
 }
 
 .ttc-action-btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 26px;
-  height: 26px;
+  width: 28px;
+  height: 28px;
   border: 1px solid #d8e1ec;
   background: #ffffff;
   border-radius: 5px;
   color: #475569;
   cursor: pointer;
   transition: all 150ms ease;
+  flex-shrink: 0;
 }
 
 .ttc-action-btn:hover {
@@ -2500,8 +2476,8 @@ html[data-theme="dark"] .map-timeline-tick::after {
 .ttc-rows {
   display: flex;
   flex-direction: column;
-  padding: 4px 8px 6px;
-  gap: 2px;
+  padding: 6px 8px;
+  gap: 1px;
 }
 
 /* Individual row */
@@ -2511,7 +2487,11 @@ html[data-theme="dark"] .map-timeline-tick::after {
   gap: 6px;
   transition: height 200ms ease, opacity 200ms ease;
   border-radius: 6px;
-  padding: 0 4px;
+  padding: 2px 4px;
+  border-bottom: 1px solid #f1f5f9;
+}
+.ttc-row:last-child {
+  border-bottom: none;
 }
 
 .ttc-row--active {
@@ -2586,34 +2566,37 @@ html[data-theme="dark"] .map-timeline-tick::after {
   width: 100%;
   cursor: pointer;
   touch-action: none;
+  overflow: hidden;
+  border-radius: 3px;
 }
 
 .ttc-ruler-svg {
   display: block;
   width: 100%;
   height: auto;
+  transition: transform 0s;
 }
 
 /* Selected value bubble */
 .ttc-selected-bubble {
   position: absolute;
-  top: -20px;
+  top: -26px;
   transform: translateX(-50%);
-  background: #2f65b0;
+  background: #ef4444;
   color: #ffffff;
-  font-size: 0.68rem;
+  font-size: 0.7rem;
   font-weight: 700;
-  padding: 2px 8px;
-  border-radius: 4px;
+  padding: 3px 10px;
+  border-radius: 5px;
   white-space: nowrap;
   pointer-events: none;
   z-index: 5;
-  box-shadow: 0 1px 4px rgba(47, 101, 176, 0.3);
+  box-shadow: 0 2px 8px rgba(239, 68, 68, 0.35);
 }
 
 .ttc-hover-bubble {
   position: absolute;
-  top: -20px;
+  top: -24px;
   transform: translateX(-50%);
   background: #ffffff;
   color: #2f65b0;
@@ -2631,11 +2614,84 @@ html[data-theme="dark"] .map-timeline-tick::after {
 /* Range hint */
 .ttc-range-hint {
   display: flex;
+  align-items: center;
   justify-content: space-between;
-  padding: 0 2px;
+  gap: 6px;
+  padding: 2px 2px 0;
   font-size: 0.55rem;
   color: #94a3b8;
-  margin-top: -2px;
+}
+
+/* Mini progress bar */
+.ttc-range-bar {
+  flex: 1;
+  height: 4px;
+  background: #e2e8f0;
+  border-radius: 2px;
+  position: relative;
+  overflow: hidden;
+}
+.ttc-range-bar-fill {
+  position: absolute;
+  top: 0;
+  height: 100%;
+  background: #2f65b0;
+  border-radius: 2px;
+  min-width: 4px;
+  transition: left 200ms ease, width 200ms ease;
+}
+
+/* Pan arrows */
+.ttc-pan-hint {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  color: #94a3b8;
+  pointer-events: none;
+  z-index: 3;
+  opacity: 0.5;
+}
+.ttc-pan-hint--left {
+  left: 2px;
+}
+.ttc-pan-hint--right {
+  right: 2px;
+}
+
+/* Gradient fades for hidden data */
+.ttc-fade {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 24px;
+  z-index: 4;
+  pointer-events: none;
+}
+.ttc-fade--left {
+  left: 0;
+  background: linear-gradient(to right, rgba(255,255,255,0.9), transparent);
+}
+.ttc-fade--right {
+  right: 0;
+  background: linear-gradient(to left, rgba(255,255,255,0.9), transparent);
+}
+
+/* Row action buttons (Play + Expand) */
+.ttc-row-actions {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  flex-shrink: 0;
+  padding-left: 6px;
+}
+.ttc-action-play {
+  background: #2f65b0;
+  color: #fff;
+  border-color: #2f65b0;
+}
+.ttc-action-play:hover {
+  background: #1e4d7a;
+  color: #fff;
 }
 
 /* Add Player Control */

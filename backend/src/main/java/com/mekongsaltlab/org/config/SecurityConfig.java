@@ -54,6 +54,7 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.GET, "/api/s3/list").permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/gis/manual-stations/**").permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/gis/water-quality/**").permitAll()
+                        .requestMatchers("/api/gis/landuse-yearly-stats/**").permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/articles/public/**").permitAll()
                         .anyRequest().authenticated()
                 )

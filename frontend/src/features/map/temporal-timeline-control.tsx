@@ -2,15 +2,10 @@
 
 import React, { useCallback, useRef, useState, useEffect } from "react";
 import {
-  Play,
-  Pause,
   ChevronDown,
   ChevronUp,
-  Clock,
   ChevronLeft,
   ChevronRight,
-  ZoomIn,
-  ZoomOut,
 } from "lucide-react";
 import type { TimeScale } from "../../lib/constants/datasets";
 
@@ -130,9 +125,7 @@ interface TemporalTimelineControlProps {
   onDayChange: (month: number, day: number) => void;
   onHourChange: (hour: number) => void;
   onScaleChange: (scale: TimeScale) => void;
-  onPlayPause: () => void;
   onTimeLapse: () => void;
-  isPlaying: boolean;
   isMobile?: boolean;
 }
 
@@ -146,12 +139,10 @@ export function TemporalTimelineControl({
   onDayChange,
   onHourChange,
   onScaleChange,
-  onPlayPause,
   onTimeLapse,
-  isPlaying,
   isMobile,
 }: TemporalTimelineControlProps) {
-  const [collapsed, setCollapsed] = useState(false);
+  const [collapsed, setCollapsed] = useState(true);
   const yearDef = buildYearDef(yearValue);
   const dayDef = buildDayDef(dayValue);
   const hourDef = buildHourDef(hourValue);
@@ -161,39 +152,6 @@ export function TemporalTimelineControl({
 
   return (
     <div className="ttc-card">
-      <div className="ttc-header">
-        <Clock size={14} />
-        <span className="ttc-header-label">Timeline</span>
-        <div className="ttc-header-actions">
-          <button
-            className="ttc-action-btn"
-            onClick={onTimeLapse}
-            type="button"
-            title="Time-Lapse"
-          >
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-              <polygon points="5 3 19 12 5 21 5 3" />
-            </svg>
-          </button>
-          <button
-            className="ttc-action-btn"
-            onClick={onPlayPause}
-            type="button"
-            title={isPlaying ? "Pause" : "Play"}
-          >
-            {isPlaying ? <Pause size={13} fill="currentColor" /> : <Play size={13} fill="currentColor" />}
-          </button>
-          <button
-            className="ttc-action-btn"
-            onClick={() => setCollapsed(!collapsed)}
-            type="button"
-            title={collapsed ? "Expand all rows" : "Collapse to active row"}
-          >
-            {collapsed ? <ChevronDown size={14} /> : <ChevronUp size={14} />}
-          </button>
-        </div>
-      </div>
-
       <div className={`ttc-rows ${collapsed ? "ttc-rows--collapsed" : ""}`}>
         {defs.map((def, idx) => {
           const isActive = idx === scaleIndex;
@@ -216,6 +174,9 @@ export function TemporalTimelineControl({
                 }
               }}
               isMobile={isMobile}
+              onTimeLapse={onTimeLapse}
+              collapsed={collapsed}
+              onToggleCollapse={() => setCollapsed(!collapsed)}
             />
           );
         })}
@@ -231,6 +192,9 @@ function TimelineRuler({
   onActivate,
   onChange,
   isMobile,
+  onTimeLapse,
+  collapsed,
+  onToggleCollapse,
 }: {
   def: TimelineRowDef;
   isActive: boolean;
@@ -238,8 +202,12 @@ function TimelineRuler({
   onActivate: () => void;
   onChange: (value: number) => void;
   isMobile?: boolean;
+  onTimeLapse: () => void;
+  collapsed: boolean;
+  onToggleCollapse: () => void;
 }) {
   const trackRef = useRef<HTMLDivElement>(null);
+  const svgRef = useRef<SVGSVGElement>(null);
   const viewRef = useRef({ start: 0, end: 0 });
 
   const [viewState, setViewState] = useState(() => {
@@ -263,153 +231,134 @@ function TimelineRuler({
 
   const [draggingHandle, setDraggingHandle] = useState(false);
   const [panning, setPanning] = useState(false);
+  const panAnchor = useRef<{ x: number; start: number } | null>(null);
+
   const [hoverValue, setHoverValue] = useState<number | null>(null);
   const [hoverX, setHoverX] = useState(0);
-  const panAnchor = useRef<{ x: number; start: number } | null>(null);
   const opacity = isActive ? 1 : isApplicable ? 0.5 : 0.3;
 
-  const valueToScreen = useCallback(
-    (v: number) => {
-      const range = viewState.end - viewState.start;
-      if (range <= 0) return 0;
-      return ((v - viewState.start) / range) * 100;
-    },
-    [viewState]
-  );
+  const valueToScreen = useCallback((v: number) => {
+    const range = viewRef.current.end - viewRef.current.start;
+    if (range <= 0) return 0;
+    return ((v - viewRef.current.start) / range) * 100;
+  }, []);
 
-  const screenToViewValue = useCallback(
-    (clientX: number) => {
-      const rect = trackRef.current?.getBoundingClientRect();
-      if (!rect) return def.value;
-      const ratio = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
-      return viewRef.current.start + ratio * (viewRef.current.end - viewRef.current.start);
-    },
-    [def]
-  );
-
-  const clampValue = (v: number) =>
-    Math.max(def.fullMin, Math.min(def.fullMax, Math.round(v)));
-
-  const snapHour = (v: number) => Math.round(v);
+  const selectedX = valueToScreen(def.value);
+  const canPanLeft = viewRef.current.start > def.fullMin;
+  const canPanRight = viewRef.current.end < def.fullMax;
 
   const handleTrackPointerDown = useCallback(
     (e: React.PointerEvent) => {
       if (!isActive) return;
       e.preventDefault();
-      const val = screenToViewValue(e.clientX);
       const selX = valueToScreen(def.value);
       const rect = trackRef.current?.getBoundingClientRect();
       if (!rect) return;
       const clickXPercent = ((e.clientX - rect.left) / rect.width) * 100;
 
-      if (Math.abs(clickXPercent - selX) < 4) {
+      if (Math.abs(clickXPercent - selX) < 15) {
         setDraggingHandle(true);
-        const snapped = def.scale === "hour" ? snapHour(val) : clampValue(val);
-        onChange(snapped);
       } else {
         setPanning(true);
         panAnchor.current = { x: e.clientX, start: viewRef.current.start };
       }
     },
-    [isActive, def, valueToScreen, screenToViewValue, onChange]
+    [isActive, def, valueToScreen]
   );
 
   useEffect(() => {
     if (!draggingHandle && !panning) return;
+
     const onMove = (e: PointerEvent) => {
-      if (draggingHandle) {
-        const val = screenToViewValue(e.clientX);
-        const snapped = def.scale === "hour" ? snapHour(val) : clampValue(val);
-        onChange(snapped);
-      }
       if (panning && panAnchor.current) {
         const dx = e.clientX - panAnchor.current.x;
         const rect = trackRef.current?.getBoundingClientRect();
         if (!rect) return;
-        const range = viewRef.current.end - viewRef.current.start;
-        const shift = -(dx / rect.width) * range;
+        const r = viewRef.current.end - viewRef.current.start;
+        const shift = -(dx / rect.width) * r;
         let newStart = panAnchor.current.start + shift;
         if (newStart < def.fullMin) newStart = def.fullMin;
-        if (newStart + range > def.fullMax) newStart = def.fullMax - range;
-        setViewState((prev) => {
-          const r = prev.end - prev.start;
-          let s = newStart;
-          if (s < def.fullMin) s = def.fullMin;
-          if (s + r > def.fullMax) s = def.fullMax - r;
-          return { start: Math.floor(s), end: Math.floor(s + r) };
-        });
+        if (newStart + r > def.fullMax) newStart = def.fullMax - r;
+
+        viewRef.current = { start: newStart, end: newStart + r };
+
+        if (svgRef.current) {
+          svgRef.current.style.transform = `translateX(${dx}px)`;
+          svgRef.current.style.willChange = 'transform';
+        }
+      }
+
+      if (draggingHandle) {
+        const rect = trackRef.current?.getBoundingClientRect();
+        if (!rect) return;
+        const ratio = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+        const val = viewRef.current.start + ratio * (viewRef.current.end - viewRef.current.start);
+        const snapped = Math.round(val);
+        onChange(Math.max(def.fullMin, Math.min(def.fullMax, snapped)));
       }
     };
+
     const onUp = () => {
+      if (svgRef.current) {
+        svgRef.current.style.transform = '';
+        svgRef.current.style.willChange = '';
+      }
       setDraggingHandle(false);
       setPanning(false);
       panAnchor.current = null;
+      setViewState({
+        start: Math.floor(viewRef.current.start),
+        end: Math.ceil(viewRef.current.end),
+      });
     };
-    window.addEventListener("pointermove", onMove);
+
+    window.addEventListener("pointermove", onMove, { passive: true });
     window.addEventListener("pointerup", onUp);
     return () => {
       window.removeEventListener("pointermove", onMove);
       window.removeEventListener("pointerup", onUp);
+      if (svgRef.current) {
+        svgRef.current.style.transform = '';
+        svgRef.current.style.willChange = '';
+      }
     };
-  }, [draggingHandle, panning, def, screenToViewValue, onChange]);
+  }, [draggingHandle, panning, def, onChange]);
 
   const handleMouseMove = useCallback(
     (e: React.MouseEvent) => {
       if (!trackRef.current) return;
-      const val = screenToViewValue(e.clientX);
-      const snapped = def.scale === "hour" ? snapHour(val) : clampValue(val);
       const rect = trackRef.current.getBoundingClientRect();
       const ratio = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+      const val = viewRef.current.start + ratio * (viewRef.current.end - viewRef.current.start);
+      const snapped = Math.max(def.fullMin, Math.min(def.fullMax, Math.round(val)));
       setHoverValue(snapped);
       setHoverX(ratio * 100);
     },
-    [def, screenToViewValue, clampValue]
+    [def]
   );
 
   const handleTrackClick = useCallback(
     (e: React.MouseEvent) => {
       if (!isActive) return;
-      const val = screenToViewValue(e.clientX);
-      const snapped = def.scale === "hour" ? snapHour(val) : clampValue(val);
+      const rect = trackRef.current?.getBoundingClientRect();
+      if (!rect) return;
+      const ratio = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+      const val = viewRef.current.start + ratio * (viewRef.current.end - viewRef.current.start);
+      const snapped = Math.max(def.fullMin, Math.min(def.fullMax, Math.round(val)));
       onChange(snapped);
     },
-    [isActive, def, screenToViewValue, onChange]
+    [isActive, def, onChange]
   );
 
-  const zoomView = useCallback(
-    (factor: number) => {
-      setViewState((prev) => {
-        const range = prev.end - prev.start;
-        const newRange = Math.max(def.minWindow, range * factor);
-        const center = (prev.start + prev.end) / 2;
-        let start = center - newRange / 2;
-        let end = center + newRange / 2;
-        if (start < def.fullMin) {
-          end += def.fullMin - start;
-          start = def.fullMin;
-        }
-        if (end > def.fullMax) {
-          start -= end - def.fullMax;
-          end = def.fullMax;
-        }
-        if (start < def.fullMin) start = def.fullMin;
-        if (end - def.fullMin < def.minWindow) end = def.fullMin + def.minWindow;
-        return { start: Math.floor(start), end: Math.ceil(end) };
-      });
-    },
-    [def]
-  );
+  const isInView = (v: number) => v >= viewRef.current.start && v <= viewRef.current.end;
 
-  const selectedX = valueToScreen(def.value);
-  const canPanLeft = viewState.start > def.fullMin;
-  const canPanRight = viewState.end < def.fullMax;
-
-  const isInView = (v: number) => v >= viewState.start && v <= viewState.end;
-
-  const tickH = isActive ? 28 : 8;
-  const majorH = isActive ? 28 : 10;
-  const midH = isActive ? 18 : 7;
-  const minorH = isActive ? 10 : 5;
+  const majorH = isActive ? 40 : 10;
+  const midH = isActive ? 28 : 7;
+  const minorH = isActive ? 18 : 5;
+  const BASELINE = isActive ? 24 : 6;
+  const HALF_MAJOR = majorH / 2;
+  const HALF_MID = midH / 2;
+  const HALF_MINOR = minorH / 2;
 
   return (
     <div
@@ -447,6 +396,8 @@ function TimelineRuler({
           onMouseMove={handleMouseMove}
           onMouseLeave={() => setHoverValue(null)}
         >
+          {isActive && canPanLeft && <div className="ttc-fade ttc-fade--left" />}
+          {isActive && canPanRight && <div className="ttc-fade ttc-fade--right" />}
           {/* Pan arrows */}
           {isActive && canPanLeft && (
             <div className="ttc-pan-hint ttc-pan-hint--left">
@@ -460,36 +411,24 @@ function TimelineRuler({
           )}
 
           <svg
+            ref={svgRef}
             className="ttc-ruler-svg"
-            viewBox={`0 0 1000 ${isActive ? 32 : 12}`}
+            viewBox={`0 0 1000 ${isActive ? 48 : 12}`}
             preserveAspectRatio="none"
           >
             {/* Major ticks */}
             {def.majorTicks.map((v) =>
               isInView(v) ? (
-                <g key={`maj-${v}`}>
-                  <line
-                    x1={valueToScreen(v) * 10}
-                    y1={isActive ? 32 - majorH : 12 - majorH}
-                    x2={valueToScreen(v) * 10}
-                    y2={12}
-                    stroke={Math.abs(v - def.value) < 0.1 ? "#2f65b0" : isActive ? "#64748b" : "#94a3b8"}
-                    strokeWidth={isActive ? 1.2 : 0.8}
-                    shapeRendering="crispEdges"
-                  />
-                  {isActive && (
-                    <text
-                      x={valueToScreen(v) * 10}
-                      y={8}
-                      textAnchor="middle"
-                      fontSize="7"
-                      fill="#475569"
-                      fontFamily="system-ui"
-                    >
-                      {def.formatTick(v)}
-                    </text>
-                  )}
-                </g>
+                <line
+                  key={`maj-${v}`}
+                  x1={valueToScreen(v) * 10}
+                  y1={BASELINE - HALF_MAJOR}
+                  x2={valueToScreen(v) * 10}
+                  y2={BASELINE + HALF_MAJOR}
+                  stroke={Math.abs(v - def.value) < 0.1 ? "#2f65b0" : isActive ? "#64748b" : "#94a3b8"}
+                  strokeWidth={isActive ? 2 : 0.8}
+                  shapeRendering="crispEdges"
+                />
               ) : null
             )}
             {/* Medium ticks */}
@@ -498,11 +437,11 @@ function TimelineRuler({
                 <line
                   key={`med-${v}`}
                   x1={valueToScreen(v) * 10}
-                  y1={isActive ? 32 - midH : 12 - midH}
+                  y1={BASELINE - HALF_MID}
                   x2={valueToScreen(v) * 10}
-                  y2={12}
+                  y2={BASELINE + HALF_MID}
                   stroke={isActive ? "#94a3b8" : "#cbd5e1"}
-                  strokeWidth={0.6}
+                  strokeWidth={isActive ? 1.2 : 0.6}
                   shapeRendering="crispEdges"
                 />
               ) : null
@@ -513,38 +452,68 @@ function TimelineRuler({
                 <line
                   key={`min-${v}`}
                   x1={valueToScreen(v) * 10}
-                  y1={isActive ? 32 - minorH : 12 - minorH}
+                  y1={BASELINE - HALF_MINOR}
                   x2={valueToScreen(v) * 10}
-                  y2={12}
+                  y2={BASELINE + HALF_MINOR}
                   stroke={isActive ? "#cbd5e1" : "#e2e8f0"}
-                  strokeWidth={0.4}
+                  strokeWidth={isActive ? 0.8 : 0.4}
                   shapeRendering="crispEdges"
                 />
               ) : null
             )}
+            {/* Top boundary */}
+            {isActive && (
+              <line x1={0} y1={0} x2={1000} y2={0} stroke="#cbd5e1" strokeWidth={0.5} shapeRendering="crispEdges" />
+            )}
+            {/* Baseline glow (depth effect) */}
+            {isActive && (
+              <line
+                x1={0} y1={BASELINE} x2={1000} y2={BASELINE}
+                stroke="rgba(51, 65, 85, 0.08)"
+                strokeWidth={8}
+                shapeRendering="crispEdges"
+              />
+            )}
             {/* Baseline */}
             <line
               x1={0}
-              y1={12}
+              y1={BASELINE}
               x2={1000}
-              y2={12}
-              stroke={isActive ? "#94a3b8" : "#cbd5e1"}
-              strokeWidth={isActive ? 1 : 0.8}
+              y2={BASELINE}
+              stroke={isActive ? "#334155" : "#cbd5e1"}
+              strokeWidth={isActive ? 5 : 0.8}
               shapeRendering="crispEdges"
             />
+            {/* Bottom boundary */}
+            {isActive && (
+              <line x1={0} y1={48} x2={1000} y2={48} stroke="#cbd5e1" strokeWidth={0.5} shapeRendering="crispEdges" />
+            )}
             {/* Selection marker */}
             {isActive && (
               <g>
+                {/* Selection pillar (full height highlight) */}
                 <line
                   x1={selectedX * 10}
-                  y1={32 - majorH}
+                  y1={0}
                   x2={selectedX * 10}
-                  y2={6}
+                  y2={48}
                   stroke="#2f65b0"
-                  strokeWidth={1.8}
+                  strokeWidth={4}
+                  strokeOpacity={0.18}
                   shapeRendering="crispEdges"
                 />
-                <circle cx={selectedX * 10} cy={6} r={3} fill="#2f65b0" />
+                {/* Selection line */}
+                <line
+                  x1={selectedX * 10}
+                  y1={0}
+                  x2={selectedX * 10}
+                  y2={48}
+                  stroke="#2f65b0"
+                  strokeWidth={2.5}
+                  shapeRendering="crispEdges"
+                />
+                {/* Thermometer bulb */}
+                <circle cx={selectedX * 10} cy={BASELINE} r={6} fill="#ef4444" stroke="#fff" strokeWidth={2} />
               </g>
             )}
           </svg>
@@ -553,28 +522,42 @@ function TimelineRuler({
         {isActive && (
           <div className="ttc-range-hint">
             <span>{def.formatTick(viewState.start)}</span>
-            <div className="ttc-zoom-btns">
-              <button
-                className="ttc-zoom-btn"
-                onClick={() => zoomView(2)}
-                type="button"
-                title="Zoom in"
-              >
-                <ZoomIn size={11} />
-              </button>
-              <button
-                className="ttc-zoom-btn"
-                onClick={() => zoomView(0.5)}
-                type="button"
-                title="Zoom out"
-              >
-                <ZoomOut size={11} />
-              </button>
+            <div className="ttc-range-bar">
+              <div
+                className="ttc-range-bar-fill"
+                style={{
+                  left: `${((viewState.start - def.fullMin) / (def.fullMax - def.fullMin)) * 100}%`,
+                  width: `${((viewState.end - viewState.start) / (def.fullMax - def.fullMin)) * 100}%`,
+                }}
+              />
             </div>
             <span>{def.formatTick(viewState.end)}</span>
           </div>
         )}
       </div>
+
+      {isActive && (
+        <div className="ttc-row-actions">
+          <button
+            className="ttc-action-btn ttc-action-play"
+            onClick={onTimeLapse}
+            type="button"
+            title="Time-Lapse"
+          >
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor" stroke="none">
+              <polygon points="5 3 19 12 5 21 5 3" />
+            </svg>
+          </button>
+          <button
+            className="ttc-action-btn"
+            onClick={onToggleCollapse}
+            type="button"
+            title={collapsed ? "Expand all rows" : "Collapse to active row"}
+          >
+            {collapsed ? <ChevronDown size={14} /> : <ChevronUp size={14} />}
+          </button>
+        </div>
+      )}
     </div>
   );
 }

@@ -1271,17 +1271,6 @@ export const MapStage = React.memo(function MapStage({ startDateTime, endDateTim
     };
   }, [hoveredDatasetId, temporalYearValue, computeLanduseStats, pixelValues, appliedDatasets]);
 
-  const handleTemporalPlayPause = useCallback(() => {
-    if (isTimelinePlaying) {
-      setIsTimelinePlaying(false);
-    } else {
-      setPbStartDate("");
-      setPbEndDate("");
-      setPbError("");
-      setShowPlaybackPicker(true);
-    }
-  }, [isTimelinePlaying]);
-
   const handleTemporalTimeLapse = useCallback(() => {
     setPbStartDate("");
     setPbEndDate("");
@@ -1986,6 +1975,7 @@ export const MapStage = React.memo(function MapStage({ startDateTime, endDateTim
           if (pointermoveRafRef.current) cancelAnimationFrame(pointermoveRafRef.current);
           pointermoveRafRef.current = requestAnimationFrame(() => {
             pointermoveRafRef.current = null;
+            if (!mapRef.current) return;
             pointermoveThrottleRef.current = performance.now();
             const layers = layerRefs.current;
             const collected: Record<string, number> = {};
@@ -2051,7 +2041,21 @@ export const MapStage = React.memo(function MapStage({ startDateTime, endDateTim
       }
     });
 
+    const mapViewport = map.getViewport();
+    mapViewport.addEventListener("pointerleave", () => {
+      if (!isMobileRef.current) {
+        setMouseCoords(null);
+        setPixelValues({});
+        setPixelValue(null);
+        mapViewport.style.cursor = "";
+      }
+    });
+
     return () => {
+      if (pointermoveRafRef.current) {
+        cancelAnimationFrame(pointermoveRafRef.current);
+        pointermoveRafRef.current = null;
+      }
       const layers = layerRefs.current;
       if (layers && typeof layers === 'object') {
         for (const layer of Object.values(layers)) {
@@ -2520,7 +2524,7 @@ export const MapStage = React.memo(function MapStage({ startDateTime, endDateTim
       })
       .finally(() => {
         if (isActive) setPopupLoading(false);
-      });
+    });
 
     return () => {
       isActive = false;
@@ -2791,9 +2795,7 @@ export const MapStage = React.memo(function MapStage({ startDateTime, endDateTim
                 onDayChange={handleTemporalDayChange}
                 onHourChange={handleTemporalHourChange}
                 onScaleChange={handleTemporalScaleChange}
-                onPlayPause={handleTemporalPlayPause}
                 onTimeLapse={handleTemporalTimeLapse}
-                isPlaying={isTimelinePlaying}
                 isMobile={isMobile}
               />
             )}
@@ -2955,7 +2957,7 @@ export const MapStage = React.memo(function MapStage({ startDateTime, endDateTim
           </div>
         )}
 
-        {((Object.keys(pixelValues).length > 0 && mouseCoords !== null) || (hoveredDatasetId && isLanduseLayer(hoveredDatasetId))) && (
+        {(Object.keys(pixelValues).length > 0 && mouseCoords !== null) && (
           <div className={`geo-map-inspector ${isMobile ? 'geo-map-inspector--mobile' : ''}`}>
             {/* Header */}
             <div 
@@ -3019,12 +3021,6 @@ export const MapStage = React.memo(function MapStage({ startDateTime, endDateTim
                 {(() => {
                   // Merge actual and virtual hovered entries
                   const inspectorEntries = [...Object.entries(pixelValues)];
-                  if (hoveredDatasetId && isLanduseLayer(hoveredDatasetId)) {
-                    const isAlreadyIn = inspectorEntries.some(([k]) => k.startsWith(hoveredDatasetId));
-                    if (!isAlreadyIn) {
-                      inspectorEntries.push([hoveredDatasetId, 1]);
-                    }
-                  }
 
                   return inspectorEntries.map(([key, val]) => {
                     let layerInfo = renderedLayers[key] || renderedLayersRef.current[key];
@@ -3134,63 +3130,39 @@ export const MapStage = React.memo(function MapStage({ startDateTime, endDateTim
                             {luYearly && luYearly.length > 1 && (
                               <div className="geo-map-inspector-chart-container" style={{ marginTop: '16px', borderTop: '1px solid #f1f5f9', paddingTop: '12px' }}>
                                 <div style={{ fontSize: '0.72rem', color: '#64748b', marginBottom: '8px', fontWeight: 600 }}>Area by Year</div>
-                                {(() => { console.log("[chart] cur:", temporalYearValue, "years:", luYearly.map(d => d.year), "areaHa:", luYearly.map(d => d.areaHa)); return null; })()}
-                                <div style={{ display: 'flex', gap: 6 }}>
-                                  <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'space-between', height: 70, fontSize: '0.58rem', color: '#94a3b8', textAlign: 'right', paddingTop: 0, paddingBottom: 14, minWidth: 28 }}>
-                                    {(() => {
-                                      const vals = luYearly.map(d => d.areaHa);
-                                      const rawMax = Math.max(...vals, 1);
-                                      const niceCeil = (() => {
-                                        if (rawMax <= 0) return 1;
-                                        const exp = Math.floor(Math.log10(rawMax));
-                                        const base = Math.pow(10, exp);
-                                        const norm = rawMax / base;
-                                        const nice = norm <= 1 ? 1 : norm <= 2 ? 2 : norm <= 5 ? 5 : 10;
-                                        return nice * base;
-                                      })();
-                                      const fmt = (v: number) => v >= 1e6 ? (v/1e6).toFixed(1)+'M' : v >= 1000 ? (v/1000).toFixed(0)+'K' : v.toFixed(0);
-                                      return [niceCeil, niceCeil*0.75, niceCeil*0.5, niceCeil*0.25, 0].map((v, i) => <span key={i}>{fmt(v)}</span>);
-                                    })()}
-                                  </div>
-                                  <div style={{ flex: 1, position: 'relative' }}>
-                                    {(() => {
-                                      const vals = luYearly.map(d => d.areaHa);
-                                      const rawMax = Math.max(...vals, 1);
-                                      const niceCeil = (() => {
-                                        if (rawMax <= 0) return 1;
-                                        const exp = Math.floor(Math.log10(rawMax));
-                                        const base = Math.pow(10, exp);
-                                        const norm = rawMax / base;
-                                        const nice = norm <= 1 ? 1 : norm <= 2 ? 2 : norm <= 5 ? 5 : 10;
-                                        return nice * base;
-                                      })();
-                                      const cur = temporalYearValue;
-                                      const years = luYearly.map(d => d.year);
-                                      const latestYear = years[years.length - 1];
-                                      return (
-                                        <>
-                                          <div style={{ display: 'flex', alignItems: 'flex-end', gap: 3, height: 70, padding: '0 2px' }}>
-                                            {luYearly.map(d => {
-                                              const h = Math.max(4, 2 + (d.areaHa / niceCeil) * 56);
-                                              const isCur = Number(d.year) === Number(cur)
-                                                || (years.every(y => Number(y) !== Number(cur)) && Number(d.year) === Number(latestYear));
-                                              return (
-                                                <div key={d.year} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3 }} title={`${d.year}: ${d.areaHa.toLocaleString()} ha` + (isCur ? ' (current)' : '')}>
-                                                  <div style={{ width: '100%', maxWidth: 28, height: h, borderRadius: '4px 4px 0 0', background: isCur ? '#f59e0b' : '#3b82f6', border: isCur ? '1px solid #d97706' : '1px solid #2563eb' }} />
-                                                  <span style={{ fontSize: '0.58rem', color: isCur ? '#d97706' : '#64748b', fontWeight: isCur ? 700 : 500 }}>{d.year}</span>
-                                                </div>
-                                              );
-                                            })}
+                                {(() => {
+                                  const vals = luYearly.map(d => d.areaHa);
+                                  const rawMax = Math.max(...vals, 1);
+                                  const niceCeil = (() => {
+                                    if (rawMax <= 0) return 1;
+                                    const exp = Math.floor(Math.log10(rawMax));
+                                    const base = Math.pow(10, exp);
+                                    const norm = rawMax / base;
+                                    const nice = norm <= 1 ? 1 : norm <= 2 ? 2 : norm <= 5 ? 5 : 10;
+                                    return nice * base;
+                                  })();
+                                  const cur = temporalYearValue;
+                                  const years = luYearly.map(d => d.year);
+                                  const latestYear = years[years.length - 1];
+                                  const valFmt = (v: number) => v >= 1e6 ? (v/1e6).toFixed(1)+'M' : v >= 1000 ? (v/1000).toFixed(0)+'K' : v >= 100 ? v.toFixed(0) : v.toFixed(1);
+                                  return (
+                                    <div style={{ display: 'flex', alignItems: 'flex-end', gap: 3, height: 84, padding: '0 2px' }}>
+                                      {luYearly.map(d => {
+                                        const h = Math.max(4, 2 + (d.areaHa / niceCeil) * 56);
+                                        const isCur = Number(d.year) === Number(cur)
+                                          || (years.every(y => Number(y) !== Number(cur)) && Number(d.year) === Number(latestYear));
+                                        return (
+                                          <div key={d.year} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2 }} title={`${d.year}: ${d.areaHa.toLocaleString()} ha` + (isCur ? ' (current)' : '')}>
+                                            <span style={{ fontSize: '0.55rem', fontWeight: 700, color: isCur ? '#d97706' : '#1e40af' }}>{valFmt(d.areaHa)}</span>
+                                            <div style={{ width: '100%', maxWidth: 28, height: h, borderRadius: '4px 4px 0 0', background: isCur ? '#f59e0b' : '#3b82f6', border: isCur ? '1px solid #d97706' : '1px solid #2563eb' }} />
+                                            <span style={{ fontSize: '0.58rem', color: isCur ? '#d97706' : '#64748b', fontWeight: isCur ? 700 : 500 }}>{d.year}</span>
                                           </div>
-                                          <div style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 14, display: 'flex', flexDirection: 'column', justifyContent: 'space-between', pointerEvents: 'none' }}>
-                                            {[0,1,2,3,4].map(i => <div key={i} style={{ borderTop: '1px solid #f1f5f9', width: '100%', height: 0 }} />)}
-                                          </div>
-                                        </>
-                                      );
-                                    })()}
-                                  </div>
-                                </div>
-                            </div>
+                                        );
+                                      })}
+                                    </div>
+                                  );
+                                })()}
+                              </div>
                             )}
 
                             {activeLuId && !luYearly && (
