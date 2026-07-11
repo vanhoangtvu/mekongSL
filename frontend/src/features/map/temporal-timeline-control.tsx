@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useCallback, useRef, useState, useEffect } from "react";
+import React, { useCallback, useRef, useState, useEffect, useMemo } from "react";
 import {
   ChevronDown,
   ChevronUp,
@@ -25,6 +25,46 @@ type TimelineRowDef = {
   minWindow: number;
 };
 
+const BASE_DATE = new Date(1990, 0, 1);
+
+function getInputValueString(def: TimelineRowDef): string {
+  if (def.scale === "year") return String(def.value);
+  if (def.scale === "day") {
+    const d = daysToDate(def.value);
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  }
+  const h = ((def.value % 24) + 24) % 24;
+  return `${String(h).padStart(2, "0")}:00`;
+}
+
+function tryParseInputValue(scale: string, input: string, def: TimelineRowDef): number | null {
+  if (scale === "year") {
+    const year = parseInt(input, 10);
+    return isNaN(year) ? null : year;
+  }
+  if (scale === "day") {
+    const d = new Date(input + "T00:00:00");
+    if (isNaN(d.getTime())) return null;
+    return dateToDays(d.getFullYear(), d.getMonth() + 1, d.getDate());
+  }
+  if (scale === "hour") {
+    const parts = input.split(":").map(Number);
+    if (parts.length < 1 || isNaN(parts[0]) || parts[0] < 0 || parts[0] > 23) return null;
+    const baseDay = Math.floor(def.value / 24);
+    return baseDay * 24 + parts[0];
+  }
+  return null;
+}
+
+function dateToDays(year: number, month: number, day: number): number {
+  const d = new Date(year, month - 1, day);
+  return Math.round((d.getTime() - BASE_DATE.getTime()) / 86400000);
+}
+
+function daysToDate(days: number): Date {
+  return new Date(BASE_DATE.getTime() + days * 86400000);
+}
+
 function buildYearDef(yearValue: number): TimelineRowDef {
   const major = [1994, 1998, 2002, 2006, 2010, 2014, 2018, 2022, 2026];
   const minor: number[] = [];
@@ -46,72 +86,99 @@ function buildYearDef(yearValue: number): TimelineRowDef {
   };
 }
 
-function buildDayDef(dateStr: string): TimelineRowDef {
+function buildDayDef(dateStr: string, yearValue: number): TimelineRowDef {
   const parts = dateStr ? dateStr.split("-").map(Number) : [1, 1];
   const month = parts[0] || 1;
   const day = parts[1] || 1;
-  const dayOfYear = Math.floor(
-    (new Date(2024, month - 1, day).getTime() - new Date(2024, 0, 0).getTime()) / 86400000
-  );
+  const absDay = dateToDays(yearValue, month, day);
+
+  // Pre-generate major ticks: start of every month from 1990 to 2026
   const major: number[] = [];
-  for (let m = 0; m < 12; m++)
-    major.push(
-      Math.floor(
-        (new Date(2024, m, 1).getTime() - new Date(2024, 0, 0).getTime()) / 86400000
-      ) + 1
-    );
+  for (let y = 1990; y <= 2026; y++) {
+    for (let m = 1; m <= 12; m++) {
+      major.push(dateToDays(y, m, 1));
+    }
+  }
+
+  // Pre-generate medium ticks: 10th and 20th of every month
   const medium: number[] = [];
-  for (let d = 7; d <= 365; d += 7) medium.push(d);
-  const minor: number[] = [];
-  for (let d = 1; d <= 365; d++)
-    if (!medium.includes(d) && !major.includes(d)) minor.push(d);
+  for (let y = 1990; y <= 2026; y++) {
+    for (let m = 1; m <= 12; m++) {
+      medium.push(dateToDays(y, m, 10));
+      medium.push(dateToDays(y, m, 20));
+    }
+  }
 
   return {
     scale: "day",
     label: "Day",
     icon: <span style={{ fontSize: "0.8rem", fontWeight: 700 }}>D</span>,
-    value: dayOfYear,
-    fullMin: 1,
-    fullMax: 365,
+    value: absDay,
+    fullMin: dateToDays(1990, 1, 1),
+    fullMax: dateToDays(2026, 12, 31),
     majorTicks: major,
     mediumTicks: medium,
-    minorTicks: minor,
+    minorTicks: [],
     formatTick: (v) => {
-      const d = new Date(2024, 0, v);
-      return `${String(d.getDate()).padStart(2, "0")}/${String(d.getMonth() + 1).padStart(2, "0")}`;
+      const d = daysToDate(v);
+      const mNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+      return `${String(d.getDate()).padStart(2, "0")} ${mNames[d.getMonth()]} ${d.getFullYear()}`;
     },
     formatSelected: (v) => {
-      const d = new Date(2024, 0, v);
-      return `${String(d.getDate()).padStart(2, "0")}/${String(d.getMonth() + 1).padStart(2, "0")}`;
+      const d = daysToDate(v);
+      return `${String(d.getDate()).padStart(2, "0")}/${String(d.getMonth() + 1).padStart(2, "0")}/${d.getFullYear()}`;
     },
-    defaultWindow: 90,
-    minWindow: 14,
+    defaultWindow: 30,
+    minWindow: 5,
   };
 }
 
-function buildHourDef(hourStr: string): TimelineRowDef {
+function buildHourDef(hourStr: string, dateStr: string, yearValue: number): TimelineRowDef {
   const hour = parseInt(hourStr || "0", 10);
-  const major = [0, 3, 6, 9, 12, 15, 18, 21, 24];
+  const parts = dateStr ? dateStr.split("-").map(Number) : [1, 1];
+  const month = parts[0] || 1;
+  const day = parts[1] || 1;
+  const absHour = dateToDays(yearValue, month, day) * 24 + hour;
+
+  const startDay = dateToDays(1990, 1, 1);
+  const endDay = dateToDays(2026, 12, 31);
+
+  // Major ticks: start of every day (hour % 24 === 0)
+  const major: number[] = [];
+  for (let d = startDay; d <= endDay; d++) {
+    major.push(d * 24);
+  }
+
+  // Medium ticks: every 6 hours
   const medium: number[] = [];
-  for (let h = 0; h <= 24; h++) if (!major.includes(h)) medium.push(h);
-  const minor: number[] = [];
-  for (let h = 0; h < 24; h++) minor.push(h + 0.5);
+  for (let d = startDay; d <= endDay; d++) {
+    medium.push(d * 24 + 6);
+    medium.push(d * 24 + 12);
+    medium.push(d * 24 + 18);
+  }
+
   return {
     scale: "hour",
     label: "Hour",
     icon: <span style={{ fontSize: "0.8rem", fontWeight: 700 }}>H</span>,
-    value: hour,
-    fullMin: 0,
-    fullMax: 24,
+    value: absHour,
+    fullMin: startDay * 24,
+    fullMax: endDay * 24 + 23,
     majorTicks: major,
     mediumTicks: medium,
-    minorTicks: minor,
-    formatTick: (v) =>
-      `${String(Math.floor(v)).padStart(2, "0")}:${v === Math.floor(v) ? "00" : "30"}`,
-    formatSelected: (v) =>
-      `${String(Math.floor(v)).padStart(2, "0")}:00`,
-    defaultWindow: 8,
-    minWindow: 2,
+    minorTicks: [],
+    formatTick: (v) => {
+      const h = ((v % 24) + 24) % 24;
+      const d = daysToDate(Math.floor(v / 24));
+      return `${String(h).padStart(2, "0")}:00 ${String(d.getDate()).padStart(2, "0")}/${String(d.getMonth() + 1).padStart(2, "0")}/${d.getFullYear()}`;
+    },
+    formatSelected: (v) => {
+      const h = ((v % 24) + 24) % 24;
+      const d = daysToDate(Math.floor(v / 24));
+      return `${String(h).padStart(2, "0")}:00 ${String(d.getDate()).padStart(2, "0")}/${String(d.getMonth() + 1).padStart(2, "0")}/${d.getFullYear()}`;
+    },
+    defaultWindow: 12,
+    minWindow: 3,
   };
 }
 
@@ -144,8 +211,8 @@ export function TemporalTimelineControl({
 }: TemporalTimelineControlProps) {
   const [collapsed, setCollapsed] = useState(true);
   const yearDef = buildYearDef(yearValue);
-  const dayDef = buildDayDef(dayValue);
-  const hourDef = buildHourDef(hourValue);
+  const dayDef = buildDayDef(dayValue, yearValue);
+  const hourDef = buildHourDef(hourValue, dayValue, yearValue);
 
   const defs: TimelineRowDef[] = [yearDef, dayDef, hourDef];
   const scaleIndex = defs.findIndex((r) => r.scale === activeScale);
@@ -167,10 +234,22 @@ export function TemporalTimelineControl({
               onChange={(v) => {
                 if (def.scale === "year") onYearChange(v);
                 else if (def.scale === "day") {
-                  const d = new Date(2024, 0, v);
+                  const d = daysToDate(v);
+                  if (d.getFullYear() !== yearValue) {
+                    onYearChange(d.getFullYear());
+                  }
                   onDayChange(d.getMonth() + 1, d.getDate());
                 } else if (def.scale === "hour") {
-                  onHourChange(v);
+                  const d = daysToDate(Math.floor(v / 24));
+                  const h = ((v % 24) + 24) % 24;
+                  if (d.getFullYear() !== yearValue) {
+                    onYearChange(d.getFullYear());
+                  }
+                  const curDayStr = `${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+                  if (curDayStr !== dayValue) {
+                    onDayChange(d.getMonth() + 1, d.getDate());
+                  }
+                  onHourChange(h);
                 }
               }}
               isMobile={isMobile}
@@ -207,8 +286,9 @@ function TimelineRuler({
   onToggleCollapse: () => void;
 }) {
   const trackRef = useRef<HTMLDivElement>(null);
-  const svgRef = useRef<SVGSVGElement>(null);
   const viewRef = useRef({ start: 0, end: 0 });
+  const selectedBubbleRef = useRef<HTMLDivElement>(null);
+  const hoverBubbleRef = useRef<HTMLDivElement>(null);
 
   const [viewState, setViewState] = useState(() => {
     const center = def.value;
@@ -235,6 +315,12 @@ function TimelineRuler({
 
   const [hoverValue, setHoverValue] = useState<number | null>(null);
   const [hoverX, setHoverX] = useState(0);
+  const [localInputValue, setLocalInputValue] = useState(() => getInputValueString(def));
+  const localInputValueRef = useRef(localInputValue);
+  const isEditingRef = useRef(false);
+  const [showTimePicker, setShowTimePicker] = useState(false);
+  const [pickerDate, setPickerDate] = useState("");
+  const [pickerTime, setPickerTime] = useState("");
   const opacity = isActive ? 1 : isApplicable ? 0.5 : 0.3;
 
   const valueToScreen = useCallback((v: number) => {
@@ -254,7 +340,9 @@ function TimelineRuler({
       const selX = valueToScreen(def.value);
       const rect = trackRef.current?.getBoundingClientRect();
       if (!rect) return;
-      const clickXPercent = ((e.clientX - rect.left) / rect.width) * 100;
+      const trackWidth = rect.width - 60;
+      const trackLeft = rect.left + 30;
+      const clickXPercent = ((e.clientX - trackLeft) / trackWidth) * 100;
 
       if (Math.abs(clickXPercent - selX) < 15) {
         setDraggingHandle(true);
@@ -266,6 +354,113 @@ function TimelineRuler({
     [isActive, def, valueToScreen]
   );
 
+  const onChangeRef = useRef(onChange);
+  useEffect(() => {
+    onChangeRef.current = onChange;
+  }, [onChange]);
+
+  const defRef = useRef(def);
+  useEffect(() => {
+    defRef.current = def;
+  }, [def]);
+
+  const lastValueRef = useRef(def.value);
+  useEffect(() => {
+    const center = def.value;
+    const start = viewRef.current.start;
+    const end = viewRef.current.end;
+
+    if (center !== lastValueRef.current) {
+      lastValueRef.current = center;
+
+      if (center < start || center > end) {
+        const half = def.defaultWindow / 2;
+        let newStart = center - half;
+        let newEnd = center + half;
+        if (newStart < def.fullMin) {
+          newEnd += def.fullMin - newStart;
+          newStart = def.fullMin;
+        }
+        if (newEnd > def.fullMax) {
+          newStart -= newEnd - def.fullMax;
+          newEnd = def.fullMax;
+        }
+        if (newStart < def.fullMin) newStart = def.fullMin;
+
+        viewRef.current = { start: Math.floor(newStart), end: Math.ceil(newEnd) };
+        setViewState({ start: Math.floor(newStart), end: Math.ceil(newEnd) });
+      }
+    }
+  }, [def.value, def.defaultWindow, def.fullMin, def.fullMax]);
+
+  useEffect(() => {
+    if (!isEditingRef.current) {
+      const s = getInputValueString(def);
+      localInputValueRef.current = s;
+      setLocalInputValue(s);
+    }
+  }, [def]);
+
+  const handleTimeBoxChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    isEditingRef.current = true;
+    const val = e.target.value;
+    localInputValueRef.current = val;
+    setLocalInputValue(val);
+  }, []);
+
+  const commitTimeBoxValue = useCallback(() => {
+    isEditingRef.current = false;
+    const currentVal = localInputValueRef.current;
+    const parsed = tryParseInputValue(def.scale, currentVal, def);
+    if (parsed !== null && parsed >= def.fullMin && parsed <= def.fullMax) {
+      onChange(parsed);
+    } else {
+      const s = getInputValueString(def);
+      localInputValueRef.current = s;
+      setLocalInputValue(s);
+    }
+  }, [def, onChange]);
+
+  const handleTimeBoxKeyDown = useCallback((e: React.KeyboardEvent) => {
+    if (e.key === "Enter") {
+      (e.target as HTMLInputElement).blur();
+    }
+  }, []);
+
+  const openTimePicker = useCallback(() => {
+    const baseValue = def.scale === "hour" ? Math.floor(def.value / 24) : def.value;
+    const d = daysToDate(baseValue);
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, "0");
+    const dd = String(d.getDate()).padStart(2, "0");
+    setPickerDate(`${y}-${m}-${dd}`);
+    if (def.scale === "hour") {
+      const h = String(((def.value % 24) + 24) % 24).padStart(2, "0");
+      setPickerTime(`${h}:00`);
+    }
+    setShowTimePicker(true);
+  }, [def]);
+
+  const applyTimePicker = useCallback(() => {
+    if (!pickerDate) return;
+    if (def.scale === "day") {
+      const d = new Date(pickerDate + "T00:00:00");
+      if (isNaN(d.getTime())) return;
+      const days = dateToDays(d.getFullYear(), d.getMonth() + 1, d.getDate());
+      onChange(Math.max(def.fullMin, Math.min(def.fullMax, days)));
+    } else if (def.scale === "hour") {
+      const d = new Date(pickerDate + "T00:00:00");
+      if (isNaN(d.getTime())) return;
+      const h = parseInt(pickerTime?.split(":")[0] || "0", 10);
+      const baseHours = dateToDays(d.getFullYear(), d.getMonth() + 1, d.getDate()) * 24;
+      const totalHours = baseHours + Math.max(0, Math.min(23, h));
+      onChange(Math.max(def.fullMin, Math.min(def.fullMax, totalHours)));
+    }
+    setShowTimePicker(false);
+  }, [def, pickerDate, pickerTime, onChange]);
+
+  const pointerXRef = useRef<number | null>(null);
+
   useEffect(() => {
     if (!draggingHandle && !panning) return;
 
@@ -274,38 +469,46 @@ function TimelineRuler({
         const dx = e.clientX - panAnchor.current.x;
         const rect = trackRef.current?.getBoundingClientRect();
         if (!rect) return;
+        const trackWidth = rect.width - 60;
         const r = viewRef.current.end - viewRef.current.start;
-        const shift = -(dx / rect.width) * r;
+        const shift = -(dx / trackWidth) * r;
         let newStart = panAnchor.current.start + shift;
-        if (newStart < def.fullMin) newStart = def.fullMin;
-        if (newStart + r > def.fullMax) newStart = def.fullMax - r;
+        if (newStart < defRef.current.fullMin) newStart = defRef.current.fullMin;
+        if (newStart + r > defRef.current.fullMax) newStart = defRef.current.fullMax - r;
 
         viewRef.current = { start: newStart, end: newStart + r };
-
-        if (svgRef.current) {
-          svgRef.current.style.transform = `translateX(${dx}px)`;
-          svgRef.current.style.willChange = 'transform';
-        }
+        setViewState({
+          start: Math.floor(newStart),
+          end: Math.ceil(newStart + r),
+        });
       }
 
       if (draggingHandle) {
         const rect = trackRef.current?.getBoundingClientRect();
         if (!rect) return;
-        const ratio = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+        const trackWidth = rect.width - 60;
+        const trackLeft = rect.left + 30;
+        const ratio = Math.max(0, Math.min(1, (e.clientX - trackLeft) / trackWidth));
         const val = viewRef.current.start + ratio * (viewRef.current.end - viewRef.current.start);
         const snapped = Math.round(val);
-        onChange(Math.max(def.fullMin, Math.min(def.fullMax, snapped)));
+        const visibleMin = Math.floor(viewRef.current.start);
+        const visibleMax = Math.ceil(viewRef.current.end);
+        const clampedVal = Math.max(visibleMin, Math.min(visibleMax, snapped));
+        onChangeRef.current(Math.max(defRef.current.fullMin, Math.min(defRef.current.fullMax, clampedVal)));
+        
+        const hoverSnapped = Math.max(defRef.current.fullMin, Math.min(defRef.current.fullMax, Math.round(val)));
+        setHoverValue(hoverSnapped);
+        setHoverX(ratio * 100);
+
+        pointerXRef.current = e.clientX;
       }
     };
 
     const onUp = () => {
-      if (svgRef.current) {
-        svgRef.current.style.transform = '';
-        svgRef.current.style.willChange = '';
-      }
       setDraggingHandle(false);
       setPanning(false);
       panAnchor.current = null;
+      pointerXRef.current = null;
       setViewState({
         start: Math.floor(viewRef.current.start),
         end: Math.ceil(viewRef.current.end),
@@ -317,18 +520,116 @@ function TimelineRuler({
     return () => {
       window.removeEventListener("pointermove", onMove);
       window.removeEventListener("pointerup", onUp);
-      if (svgRef.current) {
-        svgRef.current.style.transform = '';
-        svgRef.current.style.willChange = '';
-      }
     };
-  }, [draggingHandle, panning, def, onChange]);
+  }, [draggingHandle, panning]);
+
+  // Autoscroll when dragging handle near edges
+  useEffect(() => {
+    if (!draggingHandle) return;
+
+    let active = true;
+    let lastTime = performance.now();
+
+    const loop = (now: number) => {
+      if (!active) return;
+      requestAnimationFrame(loop);
+
+      if (pointerXRef.current === null) return;
+
+      const rect = trackRef.current?.getBoundingClientRect();
+      if (!rect) return;
+      const trackWidth = rect.width - 60;
+      const trackLeft = rect.left + 30;
+
+      const ratio = (pointerXRef.current - trackLeft) / trackWidth;
+
+      let scrollSpeed = 0; // units per millisecond
+      if (ratio < 0.05) {
+        scrollSpeed = -0.05 * (defRef.current.scale === "hour" ? 5 : 2);
+      } else if (ratio > 0.95) {
+        scrollSpeed = 0.05 * (defRef.current.scale === "hour" ? 5 : 2);
+      }
+
+      if (scrollSpeed !== 0) {
+        const delta = now - lastTime;
+        const shift = scrollSpeed * delta;
+
+        const r = viewRef.current.end - viewRef.current.start;
+        let newStart = viewRef.current.start + shift;
+        if (newStart < defRef.current.fullMin) newStart = defRef.current.fullMin;
+        if (newStart + r > defRef.current.fullMax) newStart = defRef.current.fullMax - r;
+
+        if (newStart !== viewRef.current.start) {
+          viewRef.current = { start: newStart, end: newStart + r };
+          setViewState({ start: Math.floor(newStart), end: Math.ceil(newStart + r) });
+
+          const clampedRatio = Math.max(0, Math.min(1, ratio));
+          const val = newStart + clampedRatio * r;
+          const snapped = Math.round(val);
+          const clampedVal = Math.max(defRef.current.fullMin, Math.min(defRef.current.fullMax, snapped));
+          onChangeRef.current(clampedVal);
+        }
+      }
+
+      lastTime = now;
+    };
+
+    requestAnimationFrame(loop);
+    return () => {
+      active = false;
+    };
+  }, [draggingHandle]);
+
+  // Support 2-finger trackpad horizontal scrolling
+  useEffect(() => {
+    const track = trackRef.current;
+    if (!track || !isActive) return;
+
+    const onWheel = (e: WheelEvent) => {
+      const dx = e.deltaX !== 0 ? e.deltaX : e.deltaY;
+      if (dx === 0) return;
+
+      e.preventDefault();
+
+      const rect = track.getBoundingClientRect();
+      const trackWidth = rect.width - 60;
+      const trackLeft = rect.left + 30;
+      const r = viewRef.current.end - viewRef.current.start;
+      const sensitivity = 0.8;
+      const shift = (dx / trackWidth) * r * sensitivity;
+
+      let newStart = viewRef.current.start + shift;
+      if (newStart < defRef.current.fullMin) newStart = defRef.current.fullMin;
+      if (newStart + r > defRef.current.fullMax) newStart = defRef.current.fullMax - r;
+
+      if (newStart !== viewRef.current.start) {
+        viewRef.current = { start: newStart, end: newStart + r };
+        setViewState({
+          start: Math.floor(newStart),
+          end: Math.ceil(newStart + r),
+        });
+      }
+
+      const mouseRatio = Math.max(0, Math.min(1, (e.clientX - trackLeft) / trackWidth));
+      const mouseVal = newStart + mouseRatio * r;
+      const mouseSnapped = Math.max(defRef.current.fullMin, Math.min(defRef.current.fullMax, Math.round(mouseVal)));
+      setHoverValue(mouseSnapped);
+      setHoverX(mouseRatio * 100);
+    };
+
+    track.addEventListener("wheel", onWheel, { passive: false });
+    return () => {
+      track.removeEventListener("wheel", onWheel);
+    };
+  }, [isActive]);
 
   const handleMouseMove = useCallback(
     (e: React.MouseEvent) => {
       if (!trackRef.current) return;
       const rect = trackRef.current.getBoundingClientRect();
-      const ratio = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+      const trackWidth = rect.width - 60;
+      const trackLeft = rect.left + 30;
+      const ratio = Math.max(0, Math.min(1, (e.clientX - trackLeft) / trackWidth));
       const val = viewRef.current.start + ratio * (viewRef.current.end - viewRef.current.start);
       const snapped = Math.max(def.fullMin, Math.min(def.fullMax, Math.round(val)));
       setHoverValue(snapped);
@@ -342,7 +643,9 @@ function TimelineRuler({
       if (!isActive) return;
       const rect = trackRef.current?.getBoundingClientRect();
       if (!rect) return;
-      const ratio = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+      const trackWidth = rect.width - 60;
+      const trackLeft = rect.left + 30;
+      const ratio = Math.max(0, Math.min(1, (e.clientX - trackLeft) / trackWidth));
       const val = viewRef.current.start + ratio * (viewRef.current.end - viewRef.current.start);
       const snapped = Math.max(def.fullMin, Math.min(def.fullMax, Math.round(val)));
       onChange(snapped);
@@ -350,10 +653,59 @@ function TimelineRuler({
     [isActive, def, onChange]
   );
 
-  const isInView = (v: number) => {
+  const isInView = useCallback((v: number) => {
     const pad = (viewRef.current.end - viewRef.current.start) * 0.5;
     return v >= viewRef.current.start - pad && v <= viewRef.current.end + pad;
-  };
+  }, []);
+
+  const visibleTicks = useMemo(() => {
+    const start = Math.floor(viewState.start);
+    const end = Math.ceil(viewState.end);
+    
+    const majorList: number[] = [];
+    const mediumList: number[] = [];
+    const minorList: number[] = [];
+
+    const majorSet = new Set(def.majorTicks);
+    const mediumSet = new Set(def.mediumTicks);
+
+    if (def.scale === "hour") {
+      for (let v = start; v <= end; v++) {
+        const h = ((v % 24) + 24) % 24;
+        if (h === 0) {
+          majorList.push(v);
+        } else if (h % 6 === 0) {
+          mediumList.push(v);
+        } else {
+          minorList.push(v);
+        }
+      }
+    } else if (def.scale === "day") {
+      for (let v = start; v <= end; v++) {
+        if (majorSet.has(v)) {
+          majorList.push(v);
+        } else if (mediumSet.has(v)) {
+          mediumList.push(v);
+        } else {
+          minorList.push(v);
+        }
+      }
+    } else {
+      for (let v = start; v <= end; v++) {
+        if (majorSet.has(v)) {
+          majorList.push(v);
+        } else {
+          minorList.push(v);
+        }
+      }
+    }
+
+    return {
+      major: majorList,
+      medium: mediumList,
+      minor: minorList,
+    };
+  }, [viewState, def]);
 
   const majorH = isActive ? 40 : 10;
   const midH = isActive ? 28 : 7;
@@ -379,183 +731,234 @@ function TimelineRuler({
         {!isActive && <ChevronDown size={10} className="ttc-chevron" />}
       </button>
 
-      <div className="ttc-ruler-wrap" ref={trackRef}>
-        {isActive && (
-          <div className="ttc-selected-bubble" style={{ left: `${selectedX}%` }}>
-            {def.formatSelected(def.value)}
-          </div>
-        )}
+      {isActive && def.scale === "year" && (
+        <div className="ttc-time-box">
+          <input
+            type="number"
+            value={localInputValue}
+            min={def.fullMin}
+            max={def.fullMax}
+            onChange={handleTimeBoxChange}
+            onBlur={commitTimeBoxValue}
+            onKeyDown={handleTimeBoxKeyDown}
+            aria-label="Year value"
+          />
+        </div>
+      )}
 
-        {hoverValue !== null && isActive && (
-          <div className="ttc-hover-bubble" style={{ left: `${hoverX}%` }}>
-            {def.formatSelected(hoverValue)}
-          </div>
-        )}
+      {isActive && (def.scale === "day" || def.scale === "hour") && (
+        <div className="ttc-time-box" onClick={openTimePicker}>
+          <span className="ttc-time-box-label">{getInputValueString(def)}</span>
+        </div>
+      )}
 
+      {showTimePicker && (
+        <>
+          <div className="ttc-picker-backdrop" onClick={() => setShowTimePicker(false)} />
+          <div className={`ttc-picker-panel ${isMobile ? "ttc-picker-panel--mobile" : ""}`}>
+            <div className="ttc-picker-header">
+              <div className="ttc-picker-title">Select {def.label}</div>
+              <button className="ttc-picker-close" onClick={() => setShowTimePicker(false)} type="button">×</button>
+            </div>
+            <div className="ttc-picker-body">
+              <div className="ttc-picker-field">
+                <label className="ttc-picker-label">Date</label>
+                <input className="ttc-picker-input" type="date" value={pickerDate} onChange={e => setPickerDate(e.target.value)} />
+              </div>
+              {def.scale === "hour" && (
+                <div className="ttc-picker-field">
+                  <label className="ttc-picker-label">Time</label>
+                  <input className="ttc-picker-input" type="time" value={pickerTime} onChange={e => setPickerTime(e.target.value)} />
+                </div>
+              )}
+            </div>
+            <div className="ttc-picker-footer">
+              <button className="ttc-picker-btn ttc-picker-btn-cancel" onClick={() => setShowTimePicker(false)} type="button">Cancel</button>
+              <button className="ttc-picker-btn ttc-picker-btn-apply" onClick={applyTimePicker} type="button">Apply</button>
+            </div>
+          </div>
+        </>
+      )}
+
+      <div className="ttc-ruler-wrap">
         <div
-          className={`ttc-ruler-track ${panning ? "ttc-ruler-track--panning" : ""}`}
-          onClick={handleTrackClick}
-          onPointerDown={handleTrackPointerDown}
-          onMouseMove={handleMouseMove}
-          onMouseLeave={() => setHoverValue(null)}
+          ref={trackRef}
+          style={{ position: "relative", padding: "0 30px", width: "100%", boxSizing: "border-box" }}
         >
-          {isActive && canPanLeft && <div className="ttc-fade ttc-fade--left" />}
-          {isActive && canPanRight && <div className="ttc-fade ttc-fade--right" />}
-          {/* Pan arrows */}
-          {isActive && canPanLeft && (
-            <div className="ttc-pan-hint ttc-pan-hint--left">
-              <ChevronLeft size={12} />
-            </div>
-          )}
-          {isActive && canPanRight && (
-            <div className="ttc-pan-hint ttc-pan-hint--right">
-              <ChevronRight size={12} />
+          {isActive && selectedX >= -2 && selectedX <= 102 && (
+            <div
+              ref={selectedBubbleRef}
+              style={{ position: "absolute", top: 0, left: `calc(30px + ${selectedX} * (100% - 60px) / 100)`, width: 0, height: 0, overflow: "visible", zIndex: 10, transition: panning ? "none" : "opacity 0.2s" }}
+            >
+              <div className="ttc-selected-bubble">
+                {def.formatSelected(def.value)}
+              </div>
             </div>
           )}
 
-          <svg
-            ref={svgRef}
-            className="ttc-ruler-svg"
-            viewBox={`0 0 1000 ${isActive ? 48 : 12}`}
-            preserveAspectRatio="none"
+          {hoverValue !== null && isActive && hoverX >= -2 && hoverX <= 102 && (
+            <div
+              ref={hoverBubbleRef}
+              style={{ position: "absolute", top: 0, left: `calc(30px + ${hoverX} * (100% - 60px) / 100)`, width: 0, height: 0, overflow: "visible", zIndex: 11, transition: panning ? "none" : "opacity 0.2s" }}
+            >
+              <div className="ttc-hover-bubble">
+                {def.formatSelected(hoverValue)}
+              </div>
+            </div>
+          )}
+
+          <div
+            className={`ttc-ruler-track ${panning ? "ttc-ruler-track--panning" : ""}`}
+            onClick={handleTrackClick}
+            onPointerDown={handleTrackPointerDown}
+            onMouseMove={handleMouseMove}
+            onMouseLeave={() => setHoverValue(null)}
           >
-            {/* Major ticks */}
-            {def.majorTicks.map((v) =>
-              isInView(v) ? (
+            {isActive && canPanLeft && <div className="ttc-fade ttc-fade--left" />}
+            {isActive && canPanRight && <div className="ttc-fade ttc-fade--right" />}
+            {/* Pan arrows */}
+            {isActive && canPanLeft && (
+              <div className="ttc-pan-hint ttc-pan-hint--left">
+                <ChevronLeft size={12} />
+              </div>
+            )}
+            {isActive && canPanRight && (
+              <div className="ttc-pan-hint ttc-pan-hint--right">
+                <ChevronRight size={12} />
+              </div>
+            )}
+
+            <svg
+              className="ttc-ruler-svg"
+              viewBox={`0 0 1000 ${isActive ? 48 : 12}`}
+              preserveAspectRatio="none"
+            >
+              {/* Major ticks */}
+              {visibleTicks.major.map((v) => {
+                const mX = valueToScreen(v) * 10;
+                if (mX < 0 || mX > 1000) return null;
+                return (
+                  <line
+                    key={`maj-${v}`}
+                    x1={mX}
+                    y1={BASELINE - HALF_MAJOR}
+                    x2={mX}
+                    y2={BASELINE + HALF_MAJOR}
+                    stroke={Math.abs(v - def.value) < 0.1 ? "#2563eb" : isActive ? "#64748b" : "#94a3b8"}
+                    strokeWidth={isActive ? 2 : 0.8}
+                    shapeRendering="crispEdges"
+                  />
+                );
+              })}
+              {/* Medium ticks */}
+              {visibleTicks.medium.map((v) => {
+                const mX = valueToScreen(v) * 10;
+                if (mX < 0 || mX > 1000) return null;
+                return (
+                  <line
+                    key={`med-${v}`}
+                    x1={mX}
+                    y1={BASELINE - HALF_MID}
+                    x2={mX}
+                    y2={BASELINE + HALF_MID}
+                    stroke={isActive ? "#94a3b8" : "#cbd5e1"}
+                    strokeWidth={isActive ? 1.2 : 0.6}
+                    shapeRendering="crispEdges"
+                  />
+                );
+              })}
+              {/* Minor ticks */}
+              {visibleTicks.minor.map((v) => {
+                const mX = valueToScreen(v) * 10;
+                if (mX < 0 || mX > 1000) return null;
+                return (
+                  <line
+                    key={`min-${v}`}
+                    x1={mX}
+                    y1={BASELINE - HALF_MINOR}
+                    x2={mX}
+                    y2={BASELINE + HALF_MINOR}
+                    stroke={isActive ? "#cbd5e1" : "#e2e8f0"}
+                    strokeWidth={isActive ? 0.8 : 0.4}
+                    shapeRendering="crispEdges"
+                  />
+                );
+              })}
+              {/* Top boundary */}
+              {isActive && (
+                <line x1={0} y1={0} x2={1000} y2={0} stroke="#cbd5e1" strokeWidth={0.5} shapeRendering="crispEdges" />
+              )}
+              {/* Baseline glow (depth effect) */}
+              {isActive && (
                 <line
-                  key={`maj-${v}`}
-                  x1={valueToScreen(v) * 10}
-                  y1={BASELINE - HALF_MAJOR}
-                  x2={valueToScreen(v) * 10}
-                  y2={BASELINE + HALF_MAJOR}
-                  stroke={Math.abs(v - def.value) < 0.1 ? "#2563eb" : isActive ? "#64748b" : "#94a3b8"}
-                  strokeWidth={isActive ? 2 : 0.8}
+                  x1={0} y1={BASELINE} x2={1000} y2={BASELINE}
+                  stroke="rgba(51, 65, 85, 0.08)"
+                  strokeWidth={8}
                   shapeRendering="crispEdges"
                 />
-              ) : null
-            )}
-            {/* Medium ticks */}
-            {def.mediumTicks.map((v) =>
-              isInView(v) ? (
-                <line
-                  key={`med-${v}`}
-                  x1={valueToScreen(v) * 10}
-                  y1={BASELINE - HALF_MID}
-                  x2={valueToScreen(v) * 10}
-                  y2={BASELINE + HALF_MID}
-                  stroke={isActive ? "#94a3b8" : "#cbd5e1"}
-                  strokeWidth={isActive ? 1.2 : 0.6}
-                  shapeRendering="crispEdges"
-                />
-              ) : null
-            )}
-            {/* Minor ticks */}
-            {def.minorTicks.map((v) =>
-              isInView(v) ? (
-                <line
-                  key={`min-${v}`}
-                  x1={valueToScreen(v) * 10}
-                  y1={BASELINE - HALF_MINOR}
-                  x2={valueToScreen(v) * 10}
-                  y2={BASELINE + HALF_MINOR}
-                  stroke={isActive ? "#cbd5e1" : "#e2e8f0"}
-                  strokeWidth={isActive ? 0.8 : 0.4}
-                  shapeRendering="crispEdges"
-                />
-              ) : null
-            )}
-            {/* Top boundary */}
-            {isActive && (
-              <line x1={0} y1={0} x2={1000} y2={0} stroke="#cbd5e1" strokeWidth={0.5} shapeRendering="crispEdges" />
-            )}
-            {/* Baseline glow (depth effect) */}
-            {isActive && (
+              )}
+              {/* Baseline */}
               <line
-                x1={0} y1={BASELINE} x2={1000} y2={BASELINE}
-                stroke="rgba(51, 65, 85, 0.08)"
-                strokeWidth={8}
+                x1={0}
+                y1={BASELINE}
+                x2={1000}
+                y2={BASELINE}
+                stroke={isActive ? "#334155" : "#cbd5e1"}
+                strokeWidth={isActive ? 5 : 0.8}
                 shapeRendering="crispEdges"
               />
-            )}
-            {/* Baseline */}
-            <line
-              x1={0}
-              y1={BASELINE}
-              x2={1000}
-              y2={BASELINE}
-              stroke={isActive ? "#334155" : "#cbd5e1"}
-              strokeWidth={isActive ? 5 : 0.8}
-              shapeRendering="crispEdges"
-            />
-            {/* Bottom boundary */}
-            {isActive && (
-              <line x1={0} y1={48} x2={1000} y2={48} stroke="#cbd5e1" strokeWidth={0.5} shapeRendering="crispEdges" />
-            )}
-            {/* Selection marker */}
-            {isActive && (
-              <g>
-                {/* Selection pillar (full height highlight) */}
-                <line
-                  x1={selectedX * 10}
-                  y1={0}
-                  x2={selectedX * 10}
-                  y2={48}
-                  stroke="#2563eb"
-                  strokeWidth={4}
-                  strokeOpacity={0.18}
-                  shapeRendering="crispEdges"
-                />
-                {/* Selection line */}
-                <line
-                  x1={selectedX * 10}
-                  y1={0}
-                  x2={selectedX * 10}
-                  y2={48}
-                  stroke="#2563eb"
-                  strokeWidth={2.5}
-                  shapeRendering="crispEdges"
-                />
-                {/* Thermometer bulb */}
-                <circle cx={selectedX * 10} cy={BASELINE} r={6} fill="#ef4444" stroke="#fff" strokeWidth={2} />
-              </g>
-            )}
-          </svg>
-        </div>
-
-        {/* Major Tick Labels */}
-        {isActive && (
-          <div className="ttc-ruler-labels">
-            {def.majorTicks.map((v) => {
-              if (!isInView(v)) return null;
-              const isLabelActive = Math.abs(v - def.value) < 0.1;
+              {/* Bottom boundary */}
+              {isActive && (
+                <line x1={0} y1={48} x2={1000} y2={48} stroke="#cbd5e1" strokeWidth={0.5} shapeRendering="crispEdges" />
+              )}
+              {/* Selection marker */}
+              {isActive && selectedX >= -2 && selectedX <= 102 && (
+                <g>
+                  {/* Selection pillar (full height highlight) */}
+                  <line
+                    x1={selectedX * 10}
+                    y1={0}
+                    x2={selectedX * 10}
+                    y2={48}
+                    stroke="#2563eb"
+                    strokeWidth={4}
+                    strokeOpacity={0.18}
+                    shapeRendering="crispEdges"
+                  />
+                  {/* Selection line */}
+                  <line
+                    x1={selectedX * 10}
+                    y1={0}
+                    x2={selectedX * 10}
+                    y2={48}
+                    stroke="#2563eb"
+                    strokeWidth={2.5}
+                    shapeRendering="crispEdges"
+                  />
+                  {/* Thermometer bulb */}
+                  <circle cx={selectedX * 10} cy={BASELINE} r={6} fill="#ef4444" stroke="#fff" strokeWidth={2} />
+                </g>
+              )}
+            </svg>
+            {isActive && visibleTicks.major.map((v, idx, arr) => {
+              const pct = valueToScreen(v);
+              if (pct < 3 || pct > 97) return null;
+              if (idx > 0 && pct - valueToScreen(arr[idx - 1]) < 6) return null;
               return (
-                <span
-                  key={`lbl-${v}`}
-                  className={`ttc-ruler-label ${isLabelActive ? "ttc-ruler-label--active" : ""}`}
-                  style={{ left: `${valueToScreen(v)}%` }}
-                >
+                <div key={`tlb-${v}`} className="ttc-tick-label" style={{ left: `${pct}%` }}>
                   {def.formatTick(v)}
-                </span>
+                </div>
               );
             })}
+            {isActive && (
+              <>
+                <div className="ttc-range-label ttc-range-label--left">{def.formatSelected(viewState.start)}</div>
+                <div className="ttc-range-label ttc-range-label--right">{def.formatSelected(viewState.end)}</div>
+              </>
+            )}
           </div>
-        )}
 
-        {isActive && (
-          <div className="ttc-range-hint">
-            <span>{def.formatTick(viewState.start)}</span>
-            <div className="ttc-range-bar">
-              <div
-                className="ttc-range-bar-fill"
-                style={{
-                  left: `${((viewState.start - def.fullMin) / (def.fullMax - def.fullMin)) * 100}%`,
-                  width: `${((viewState.end - viewState.start) / (def.fullMax - def.fullMin)) * 100}%`,
-                }}
-              />
-            </div>
-            <span>{def.formatTick(viewState.end)}</span>
-          </div>
-        )}
+        </div>
       </div>
 
       {isActive && (

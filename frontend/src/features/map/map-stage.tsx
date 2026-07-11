@@ -968,6 +968,9 @@ export const MapStage = React.memo(function MapStage({ startDateTime, endDateTim
   const luYearly = useLanduseYearlyStats(activeLuId);
   const [isInspectorCollapsed, setIsInspectorCollapsed] = useState(false);
 
+  const [landuseStats, setLanduseStats] = useState<Record<string, { areaHa: number; percentage: number; classPixels?: number } | null>>({});
+  const landuseStatsFetching = useRef<Set<string>>(new Set());
+
   const hideOverlays = useCallback(() => {
     if (overlayVisibilityRef.current) return; // already saved
     const layers = layerRefs.current;
@@ -1208,7 +1211,28 @@ export const MapStage = React.memo(function MapStage({ startDateTime, endDateTim
     id = id.replace(/-(raster|vector)$/, "");
     console.log("[map:luEffect] setting activeLuId:", id);
     setActiveLuId(function(prev) { return prev === id ? prev : id; });
-  }, [pixelValues]);
+
+    for (const key of lKeys) {
+      const normKey = normalizeLanduseKey(key);
+      const cacheKey = `${normKey}__${temporalYearValue}`;
+      if (landuseStatsFetching.current.has(cacheKey)) continue;
+      if (landuseStats.hasOwnProperty(cacheKey)) continue;
+      landuseStatsFetching.current.add(cacheKey);
+      fetch(`/api/gis/landuse-yearly-stats?key=${encodeURIComponent(normKey)}`)
+        .then(r => r.json())
+        .then((data: Array<{ year: number; areaHa: number; percentage?: number; classPixels?: number }>) => {
+          const cur = data.find(s => s.year === temporalYearValue) || data[data.length - 1];
+          if (cur) {
+            setLanduseStats(prev => ({
+              ...prev,
+              [cacheKey]: { areaHa: cur.areaHa, percentage: cur.percentage ?? 0, classPixels: cur.classPixels },
+            }));
+          }
+        })
+        .catch(() => {})
+        .finally(() => { landuseStatsFetching.current.delete(cacheKey); });
+    }
+  }, [pixelValues, temporalYearValue]);
 
   useEffect(() => {
     if (!appliedDatasets?.length) { setActiveLuId(null); return; }
@@ -2961,7 +2985,9 @@ export const MapStage = React.memo(function MapStage({ startDateTime, endDateTim
                         return null;
                       }
                     }
-
+                    if (isLanduseLayer(key) && displayName.includes(" - ")) {
+                      displayName = displayName.substring(displayName.indexOf(" - ") + 3);
+                    }
                     const label = translateLegendLabel(displayName);
                     const unitMatch = label.match(/\(([^)]+)\)/);
                     const HYDRO_UNITS: Record<string, string> = {
@@ -2977,19 +3003,15 @@ export const MapStage = React.memo(function MapStage({ startDateTime, endDateTim
                     const dateStr = dateMatch ? `${dateMatch[1]}-${dateMatch[2]}-${dateMatch[3]}` : null;
                     
                     const isLu = isLanduseLayer(key);
-                    const curYearStat = isLu ? luYearly?.find(s => s.year === temporalYearValue) : undefined;
-                    const luStats = curYearStat ? { areaHa: curYearStat.areaHa, percentage: curYearStat.percentage ?? 0, classPixels: curYearStat.classPixels } : undefined;
-                    const statsLoading = isLu && !luStats;
+                    const normKey = normalizeLanduseKey(key);
+                    const cacheKey = `${normKey}__${temporalYearValue}`;
+                    const luStats = isLu ? landuseStats[cacheKey] : undefined;
+                    const statsLoading = isLu && luStats === undefined && landuseStatsFetching.current.has(cacheKey);
 
                     return (
                       <div key={key} className="geo-map-inspector-layer">
                         {isLu ? (
                           <>
-                            {/* Title Category */}
-                            <div style={{ fontSize: '0.72rem', color: '#94a3b8', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '2px' }}>
-                              Landuse Classification
-                            </div>
-                            
                             {/* Layer name toggle */}
                             <button
                               className="geo-map-inspector-layer-btn"
@@ -3063,20 +3085,41 @@ export const MapStage = React.memo(function MapStage({ startDateTime, endDateTim
                                   const years = luYearly.map(d => d.year);
                                   const latestYear = years[years.length - 1];
                                   const valFmt = (v: number) => v >= 1e6 ? (v/1e6).toFixed(1)+'M' : v >= 1000 ? (v/1000).toFixed(0)+'K' : v >= 100 ? v.toFixed(0) : v.toFixed(1);
+                                  const linePts = luYearly.map((d, i) => {
+                                    const bh = Math.max(4, 2 + (d.areaHa / niceCeil) * 56);
+                                    const x = ((i + 0.5) / luYearly.length * 100).toFixed(1);
+                                    const y = (84 - bh).toFixed(0);
+                                    return `${x} ${y}`;
+                                  }).join(' ');
                                   return (
-                                    <div style={{ display: 'flex', alignItems: 'flex-end', gap: 3, height: 84, padding: '0 2px' }}>
-                                      {luYearly.map(d => {
-                                        const h = Math.max(4, 2 + (d.areaHa / niceCeil) * 56);
-                                        const isCur = Number(d.year) === Number(cur)
-                                          || (years.every(y => Number(y) !== Number(cur)) && Number(d.year) === Number(latestYear));
-                                        return (
-                                          <div key={d.year} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2 }} title={`${d.year}: ${d.areaHa.toLocaleString()} ha` + (isCur ? ' (current)' : '')}>
-                                            <span style={{ fontSize: '0.55rem', fontWeight: 700, color: isCur ? '#d97706' : '#1e40af' }}>{valFmt(d.areaHa)}</span>
-                                            <div style={{ width: '100%', maxWidth: 28, height: h, borderRadius: '4px 4px 0 0', background: isCur ? '#f59e0b' : '#3b82f6', border: isCur ? '1px solid #d97706' : '1px solid #2563eb' }} />
-                                            <span style={{ fontSize: '0.58rem', color: isCur ? '#d97706' : '#64748b', fontWeight: isCur ? 700 : 500 }}>{d.year}</span>
-                                          </div>
-                                        );
-                                      })}
+                                    <div style={{ padding: '0 2px' }}>
+                                      <div style={{ position: 'relative', height: 84 }}>
+                                        <svg viewBox="0 0 100 84" preserveAspectRatio="none" style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', pointerEvents: 'none' }}>
+                                          <polyline points={linePts} fill="none" stroke="#64748b" strokeWidth="1" strokeLinecap="round" strokeLinejoin="round" opacity={0.7} />
+                                        </svg>
+                                        <div style={{ display: 'flex', alignItems: 'flex-end', gap: 3, height: 84 }}>
+                                        {luYearly.map(d => {
+                                          const h = Math.max(4, 2 + (d.areaHa / niceCeil) * 56);
+                                          const isCur = Number(d.year) === Number(cur)
+                                            || (years.every(y => Number(y) !== Number(cur)) && Number(d.year) === Number(latestYear));
+                                          return (
+                                            <div key={d.year} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2 }} title={`${d.year}: ${d.areaHa.toLocaleString()} ha` + (isCur ? ' (current)' : '')}>
+                                              <span style={{ fontSize: '0.55rem', fontWeight: 700, color: isCur ? '#d97706' : '#1e40af' }}>{valFmt(d.areaHa)}</span>
+                                              <div style={{ width: '100%', maxWidth: 28, height: h, borderRadius: '4px 4px 0 0', background: isCur ? '#f59e0b' : '#3b82f6', border: isCur ? '1px solid #d97706' : '1px solid #2563eb' }} />
+                                            </div>
+                                          );
+                                        })}
+                                        </div>
+                                      </div>
+                                      <div style={{ display: 'flex', gap: 3, paddingTop: 3 }}>
+                                        {luYearly.map(d => {
+                                          const isCur = Number(d.year) === Number(cur)
+                                            || (years.every(y => Number(y) !== Number(cur)) && Number(d.year) === Number(latestYear));
+                                          return (
+                                            <span key={d.year} style={{ flex: 1, textAlign: 'center', fontSize: '0.58rem', color: isCur ? '#d97706' : '#64748b', fontWeight: isCur ? 700 : 500 }}>{d.year}</span>
+                                          );
+                                        })}
+                                      </div>
                                     </div>
                                   );
                                 })()}
