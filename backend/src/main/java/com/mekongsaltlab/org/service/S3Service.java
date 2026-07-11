@@ -81,7 +81,7 @@ public class S3Service {
             // Upsert S3Object record in DB
             upsertS3Object(key, file, putResponse);
 
-            log.info("Uploaded file to S3: {} (overwrite={})", key, overwrite);
+            log.info("Uploaded file to S3 (overwrite={})", overwrite);
             return key;
         } catch (S3Exception e) {
             var err = e.awsErrorDetails();
@@ -110,7 +110,7 @@ public class S3Service {
             s3ObjectRepository.save(s3Object);
             log.debug("Upserted S3Object record for key: {}", key);
         } catch (Exception e) {
-            log.error("Failed to upsert S3Object record for key: {}, error: {}", key, e.getMessage());
+            log.error("Failed to upsert S3Object record: {}", e.getMessage());
         }
     }
     
@@ -142,7 +142,7 @@ public class S3Service {
             
             s3Client.putObject(putObjectRequest, RequestBody.fromInputStream(inputStream, contentLength));
             
-            log.info("Uploaded file to S3: {}", key);
+            log.info("Uploaded file to S3");
             return key;
         } catch (S3Exception e) {
             var err = e.awsErrorDetails();
@@ -215,7 +215,7 @@ public class S3Service {
                             .continuationToken(listResponse.nextContinuationToken())
                             .build();
                 } while (listResponse.isTruncated());
-                log.info("Deleted S3 folder and contents recursively: {}", key);
+                log.info("Deleted S3 folder and contents recursively");
             } else {
                 // It's a single file
                 DeleteObjectRequest deleteObjectRequest = DeleteObjectRequest.builder()
@@ -224,14 +224,14 @@ public class S3Service {
                         .build();
 
                 s3Client.deleteObject(deleteObjectRequest);
-                log.info("Deleted file from S3: {}", key);
+                log.info("Deleted file from S3");
 
                 // Soft-delete corresponding record in DB
                 s3ObjectRepository.findByBucketAndS3Key(bucketName, key).ifPresent(s3Object -> {
                     s3Object.setIsDeleted(true);
                     s3Object.setDeletedAt(Instant.now());
                     s3ObjectRepository.save(s3Object);
-                    log.info("Soft-deleted DB record for S3 key: {}", key);
+                    log.info("Soft-deleted DB record");
                 });
             }
         } catch (S3Exception e) {
@@ -296,7 +296,7 @@ public class S3Service {
                     .build();
 
             s3Client.copyObject(copyRequest);
-            log.info("Copied S3 object from {} to {}", sourceKey, destinationKey);
+            log.info("Copied S3 object");
         } catch (S3Exception e) {
             log.error("Failed to copy file in S3: {}", e.getMessage());
             throw new RuntimeException("Failed to copy file: " + e.getMessage());
@@ -309,7 +309,7 @@ public class S3Service {
     public void renameFile(String oldKey, String newKey) {
         copyFile(oldKey, newKey);
         deleteFile(oldKey);
-        log.info("Renamed S3 object from {} to {}", oldKey, newKey);
+        log.info("Renamed S3 object");
     }
 
     /**
@@ -352,7 +352,7 @@ public class S3Service {
                     .build());
         }
 
-        log.info("Renamed S3 folder from {} to {} ({} objects)", oldPrefix, newPrefix, keysToDelete.size());
+        log.info("Renamed S3 folder ({} objects)", keysToDelete.size());
     }
 
     /**

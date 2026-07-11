@@ -27,6 +27,20 @@ type TabKey = "landuse" | "hydrology";
 
 function formatSize(bytes: number) { if (bytes < 1024) return `${bytes} B`; if (bytes < 1048576) return `${(bytes / 1024).toFixed(1)} KB`; return `${(bytes / 1048576).toFixed(1)} MB`; }
 
+const TIME_SLOTS = ["00-00", "06-00", "12-00", "18-00"];
+const MAX_RANGE_DAYS = 31;
+
+function eachDate(from: string, to: string): string[] {
+  const dates: string[] = [];
+  const cur = new Date(from);
+  const end = new Date(to);
+  while (cur <= end) {
+    dates.push(cur.toISOString().slice(0, 10));
+    cur.setDate(cur.getDate() + 1);
+  }
+  return dates;
+}
+
 async function listFilesAuth(prefix: string): Promise<any[]> {
   const token = authService.getToken();
   const res = await fetch(`/api/download/files?prefix=${encodeURIComponent(prefix)}`, {
@@ -54,11 +68,16 @@ export default function DownloadPage() {
   const [checking, setChecking] = useState(true);
   const [luStats, setLuStats] = useState<Record<string, any[]>>({});
   const [luLoading, setLuLoading] = useState(true);
-  const [hydroDate, setHydroDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [hydroDateFrom, setHydroDateFrom] = useState(() => new Date().toISOString().slice(0, 10));
+  const [hydroDateTo, setHydroDateTo] = useState(() => new Date().toISOString().slice(0, 10));
   const [hydroCat, setHydroCat] = useState("salinity");
-  const [hydroFiles, setHydroFiles] = useState<Array<{ key: string; size: number; lastModified: string }>>([]);
-  const [hydroLoading, setHydroLoading] = useState(false);
-  const [hydroSearched, setHydroSearched] = useState(false);
+  const [hydroTimeSlots, setHydroTimeSlots] = useState<string[]>(TIME_SLOTS);
+  const [hydroResults, setHydroResults] = useState<Record<string, Array<{ key: string; size: number; lastModified: string; time: string }>>>({});
+  const [hydroSelected, setHydroSelected] = useState<Set<string>>(new Set());
+  const [hydroScanning, setHydroScanning] = useState(false);
+  const [hydroScanned, setHydroScanned] = useState(false);
+  const [hydroProgress, setHydroProgress] = useState({ current: 0, total: 0, date: '' });
+  const [hydroDlProgress, setHydroDlProgress] = useState<string>('');
   const [dlMsg, setDlMsg] = useState<Record<string, string>>({});
 
   useEffect(() => { if (authService.getToken()) setAuth(true); setChecking(false); }, []);
@@ -72,20 +91,75 @@ export default function DownloadPage() {
   }, [auth, tab]);
 
   const searchHydro = async () => {
-    setHydroLoading(true); setHydroSearched(true); setHydroFiles([]);
-    try {
-      const [y, m, d] = hydroDate.split('-');
-      const files = await listFilesAuth(`gis-data/hydrology/${hydroCat}/${y}/${m}/${d}/`);
-      if (files.length > 0) {
-        setHydroFiles(files.filter((f: any) => /\.tiff?$/i.test(f.key)).map((f: any) => ({ key: f.key, size: f.size || 0, lastModified: f.lastModified || '' })));
-      }
-    } catch {} finally { setHydroLoading(false); }
+    setHydroScanning(true); setHydroScanned(false); setHydroResults({}); setHydroSelected(new Set());
+    const dates = eachDate(hydroDateFrom, hydroDateTo);
+    if (dates.length > MAX_RANGE_DAYS) { setHydroScanning(false); return; }
+    setHydroProgress({ current: 0, total: dates.length, date: '' });
+    const results: Record<string, Array<{ key: string; size: number; lastModified: string; time: string }>> = {};
+    const discoveredSlots = new Set(hydroTimeSlots);
+    for (let i = 0; i < dates.length; i++) {
+      const d = dates[i];
+      setHydroProgress({ current: i + 1, total: dates.length, date: d });
+      try {
+        const [y, m, day] = d.split('-');
+        const files = await listFilesAuth(`gis-data/hydrology/${hydroCat}/${y}/${m}/${day}/`);
+        const tifFiles = files.filter((f: any) => /\.tiff?$/i.test(f.key));
+        if (tifFiles.length > 0) {
+          const mapped = tifFiles.map((f: any) => {
+            const parts = f.key.split('/');
+            const time = parts.find((p: string) => /^\d{2}-\d{2}$/.test(p)) || '';
+            return { key: f.key, size: f.size || 0, lastModified: f.lastModified || '', time };
+          });
+          results[d] = mapped;
+          mapped.forEach(f => { if (f.time) discoveredSlots.add(f.time); });
+        }
+      } catch {}
+    }
+    if (discoveredSlots.size > hydroTimeSlots.length) setHydroTimeSlots(Array.from(discoveredSlots).sort());
+    const activeSlots = new Set(hydroTimeSlots);
+    const filtered: typeof results = {};
+    for (const [date, files] of Object.entries(results)) {
+      const matched = files.filter(f => activeSlots.has(f.time));
+      if (matched.length > 0) filtered[date] = matched;
+    }
+    setHydroResults(filtered);
+    setHydroScanned(true);
+    setHydroScanning(false);
   };
 
   const dlFile = async (s3Key: string, id: string) => {
     setDlMsg(p => ({ ...p, [id]: "..." }));
     try { await downloadWithAuth(s3Key); setDlMsg(p => ({ ...p, [id]: "Done" })); setTimeout(() => setDlMsg(p => { const n = { ...p }; delete n[id]; return n; }), 2000); }
     catch { setDlMsg(p => ({ ...p, [id]: "Error" })); setTimeout(() => setDlMsg(p => { const n = { ...p }; delete n[id]; return n; }), 2000); }
+  };
+
+  const dlHydroFile = async (key: string, label: string) => {
+    setHydroDlProgress(`Downloading ${label}...`);
+    try { await downloadWithAuth(key); } catch {}
+    setHydroDlProgress('');
+  };
+
+  const dlAllSelected = async () => {
+    const allFiles = Object.values(hydroResults).flat().filter(f => hydroSelected.has(f.key));
+    for (let i = 0; i < allFiles.length; i++) {
+      const f = allFiles[i];
+      setHydroDlProgress(`Downloading ${i + 1}/${allFiles.length}: ${f.time} ${f.key.split('/').pop()}`);
+      try { await downloadWithAuth(f.key); } catch {}
+    }
+    setHydroDlProgress('');
+  };
+
+  const toggleAll = () => {
+    const allKeys = Object.values(hydroResults).flat().map(f => f.key);
+    setHydroSelected(prev => prev.size === allKeys.length ? new Set() : new Set(allKeys));
+  };
+
+  const toggleFile = (key: string) => {
+    setHydroSelected(prev => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key); else next.add(key);
+      return next;
+    });
   };
 
 
@@ -174,69 +248,154 @@ export default function DownloadPage() {
         {/* Hydrology */}
         {tab === "hydrology" && (
           <div style={{ background: '#fff', borderRadius: 14, border: '1px solid #e2e8f0', overflow: 'hidden' }}>
-            <div style={{ padding: '20px 24px', borderBottom: '1px solid #f1f5f9', display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'flex-end' }}>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                <label style={{ fontSize: '0.72rem', fontWeight: 600, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Category</label>
-                <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-                  {HYDRO_CATEGORIES.map(c => (
-                    <button key={c.key} onClick={() => { setHydroCat(c.key); setHydroFiles([]); setHydroSearched(false); }}
-                      style={{ padding: '7px 14px', borderRadius: 8, border: hydroCat === c.key ? `2px solid ${c.color}` : '1px solid #e2e8f0', background: hydroCat === c.key ? `${c.color}10` : '#fff', color: hydroCat === c.key ? c.color : '#64748b', fontWeight: hydroCat === c.key ? 600 : 400, fontSize: '0.82rem', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 5 }}>
-                      <c.icon size={14} />{c.name}{c.unit ? ` (${c.unit})` : ''}
-                    </button>
-                  ))}
+            {/* Filter bar */}
+            <div style={{ padding: '20px 24px', borderBottom: '1px solid #f1f5f9' }}>
+              <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'flex-end', marginBottom: 12 }}>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                  <label style={{ fontSize: '0.72rem', fontWeight: 600, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Category</label>
+                  <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                    {HYDRO_CATEGORIES.map(c => (
+                      <button key={c.key} onClick={() => { setHydroCat(c.key); setHydroScanned(false); setHydroResults({}); }}
+                        style={{ padding: '7px 14px', borderRadius: 8, border: hydroCat === c.key ? `2px solid ${c.color}` : '1px solid #e2e8f0', background: hydroCat === c.key ? `${c.color}10` : '#fff', color: hydroCat === c.key ? c.color : '#64748b', fontWeight: hydroCat === c.key ? 600 : 400, fontSize: '0.82rem', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 5 }}>
+                        <c.icon size={14} />{c.name}{c.unit ? ` (${c.unit})` : ''}
+                      </button>
+                    ))}
+                  </div>
                 </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                  <label style={{ fontSize: '0.72rem', fontWeight: 600, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.05em' }}>From</label>
+                  <input type="date" value={hydroDateFrom} max={hydroDateTo}
+                    onChange={e => { setHydroDateFrom(e.target.value); setHydroScanned(false); setHydroResults({}); }}
+                    style={{ padding: '8px 12px', borderRadius: 8, border: '1px solid #e2e8f0', fontSize: '0.85rem', color: '#0f172a', outline: 'none' }} />
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                  <label style={{ fontSize: '0.72rem', fontWeight: 600, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.05em' }}>To</label>
+                  <input type="date" value={hydroDateTo} min={hydroDateFrom}
+                    onChange={e => { setHydroDateTo(e.target.value); setHydroScanned(false); setHydroResults({}); }}
+                    style={{ padding: '8px 12px', borderRadius: 8, border: '1px solid #e2e8f0', fontSize: '0.85rem', color: '#0f172a', outline: 'none' }} />
+                </div>
+                <button onClick={searchHydro} disabled={hydroScanning}
+                  style={{ padding: '8px 24px', height: 38, background: hydroScanning ? '#94a3b8' : '#2563eb', color: '#fff', border: 'none', borderRadius: 8, fontWeight: 600, fontSize: '0.85rem', cursor: hydroScanning ? 'not-allowed' : 'pointer', transition: 'all 150ms ease' }}>
+                  {hydroScanning ? 'Scanning...' : 'Search Files'}
+                </button>
               </div>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                <label style={{ fontSize: '0.72rem', fontWeight: 600, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Date</label>
-                <input type="date" value={hydroDate} onChange={e => { setHydroDate(e.target.value); setHydroFiles([]); setHydroSearched(false); }}
-                  style={{ padding: '8px 12px', borderRadius: 8, border: '1px solid #e2e8f0', fontSize: '0.85rem', color: '#0f172a', outline: 'none' }} />
+              {/* Time slot chips */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                <span style={{ fontSize: '0.72rem', fontWeight: 600, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Time</span>
+                {TIME_SLOTS.map(slot => {
+                  const active = hydroTimeSlots.includes(slot);
+                  return (
+                    <button key={slot} onClick={() => {
+                      setHydroTimeSlots(prev => prev.includes(slot) ? prev.filter(s => s !== slot) : [...prev, slot].sort());
+                      setHydroScanned(false); setHydroResults({});
+                    }} style={{ padding: '4px 12px', borderRadius: 6, border: active ? '1px solid #3b82f6' : '1px solid #e2e8f0', background: active ? '#eff6ff' : '#fff', color: active ? '#2563eb' : '#94a3b8', fontSize: '0.78rem', fontWeight: active ? 600 : 400, cursor: 'pointer', transition: 'all 120ms ease' }}>
+                      {slot}
+                    </button>
+                  );
+                })}
               </div>
-              <button onClick={searchHydro} disabled={hydroLoading}
-                style={{ padding: '8px 24px', height: 38, background: hydroLoading ? '#94a3b8' : '#2563eb', color: '#fff', border: 'none', borderRadius: 8, fontWeight: 600, fontSize: '0.85rem', cursor: hydroLoading ? 'not-allowed' : 'pointer', transition: 'all 150ms ease' }}>
-                {hydroLoading ? 'Searching...' : 'Search Files'}
-              </button>
             </div>
 
+            {/* Results */}
             <div style={{ padding: '20px 24px', minHeight: 200 }}>
-              {!hydroSearched ? (
+              {!hydroScanned && !hydroScanning ? (
                 <div style={{ textAlign: 'center', padding: 48 }}>
                   <div style={{ width: 64, height: 64, borderRadius: '50%', background: '#f1f5f9', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 16px' }}><Droplets size={28} color="#94a3b8" /></div>
-                  <p style={{ color: '#94a3b8', fontSize: '0.9rem' }}>Select a data category and date above, then click <strong>Search Files</strong></p>
+                  <p style={{ color: '#94a3b8', fontSize: '0.9rem' }}>Select a category and date range above, then click <strong>Search Files</strong></p>
                 </div>
-              ) : hydroLoading ? (
-                <div style={{ textAlign: 'center', padding: 48 }}><div style={{ width: 28, height: 28, borderRadius: '50%', border: '2px solid #e2e8f0', borderTopColor: '#3b82f6', margin: '0 auto 16px', animation: 'spin 0.8s linear infinite' }} /><p style={{ color: '#94a3b8', fontSize: '0.85rem' }}>Searching S3 bucket...</p></div>
-              ) : hydroFiles.length === 0 ? (
+              ) : hydroScanning ? (
+                <div style={{ textAlign: 'center', padding: 48 }}>
+                  <div style={{ width: 28, height: 28, borderRadius: '50%', border: '2px solid #e2e8f0', borderTopColor: '#3b82f6', margin: '0 auto 12px', animation: 'spin 0.8s linear infinite' }} />
+                  <p style={{ color: '#64748b', fontSize: '0.85rem', fontWeight: 500 }}>Scanning {hydroProgress.current}/{hydroProgress.total} days...</p>
+                  <p style={{ color: '#94a3b8', fontSize: '0.78rem', marginTop: 4 }}>{hydroProgress.date}</p>
+                </div>
+              ) : Object.keys(hydroResults).length === 0 ? (
                 <div style={{ textAlign: 'center', padding: 48 }}>
                   <div style={{ width: 64, height: 64, borderRadius: '50%', background: '#fef2f2', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 16px' }}><FileText size={28} color="#dc2626" /></div>
                   <p style={{ color: '#64748b', fontSize: '0.9rem', marginBottom: 4 }}>No files found</p>
-                  <p style={{ color: '#94a3b8', fontSize: '0.8rem' }}>{HYDRO_CATEGORIES.find(c => c.key === hydroCat)?.name} — {hydroDate}</p>
+                  <p style={{ color: '#94a3b8', fontSize: '0.8rem' }}>{hydroDateFrom} → {hydroDateTo}</p>
                 </div>
               ) : (
                 <div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-                    <div>
-                      <h3 style={{ fontSize: '1rem', fontWeight: 700, color: '#0f172a' }}>{hydroFiles.length} file{hydroFiles.length > 1 ? 's' : ''} found</h3>
-                      <p style={{ fontSize: '0.75rem', color: '#94a3b8', marginTop: 2 }}>{HYDRO_CATEGORIES.find(c => c.key === hydroCat)?.name} — {hydroDate} · {formatSize(hydroFiles.reduce((s, f) => s + f.size, 0))} total</p>
-                    </div>
-                  </div>
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: 10 }}>
-                    {hydroFiles.map(f => {
-                      const parts = f.key.split('/');
-                      const timePart = parts.find(p => /^\d{2}-\d{2}$/.test(p)) || '';
-                      const fileName = parts[parts.length - 1].replace(/\.(tif|tiff)$/i, '');
-                      const label = timePart || fileName || 'Download';
-                      const id = `hydro__${f.key}`; const msg = dlMsg[id];
+                  {/* Summary bar */}
+                  {(() => {
+                    const allFiles = Object.values(hydroResults).flat();
+                    const totalSize = allFiles.reduce((s, f) => s + f.size, 0);
+                    const selectedSize = allFiles.filter(f => hydroSelected.has(f.key)).reduce((s, f) => s + f.size, 0);
+                    return (
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16, flexWrap: 'wrap', gap: 8 }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                          <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', fontSize: '0.82rem', color: '#0f172a', fontWeight: 500 }}>
+                            <input type="checkbox" checked={hydroSelected.size === allFiles.length && allFiles.length > 0} onChange={toggleAll} style={{ accentColor: '#2563eb' }} />
+                            Select All
+                          </label>
+                          <span style={{ fontSize: '0.75rem', color: '#94a3b8' }}>
+                            {allFiles.length} files · {formatSize(totalSize)} total
+                          </span>
+                        </div>
+                        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                          {hydroDlProgress && <span style={{ fontSize: '0.78rem', color: '#64748b' }}>{hydroDlProgress}</span>}
+                          <button onClick={dlAllSelected} disabled={hydroSelected.size === 0 || !!hydroDlProgress}
+                            style={{ padding: '8px 20px', background: hydroSelected.size === 0 || hydroDlProgress ? '#cbd5e1' : '#059669', color: '#fff', border: 'none', borderRadius: 8, fontWeight: 600, fontSize: '0.85rem', cursor: hydroSelected.size === 0 || hydroDlProgress ? 'not-allowed' : 'pointer', transition: 'all 150ms ease', display: 'flex', alignItems: 'center', gap: 6 }}>
+                            <Download size={14} />Download Selected{hydroSelected.size > 0 ? ` (${hydroSelected.size})` : ''}
+                          </button>
+                          {selectedSize > 0 && <span style={{ fontSize: '0.72rem', color: '#94a3b8' }}>{formatSize(selectedSize)}</span>}
+                        </div>
+                      </div>
+                    );
+                  })()}
+
+                  {/* Grouped by date */}
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                    {Object.entries(hydroResults).sort(([a], [b]) => b.localeCompare(a)).map(([date, files]) => {
+                      const dateFiles = files.filter(f => hydroTimeSlots.includes(f.time));
+                      if (dateFiles.length === 0) return null;
+                      const dateSize = dateFiles.reduce((s, f) => s + f.size, 0);
+                      const checkedCount = dateFiles.filter(f => hydroSelected.has(f.key)).length;
                       return (
-                        <button key={f.key} onClick={() => dlFile(f.key, id)}
-                          style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 14px', borderRadius: 10, border: '1px solid #e2e8f0', background: msg ? (msg === 'Done' ? '#ecfdf5' : '#fef2f2') : '#fff', textAlign: 'left', cursor: 'pointer', transition: 'all 120ms ease' }}
-                          onMouseEnter={e => { if (!msg) { e.currentTarget.style.borderColor = '#93c5fd'; e.currentTarget.style.boxShadow = '0 2px 8px rgba(59,130,246,0.1)'; } }}
-                          onMouseLeave={e => { if (!msg) { e.currentTarget.style.borderColor = '#e2e8f0'; e.currentTarget.style.boxShadow = 'none'; } }}>
-                          <Download size={14} color={msg === 'Done' ? '#059669' : '#3b82f6'} />
-                          <div style={{ flex: 1, minWidth: 0 }}>
-                            <div style={{ fontSize: '0.82rem', fontWeight: 600, color: msg ? (msg === 'Done' ? '#059669' : '#dc2626') : '#0f172a' }}>{msg || label}</div>
-                            <div style={{ fontSize: '0.65rem', color: '#94a3b8' }}>{formatSize(f.size)} · GeoTIFF</div>
+                        <div key={date} style={{ border: '1px solid #e2e8f0', borderRadius: 12, overflow: 'hidden' }}>
+                          <div style={{ padding: '10px 16px', background: '#f8fafc', borderBottom: '1px solid #e2e8f0', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                              <span style={{ fontSize: '0.85rem', fontWeight: 700, color: '#0f172a' }}>{date}</span>
+                              <span style={{ fontSize: '0.7rem', color: '#94a3b8' }}>{dateFiles.length} files · {formatSize(dateSize)}</span>
+                            </div>
+                            <button onClick={() => {
+                              const keys = dateFiles.map(f => f.key);
+                              setHydroSelected(prev => {
+                                const allChecked = keys.every(k => prev.has(k));
+                                const next = new Set(prev);
+                                keys.forEach(k => { if (allChecked) next.delete(k); else next.add(k); });
+                                return next;
+                              });
+                            }} style={{ fontSize: '0.72rem', color: '#3b82f6', background: 'none', border: 'none', cursor: 'pointer', fontWeight: 500 }}>
+                              {checkedCount === dateFiles.length ? 'Deselect all' : checkedCount > 0 ? `${checkedCount} selected` : 'Select all'}
+                            </button>
                           </div>
-                        </button>
+                          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: 1, background: '#f1f5f9' }}>
+                            {dateFiles.sort((a, b) => a.time.localeCompare(b.time)).map(f => {
+                              const checked = hydroSelected.has(f.key);
+                              const fileName = f.key.split('/').pop() || 'download.tif';
+                              return (
+                                <div key={f.key} onClick={() => toggleFile(f.key)} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 14px', background: checked ? '#eff6ff' : '#fff', cursor: 'pointer', transition: 'all 100ms ease', borderBottom: '1px solid #f1f5f9' }}>
+                                  <input type="checkbox" checked={checked} onChange={() => {}} style={{ accentColor: '#2563eb', flexShrink: 0 }} />
+                                  <div style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                                    <div style={{ minWidth: 0 }}>
+                                      <div style={{ fontSize: '0.82rem', fontWeight: 600, color: '#0f172a' }}>{f.time}</div>
+                                      <div style={{ fontSize: '0.62rem', color: '#94a3b8', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{fileName}</div>
+                                    </div>
+                                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 2 }}>
+                                      <span style={{ fontSize: '0.65rem', color: '#94a3b8' }}>{formatSize(f.size)}</span>
+                                      <button onClick={e => { e.stopPropagation(); dlHydroFile(f.key, f.time); }}
+                                        style={{ padding: '2px 6px', border: '1px solid #e2e8f0', borderRadius: 4, background: '#fff', cursor: 'pointer', fontSize: '0.62rem', color: '#3b82f6', display: 'flex', alignItems: 'center', gap: 3 }}>
+                                        <Download size={10} />DL
+                                      </button>
+                                    </div>
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
                       );
                     })}
                   </div>

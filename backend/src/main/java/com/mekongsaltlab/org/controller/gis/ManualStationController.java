@@ -82,7 +82,7 @@ public class ManualStationController {
                                 try {
                                     s3Service.deleteFile(trimmed);
                                 } catch (Exception e) {
-                                    System.err.println("Failed to delete removed S3 file during update: " + trimmed + ". Error: " + e.getMessage());
+                                    System.err.println("Failed to delete S3 file during update");
                                 }
                             }
                         }
@@ -107,7 +107,7 @@ public class ManualStationController {
                             try {
                                 s3Service.deleteFile(trimmed);
                             } catch (Exception e) {
-                                System.err.println("Failed to delete S3 file on station delete: " + trimmed + ". Error: " + e.getMessage());
+                                System.err.println("Failed to delete S3 file on station delete");
                             }
                         }
                     }

@@ -2390,33 +2390,23 @@ export const MapStage = React.memo(function MapStage({ startDateTime, endDateTim
 
     // Load images
     if (st.stationType === 'surface_water' && st.imageCode) {
-      console.log("[WQ] Loading images for station:", st.id, st.imageCode);
       const keys = st.imageCode.split(',').map(k => k.trim()).filter(Boolean);
-      console.log("[WQ] Image keys:", keys);
       Promise.all(keys.map(async (key) => {
         try {
           const url = getBackendAdminUrl(`/s3/download?key=${encodeURIComponent(key)}`);
-          console.log("[WQ] Fetching image:", url);
           const res = await fetch(url);
-          console.log("[WQ] Image response:", res.status, res.ok);
           if (res.ok) {
             const blob = await res.blob();
             const objUrl = URL.createObjectURL(blob);
-            console.log("[WQ] Image loaded, blob size:", blob.size);
             return objUrl;
-          } else {
-            console.warn("[WQ] Image fetch not OK:", res.status, res.statusText);
           }
         } catch (e) {
-          console.warn("[WQ] Failed to load image:", key, e);
         }
         return '';
       })).then(urls => {
-        console.log("[WQ] All images loaded:", urls.filter(Boolean).length);
         setWqStationImages(urls.filter(Boolean));
       });
     } else {
-      console.log("[WQ] No images to load. stationType:", st.stationType, "imageCode:", st.imageCode);
       setWqStationImages([]);
     }
   }, [selectedWqStation]);

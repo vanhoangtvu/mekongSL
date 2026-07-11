@@ -178,6 +178,11 @@ public class S3Controller {
             return ResponseEntity.badRequest().body(error);
         }
         String cleanKey = keyToDelete.startsWith("/") ? keyToDelete.substring(1) : keyToDelete;
+        if (ALLOWED_S3_PREFIXES.stream().noneMatch(cleanKey::startsWith)) {
+            Map<String, String> error = new HashMap<>();
+            error.put("error", "Invalid S3 key prefix. Key must start with one of: " + ALLOWED_S3_PREFIXES);
+            return ResponseEntity.badRequest().body(error);
+        }
         s3Service.deleteFile(cleanKey);
 
         Map<String, String> response = new HashMap<>();
@@ -327,15 +332,20 @@ public class S3Controller {
         @RequestParam(defaultValue = "3600") long expires
     ) {
         try {
-            String url = s3Service.createSignedGetUrl(key, Duration.ofSeconds(expires));
+            String cleanKey = key.startsWith("/") ? key.substring(1) : key;
+            if (ALLOWED_S3_PREFIXES.stream().noneMatch(cleanKey::startsWith)) {
+                Map<String, Object> error = new HashMap<>();
+                error.put("error", "Invalid S3 key prefix");
+                return ResponseEntity.badRequest().body(error);
+            }
+            String url = s3Service.createSignedGetUrl(cleanKey, Duration.ofSeconds(expires));
             Map<String, Object> response = new HashMap<>();
             response.put("url", url);
             response.put("expiresAt", Instant.now().plus(Duration.ofSeconds(expires)).toString());
-            response.put("key", key);
             return ResponseEntity.ok(response);
         } catch (Exception e) {
             Map<String, Object> error = new HashMap<>();
-            error.put("error", e.getMessage());
+            error.put("error", "Failed to generate signed URL");
             return ResponseEntity.badRequest().body(error);
         }
     }
@@ -387,16 +397,12 @@ public class S3Controller {
                 }
             });
         } catch (software.amazon.awssdk.services.s3.model.NoSuchKeyException e) {
-            System.err.println("[RenderFile] File not found: " + e.getMessage());
-            return ResponseEntity.status(404).body(Map.of("error", "File not found: " + key));
+            return ResponseEntity.status(404).body(Map.of("error", "File not found"));
         } catch (software.amazon.awssdk.services.s3.model.S3Exception e) {
-            System.err.println("[RenderFile] S3 error: " + e.getMessage());
             int status = e.statusCode() >= 400 ? e.statusCode() : 502;
-            return ResponseEntity.status(status).body(Map.of("error", "S3 error: " + e.getMessage()));
+            return ResponseEntity.status(status).body(Map.of("error", "S3 error"));
         } catch (Exception e) {
-            System.err.println("[RenderFile] Internal error: " + e.getMessage());
-            e.printStackTrace();
-            return ResponseEntity.status(500).body(Map.of("error", e.getMessage()));
+            return ResponseEntity.status(500).body(Map.of("error", "Internal server error"));
         }
     }
 
