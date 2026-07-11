@@ -1205,7 +1205,7 @@ export const MapStage = React.memo(function MapStage({ startDateTime, endDateTim
 
   useEffect(() => {
     const lKeys = Object.keys(pixelValues).filter(isLanduseLayer);
-    console.log("[map:luEffect] pixelValues landuse keys:", lKeys);
+    console.log("[map:luEffect] landuse keys:", lKeys.length);
     if (!lKeys.length) return;
     let id = lKeys[0].split("__")[0];
     id = id.replace(/-(raster|vector)$/, "");
@@ -1258,7 +1258,9 @@ export const MapStage = React.memo(function MapStage({ startDateTime, endDateTim
     ALL_AVAILABLE_LAYERS.map((l) => ({ ...l }))
   );
   const [pendingLayerId, setPendingLayerId] = useState<string | null>(null);
+  const [showDownloadDropdown, setShowDownloadDropdown] = useState(false);
   const playerControlRef = useRef<HTMLDivElement>(null);
+  const downloadControlRef = useRef<HTMLDivElement>(null);
 
   // Click outside / Escape to close layer dropdown
   useEffect(() => {
@@ -1278,6 +1280,17 @@ export const MapStage = React.memo(function MapStage({ startDateTime, endDateTim
       document.removeEventListener("keydown", handleEscape);
     };
   }, [showPlayerDropdown]);
+
+  useEffect(() => {
+    if (!showDownloadDropdown) return;
+    const h = (e: PointerEvent) => {
+      if (downloadControlRef.current && !downloadControlRef.current.contains(e.target as Node)) {
+        setShowDownloadDropdown(false);
+      }
+    };
+    document.addEventListener("pointerdown", h);
+    return () => document.removeEventListener("pointerdown", h);
+  }, [showDownloadDropdown]);
 
   // Sync playerLayers from appliedDatasets: selected ones on top (reversed order = last=first), unselected below
   useEffect(() => {
@@ -2545,7 +2558,7 @@ export const MapStage = React.memo(function MapStage({ startDateTime, endDateTim
           <div className="map-player-control" ref={playerControlRef}>
             <button
               className="map-add-layer-btn"
-              onClick={() => { setShowPlayerDropdown(!showPlayerDropdown); setPendingLayerId(null); }}
+              onClick={() => { setShowPlayerDropdown(!showPlayerDropdown); setPendingLayerId(null); setShowDownloadDropdown(false); }}
               type="button"
               title="Manage layers"
             >
@@ -2650,28 +2663,32 @@ export const MapStage = React.memo(function MapStage({ startDateTime, endDateTim
                         {/* Layer name */}
                         <span className="map-player-item-name" title={layer.name}>{layer.name}</span>
 
+                        {/* Opacity slider — only when added */}
+                        {layer.added && (
+                          <input
+                            className="map-player-opacity-slider"
+                            type="range"
+                            min={0} max={1} step={0.05}
+                            value={layer.opacity ?? 0.7}
+                            title={`Opacity: ${Math.round((layer.opacity ?? 0.7) * 100)}%`}
+                            draggable={false}
+                            onMouseDown={(e) => e.stopPropagation()}
+                            onPointerDown={(e) => e.stopPropagation()}
+                            onClick={(e) => e.stopPropagation()}
+                            onChange={(e) => {
+                              const val = parseFloat(e.target.value);
+                              setPlayerLayers(prev => prev.map(l => getLayerKey(l) === layerKey ? { ...l, opacity: val } : l));
+                            }}
+                          />
+                        )}
+
                         {/* Layer type badge */}
                         {layer.type && (
                           <span className="map-player-item-type-badge">{isMobile ? layer.type === "raster" ? "R" : layer.type === "vector" ? "V" : layer.type : layer.type}</span>
                         )}
 
-                        {/* Downloads + Visibility + Remove */}
+                        {/* Visibility + Remove */}
                         <div className="map-player-item-actions">
-                          {layer.proxyUrl && (() => {
-                            const dlKey = (() => { try { return new URL(layer.proxyUrl!, window.location.origin).searchParams.get('key'); } catch { return null; } })();
-                            return (<>
-                              <button className="map-player-item-dl" title="Download TIFF" type="button"
-                                onClick={(e) => { e.stopPropagation();
-                                  if (dlKey) { const a = document.createElement('a'); a.href = `/api/s3/download?key=${encodeURIComponent(dlKey)}`; a.download = dlKey.split('/').pop() || 'download.tif'; document.body.appendChild(a); a.click(); document.body.removeChild(a); }
-                                }}>
-                                <Download size={13} />
-                              </button>
-                              <button className="map-player-item-dl" title="Copy S3 key" type="button"
-                                onClick={(e) => { e.stopPropagation(); if (dlKey) { try { navigator.clipboard?.writeText(dlKey); } catch { const ta = document.createElement('textarea'); ta.value = dlKey; ta.style.position = 'fixed'; ta.style.opacity = '0'; document.body.appendChild(ta); ta.select(); document.execCommand('copy'); document.body.removeChild(ta); } } }}>
-                                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>
-                              </button>
-                            </>);
-                          })()}
                           <button
                             className={`map-player-item-tick ${layer.visible ? "is-visible" : ""}`}
                             title={layer.visible ? "Hide layer" : "Show layer"}
@@ -2710,6 +2727,56 @@ export const MapStage = React.memo(function MapStage({ startDateTime, endDateTim
                     >Clear all</button>
                   </div>
                 )}
+              </div>
+            )}
+          </div>
+
+          {/* Download Data Button */}
+          <div className="map-player-control" ref={downloadControlRef}>
+            <button
+              className="map-layer-toggle"
+              onClick={() => setShowDownloadDropdown(!showDownloadDropdown)}
+              type="button"
+              title="Download data"
+            >
+              <Download size={16} />
+            </button>
+            {showDownloadDropdown && (
+              <div className="map-player-dropdown" style={{ width: 280, minWidth: 280, maxWidth: 280 }}>
+                <div className="map-player-dropdown-header">
+                  <div className="map-player-dropdown-title">Download Data</div>
+                </div>
+                <div className="map-player-list">
+                  {playerLayers.filter(l => l.added && l.proxyUrl).length === 0 ? (
+                    <div className="map-player-empty">No data layers</div>
+                  ) : (
+                    playerLayers.filter(l => l.added && l.proxyUrl).map(l => {
+                      const s3Key = (() => { try { return new URL(l.proxyUrl!, window.location.origin).searchParams.get('key'); } catch { return null; } })();
+                      return (
+                        <div key={getLayerKey(l)} className="map-player-item" style={{ flexWrap: 'nowrap' }}>
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            <span className="map-player-item-name" style={{ maxWidth: 200, display: 'block' }} title={l.name}>{l.name}</span>
+                            <span style={{ fontSize: '0.62rem', color: '#94a3b8' }}>{temporalDayValue}-{temporalYearValue}</span>
+                          </div>
+                          <div className="map-player-item-actions">
+                            {s3Key && (
+                              <button className="map-player-item-dl" title="Download" type="button"
+                                onClick={(e) => { e.stopPropagation();
+                                  const a = document.createElement('a');
+                                  a.href = `/api/s3/download?key=${encodeURIComponent(s3Key)}`;
+                                  a.download = s3Key.split('/').pop() || 'download.tif';
+                                  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+                                  setShowDownloadDropdown(false);
+                                }}>
+                                <Download size={13} />
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })
+                  )}
+                </div>
               </div>
             )}
           </div>

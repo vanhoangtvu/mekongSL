@@ -5,11 +5,11 @@ import { useState, useEffect } from "react";
 
 const FOOTER_LINKS = [
   { href: "/about", label: "About Us" },
-  { href: "/privacy", label: "Privacy Policy" },
-  { href: "/legal", label: "Legal" },
-  { href: "/accessibility", label: "Accessibility" },
-  { href: "/sitemap", label: "Site Map" },
   { href: "/news", label: "News" },
+  { href: "/download", label: "Download" },
+  { href: "/privacy", label: "Privacy" },
+  { href: "/policy", label: "Policy" },
+  { href: "/sitemap", label: "Site Map" },
 ];
 
 export function AppFooter() {

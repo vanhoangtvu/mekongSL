@@ -51,8 +51,7 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
                         .requestMatchers("/api/auth/**", "/swagger-ui/**", "/v3/api-docs/**").permitAll()
                         .requestMatchers("/api/data/**").hasAnyRole("DATA_MANAGER", "ADMIN")
-                        .requestMatchers("/api/s3/render").permitAll()
-                        .requestMatchers("/api/s3/download").permitAll()
+                        .requestMatchers(HttpMethod.GET, "/api/s3/render").permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/s3/list").permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/gis/manual-stations/**").permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/gis/water-quality/**").permitAll()
@@ -77,7 +76,7 @@ public class SecurityConfig {
         ));
         configuration.setAllowedOrigins(origins);
         configuration.setAllowedMethods(List.of("GET", "POST", "PUT", "DELETE", "OPTIONS"));
-        configuration.setAllowedHeaders(List.of("*"));
+        configuration.setAllowedHeaders(List.of("Authorization", "Content-Type", "Range", "Content-Range"));
         configuration.setExposedHeaders(List.of("Content-Range", "Accept-Ranges", "Content-Length"));
         configuration.setAllowCredentials(true);
         

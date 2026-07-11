@@ -72,6 +72,7 @@ public class S3Controller {
      * Download file from S3 (All authenticated users)
      */
     @GetMapping(value = {"/download", "/download/{*key}"})
+    @PreAuthorize("isAuthenticated()")
     public ResponseEntity<InputStreamResource> downloadFile(
         @PathVariable(required = false) String key,
         @RequestParam(value = "key", required = false) String queryKey

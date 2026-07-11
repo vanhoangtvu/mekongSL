@@ -364,7 +364,6 @@ export function useSingleLayer(
 
           activeDateRef.current = bestDate.replace(/\//g, "-");
           discoveredMetaRef.current.set(frameKey, meta);
-          console.log("[useSingleLayer] set rendered", frameKey, meta.proxyUrl);
           setRenderedLayers({ [frameKey]: meta });
 
           if (isFirstApply && timeLabel !== (timeSlot ?? "00-00")) {
