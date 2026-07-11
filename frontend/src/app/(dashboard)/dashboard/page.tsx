@@ -33,6 +33,7 @@ import {
 } from "../../../lib/admin-api";
 import NewsManager from "../../../components/admin/NewsManager";
 import S3Manager from "../../../components/admin/S3Manager";
+import LanduseComputePanel from "../../../components/admin/LanduseComputePanel";
 import { DATA_SOURCE_OPTIONS, type DataSourceKey, type EcowittDevice } from "../../../lib/constants/data-sources";
 import { collectRecordKeys, formatRecordValue, type DataRecord } from "../../../lib/utils/record-utils";
 import {
@@ -474,38 +475,41 @@ export default function DashboardPage() {
               )}
 
               {activeTab === "gis" && (
-                <div className="d-split">
-                  <div className="d-card">
-                    <div className="d-card-h"><h3>Thư mục Layer</h3></div>
-                    <div className="d-form-group"><label>Chọn Layer</label><select value={selectedLayerId || ""} onChange={(e) => setSelectedLayerId(Number(e.target.value) || null)} style={{ border: !selectedLayerId ? "2px solid #6366f1" : undefined }}><option value="">-- Chọn Layer --</option>{layers.map((l) => <option key={l.id} value={l.id}>{l.layerName}</option>)}</select></div>
-                    <div style={{ marginTop: 16, minHeight: 200 }}>
-                      {!selectedLayerId ? (
-                        <div className="d-empty"><Folder size={36} /><p>Chọn một Layer để quản lý thư mục</p></div>
-                      ) : (
-                        <><div className={`d-folder ${selectedFolderId === null ? "active" : ""}`} onClick={() => setSelectedFolderId(null)}><Folder size={16} /> <span>Root</span></div>
-                        <div style={{ marginLeft: 14 }}>{folderTree.map((f) => (
-                          <div key={f.id} className={`d-folder ${selectedFolderId === f.id ? "active" : ""}`} onClick={() => setSelectedFolderId(f.id)}>
-                            <Folder size={16} /> <span>{f.name}</span>
-                            <button className="d-btn d-btn-xs d-btn-danger" onClick={(e) => { e.stopPropagation(); handleDeleteFolder(f.id); }}>x</button>
-                          </div>
-                        ))}</div>
-                        <button className="d-btn d-btn-ghost" style={{ marginTop: 12, width: "100%", justifyContent: "center" }} onClick={handleCreateFolder}><FolderPlus size={16} /> Tạo thư mục</button></>
+                <>
+                  <div className="d-split">
+                    <div className="d-card">
+                      <div className="d-card-h"><h3>Thư mục Layer</h3></div>
+                      <div className="d-form-group"><label>Chọn Layer</label><select value={selectedLayerId || ""} onChange={(e) => setSelectedLayerId(Number(e.target.value) || null)} style={{ border: !selectedLayerId ? "2px solid #6366f1" : undefined }}><option value="">-- Chọn Layer --</option>{layers.map((l) => <option key={l.id} value={l.id}>{l.layerName}</option>)}</select></div>
+                      <div style={{ marginTop: 16, minHeight: 200 }}>
+                        {!selectedLayerId ? (
+                          <div className="d-empty"><Folder size={36} /><p>Chọn một Layer để quản lý thư mục</p></div>
+                        ) : (
+                          <><div className={`d-folder ${selectedFolderId === null ? "active" : ""}`} onClick={() => setSelectedFolderId(null)}><Folder size={16} /> <span>Root</span></div>
+                          <div style={{ marginLeft: 14 }}>{folderTree.map((f) => (
+                            <div key={f.id} className={`d-folder ${selectedFolderId === f.id ? "active" : ""}`} onClick={() => setSelectedFolderId(f.id)}>
+                              <Folder size={16} /> <span>{f.name}</span>
+                              <button className="d-btn d-btn-xs d-btn-danger" onClick={(e) => { e.stopPropagation(); handleDeleteFolder(f.id); }}>x</button>
+                            </div>
+                          ))}</div>
+                          <button className="d-btn d-btn-ghost" style={{ marginTop: 12, width: "100%", justifyContent: "center" }} onClick={handleCreateFolder}><FolderPlus size={16} /> Tạo thư mục</button></>
+                        )}
+                      </div>
+                    </div>
+                    <div className="d-card">
+                      <div className="d-card-h"><h3>Upload file</h3></div>
+                      {!selectedLayerId ? <div className="d-empty"><p>Chọn Layer trước</p></div> : (
+                        <><div className="d-upload-box">
+                          <div className="d-form-group"><label>File (.tif, .zip...)</label><input type="file" onChange={(e) => setUploadFile(e.target.files?.[0] || null)} /></div>
+                          <div className="d-form-group"><label>Loại</label><select value={uploadCategory} onChange={(e) => setUploadCategory(e.target.value)}><option value="default">Mặc định</option><option value="raster">Raster</option><option value="vector">Vector</option><option value="document">Tài liệu</option><option value="backup">Backup</option></select></div>
+                          <button className="d-btn d-btn-primary" onClick={handleUnifiedUpload} disabled={busyAction === "upload-unified" || !uploadFile}><Upload size={16} /> Upload</button>
+                        </div>
+                        <p className="d-note">Path S3 tự động sinh theo cấu trúc thư mục đã chọn.</p>
+                        <div className="d-empty">File trong thư mục sẽ hiển thị tại đây</div></>
                       )}
                     </div>
                   </div>
-                  <div className="d-card">
-                    <div className="d-card-h"><h3>Upload file</h3></div>
-                    {!selectedLayerId ? <div className="d-empty"><p>Chọn Layer trước</p></div> : (
-                      <><div className="d-upload-box">
-                        <div className="d-form-group"><label>File (.tif, .zip...)</label><input type="file" onChange={(e) => setUploadFile(e.target.files?.[0] || null)} /></div>
-                        <div className="d-form-group"><label>Loại</label><select value={uploadCategory} onChange={(e) => setUploadCategory(e.target.value)}><option value="default">Mặc định</option><option value="raster">Raster</option><option value="vector">Vector</option><option value="document">Tài liệu</option><option value="backup">Backup</option></select></div>
-                        <button className="d-btn d-btn-primary" onClick={handleUnifiedUpload} disabled={busyAction === "upload-unified" || !uploadFile}><Upload size={16} /> Upload</button>
-                      </div>
-                      <p className="d-note">Path S3 tự động sinh theo cấu trúc thư mục đã chọn.</p>
-                      <div className="d-empty">File trong thư mục sẽ hiển thị tại đây</div></>
-                    )}
-                  </div>
-                </div>
+                  <LanduseComputePanel />
+                </>
               )}
 
               {activeTab === "data" && (
@@ -807,7 +811,7 @@ export default function DashboardPage() {
         .d-folder.active svg { color: #2563a8; }
 
         /* ── Variables ── */
-        :global(body) { --accent: #2563a8; --success: #10b981; --r-admin: #ef4444; --r-manager: #2563a8; --r-user: #64748b; }
+        :global(body) { --accent: #2563a8; --success: #10b981; --r-admin: #ef4444; --r-manager: #2563a8; --r-user: #64748b; --r-muted: #94a3b8; }
 
         @media (max-width: 1200px) {
           .d-stats { grid-template-columns: repeat(2, 1fr); }

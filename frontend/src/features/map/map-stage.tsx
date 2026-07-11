@@ -1,7 +1,8 @@
 "use client";
 
 import React, { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
-import { fromUrl } from "geotiff";
+
+
 import TileLayer from "ol/layer/Tile";
 import VectorLayer from "ol/layer/Vector";
 import Map from "ol/Map";
@@ -21,7 +22,7 @@ import { ECOWITT_DEVICES, type EcowittDevice } from "../../lib/constants/data-so
 import { useS3DatasetLayers } from "./useS3DatasetLayers";
 import type { ManualStation } from "../../lib/admin-api";
 import { listWaterQualitySamples, getWaterQualitySample, getBackendAdminUrl, listS3Files, type WaterQualitySampleDto } from "../../lib/admin-api";
-import { MapPin, Activity, Image, Calendar, X, Play, Pause, SkipForward, SkipBack, Layers, Clock, Map as MapIcon } from "lucide-react";
+import { MapPin, Activity, Image, Calendar, X, Play, Pause, SkipForward, SkipBack, Layers, Clock, Map as MapIcon, Download } from "lucide-react";
 import { TemporalTimelineControl } from "./temporal-timeline-control";
 import { useLanduseYearlyStats } from "./useLanduseYearlyStats";
 
@@ -88,6 +89,7 @@ type PlayerLayer = {
   visible: boolean;
   type?: string;
   opacity: number;
+  proxyUrl?: string;
 };
 
 const ALL_AVAILABLE_LAYERS: PlayerLayer[] = DATASETS.flatMap((root) => {
@@ -962,66 +964,9 @@ export const MapStage = React.memo(function MapStage({ startDateTime, endDateTim
   const pointermoveThrottleRef = useRef<number>(0);
   const pointermoveRafRef = useRef<ReturnType<typeof requestAnimationFrame> | null>(null);
 
-  const [landuseStats, setLanduseStats] = useState<Record<string, { areaHa: number; percentage: number; classPixels?: number } | null>>({});
-  const landuseStatsCache = useRef<Record<string, { areaHa: number; percentage: number; classPixels?: number } | null | undefined>>({});
-  const landuseStatsLoading = useRef<Record<string, boolean>>({});
-
   const [activeLuId, setActiveLuId] = useState<string | null>(null);
   const luYearly = useLanduseYearlyStats(activeLuId);
   const [isInspectorCollapsed, setIsInspectorCollapsed] = useState(false);
-
-  const computeLanduseStats = useCallback(async (layerKey: string, proxyUrl: string) => {
-    const normalizedKey = normalizeLanduseKey(layerKey);
-    if (landuseStatsLoading.current[normalizedKey]) return;
-    const cached = landuseStatsCache.current[normalizedKey];
-    if (cached !== undefined) {
-      setLanduseStats(prev => ({ ...prev, [normalizedKey]: cached }));
-      return;
-    }
-    landuseStatsLoading.current[normalizedKey] = true;
-    try {
-      const fullUrl = proxyUrl.startsWith("http") ? proxyUrl : `${window.location.origin}${proxyUrl}`;
-      const tiff = await fromUrl(fullUrl);
-      const image = await tiff.getImage();
-      const data = await image.readRasters();
-      if (!data || data.length === 0) {
-        landuseStatsCache.current[normalizedKey] = null;
-        return;
-      }
-      const band = data[0];
-      if (!band || band.length === 0) {
-        landuseStatsCache.current[normalizedKey] = null;
-        return;
-      }
-      const rawNodata = image.getGDALNoData();
-      const nodata = rawNodata !== null && rawNodata !== undefined
-        ? Number(rawNodata)
-        : undefined;
-      const imgW = image.getWidth();
-      const imgH = image.getHeight();
-      const pixelAreaM2 = (93600 / imgW) * (64800 / imgH);
-      let classPixels = 0;
-      const totalPixels = band.length;
-      for (let i = 0; i < band.length; i++) {
-        const v = band[i];
-        if (v === 0) continue;
-        if (nodata !== undefined && !Number.isNaN(nodata) && v === nodata) continue;
-        if (v === -9999) continue;
-        classPixels++;
-      }
-      const areaHa = (classPixels * pixelAreaM2) / 10000;
-      const percentage = totalPixels > 0 ? (classPixels / totalPixels) * 100 : 0;
-      const stats = { areaHa, percentage, classPixels };
-      landuseStatsCache.current[normalizedKey] = stats;
-      setLanduseStats(prev => ({ ...prev, [normalizedKey]: stats }));
-    } catch {
-      landuseStatsCache.current[normalizedKey] = null;
-    } finally {
-      delete landuseStatsLoading.current[normalizedKey];
-    }
-  }, []);
-
-
 
   const hideOverlays = useCallback(() => {
     if (overlayVisibilityRef.current) return; // already saved
@@ -1256,15 +1201,6 @@ export const MapStage = React.memo(function MapStage({ startDateTime, endDateTim
   useEffect(() => { renderedLayersRef.current = effectiveRenderedLayers; }, [effectiveRenderedLayers]);
 
   useEffect(() => {
-    for (const key of Object.keys(pixelValues)) {
-      if (!isLanduseLayer(key)) continue;
-      const layerInfo = renderedLayersRef.current[key];
-      if (!layerInfo || layerInfo.type !== "raster") continue;
-      computeLanduseStats(key, layerInfo.proxyUrl);
-    }
-  }, [pixelValues, computeLanduseStats]);
-
-  useEffect(() => {
     const lKeys = Object.keys(pixelValues).filter(isLanduseLayer);
     console.log("[map:luEffect] pixelValues landuse keys:", lKeys);
     if (!lKeys.length) return;
@@ -1355,8 +1291,21 @@ export const MapStage = React.memo(function MapStage({ startDateTime, endDateTim
       }
     }
     setPlayerLayers([...selected, ...unselected]);
-    setPendingLayerId(null); // close any open popover when list rebuilds
+    setPendingLayerId(null);
   }, [appliedDatasets]);
+
+  useEffect(() => {
+    const rendered = renderedLayersRef.current;
+    setPlayerLayers(prev =>
+      prev.map(pl => {
+        if (!pl.added) return pl;
+        const prefix = pl.type ? `${pl.id}-${pl.type}` : pl.id;
+        const matchingKey = Object.keys(rendered).find(k => k === prefix || k.startsWith(prefix + "__"));
+        const info = matchingKey ? rendered[matchingKey] : undefined;
+        return { ...pl, proxyUrl: info?.proxyUrl };
+      })
+    );
+  }, [renderedLayers]);
 
   // Sync map layer z-order, visibility and opacity with playerLayers
   useEffect(() => {
@@ -2700,8 +2649,23 @@ export const MapStage = React.memo(function MapStage({ startDateTime, endDateTim
                           <span className="map-player-item-type-badge">{isMobile ? layer.type === "raster" ? "R" : layer.type === "vector" ? "V" : layer.type : layer.type}</span>
                         )}
 
-                        {/* Visibility toggle (green checkmark) + Remove button */}
+                        {/* Downloads + Visibility + Remove */}
                         <div className="map-player-item-actions">
+                          {layer.proxyUrl && (() => {
+                            const dlKey = (() => { try { return new URL(layer.proxyUrl!, window.location.origin).searchParams.get('key'); } catch { return null; } })();
+                            return (<>
+                              <button className="map-player-item-dl" title="Download TIFF" type="button"
+                                onClick={(e) => { e.stopPropagation();
+                                  if (dlKey) { const a = document.createElement('a'); a.href = `/api/s3/download?key=${encodeURIComponent(dlKey)}`; a.download = dlKey.split('/').pop() || 'download.tif'; document.body.appendChild(a); a.click(); document.body.removeChild(a); }
+                                }}>
+                                <Download size={13} />
+                              </button>
+                              <button className="map-player-item-dl" title="Copy S3 key" type="button"
+                                onClick={(e) => { e.stopPropagation(); if (dlKey) { try { navigator.clipboard?.writeText(dlKey); } catch { const ta = document.createElement('textarea'); ta.value = dlKey; ta.style.position = 'fixed'; ta.style.opacity = '0'; document.body.appendChild(ta); ta.select(); document.execCommand('copy'); document.body.removeChild(ta); } } }}>
+                                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>
+                              </button>
+                            </>);
+                          })()}
                           <button
                             className={`map-player-item-tick ${layer.visible ? "is-visible" : ""}`}
                             title={layer.visible ? "Hide layer" : "Show layer"}
@@ -3013,8 +2977,9 @@ export const MapStage = React.memo(function MapStage({ startDateTime, endDateTim
                     const dateStr = dateMatch ? `${dateMatch[1]}-${dateMatch[2]}-${dateMatch[3]}` : null;
                     
                     const isLu = isLanduseLayer(key);
-                    const luStats = isLu ? landuseStats[normalizeLanduseKey(key)] : undefined;
-                    const statsLoading = isLu && landuseStatsLoading.current[normalizeLanduseKey(key)];
+                    const curYearStat = isLu ? luYearly?.find(s => s.year === temporalYearValue) : undefined;
+                    const luStats = curYearStat ? { areaHa: curYearStat.areaHa, percentage: curYearStat.percentage ?? 0, classPixels: curYearStat.classPixels } : undefined;
+                    const statsLoading = isLu && !luStats;
 
                     return (
                       <div key={key} className="geo-map-inspector-layer">
@@ -3076,19 +3041,10 @@ export const MapStage = React.memo(function MapStage({ startDateTime, endDateTim
                                   <span style={{ fontWeight: '700', color: '#0f172a' }}>
                                     {luStats.percentage.toFixed(1)}%
                                   </span>
-                                </div>
-                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                                  <span style={{ color: '#64748b', fontWeight: 500 }}>Total Pixels</span>
-                                  <span style={{ fontWeight: '700', color: '#0f172a' }}>
-                                    {luStats.classPixels ? luStats.classPixels.toLocaleString() : '—'} pixels
-                                  </span>
-                                </div>
                               </div>
+                            </div>
                             )}
 
-                            <div style={{ marginTop: 6, padding: "4px 0", fontSize: "0.6rem", color: "#94a3b8", borderTop: "1px solid #e2e8f0" }}>
-                              DEBUG: activeLuId={activeLuId} luYearly={luYearly ? luYearly.length + "yrs" : "null"}
-                            </div>
                             {luYearly && luYearly.length > 1 && (
                               <div className="geo-map-inspector-chart-container" style={{ marginTop: '16px', borderTop: '1px solid #f1f5f9', paddingTop: '12px' }}>
                                 <div style={{ fontSize: '0.72rem', color: '#64748b', marginBottom: '8px', fontWeight: 600 }}>Area by Year</div>
@@ -3135,7 +3091,7 @@ export const MapStage = React.memo(function MapStage({ startDateTime, endDateTim
 
                             {activeLuId && luYearly && luYearly.length <= 1 && (
                               <div style={{ marginTop: 8, padding: "4px 0", fontSize: "0.72rem", color: "#94a3b8", textAlign: "center" }}>
-                                {luYearly.length === 0 ? "No yearly data found in S3" : "Only 1 year of data"}
+                                {luYearly.length === 0 ? "No computed data" : "Only 1 year of data"}
                               </div>
                             )}
                           </>

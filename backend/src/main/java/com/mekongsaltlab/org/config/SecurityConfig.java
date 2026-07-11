@@ -5,6 +5,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.HttpMethod;
+import org.springframework.scheduling.annotation.EnableAsync;
 import org.springframework.scheduling.annotation.EnableScheduling;
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.authentication.AuthenticationProvider;
@@ -31,6 +32,7 @@ import org.springframework.beans.factory.annotation.Value;
 @EnableWebSecurity
 @EnableMethodSecurity
 @EnableScheduling
+@EnableAsync
 @RequiredArgsConstructor
 public class SecurityConfig {
     
@@ -68,16 +70,12 @@ public class SecurityConfig {
     @Bean
     public CorsConfigurationSource corsConfigurationSource() {
         CorsConfiguration configuration = new CorsConfiguration();
-        configuration.setAllowedOrigins(List.of(
-            "http://localhost:3004", 
-            "http://localhost:3000",
-            "http://103.54.251.212",
-            "http://103.54.251.212:3004",
-            "http://103.54.251.212:3000",
-            "https://103.54.251.212",
+        List<String> origins = new java.util.ArrayList<>(allowedOrigins);
+        origins.addAll(List.of(
             "https://mekongsaltlab.org",
             "https://www.mekongsaltlab.org"
         ));
+        configuration.setAllowedOrigins(origins);
         configuration.setAllowedMethods(List.of("GET", "POST", "PUT", "DELETE", "OPTIONS"));
         configuration.setAllowedHeaders(List.of("*"));
         configuration.setExposedHeaders(List.of("Content-Range", "Accept-Ranges", "Content-Length"));

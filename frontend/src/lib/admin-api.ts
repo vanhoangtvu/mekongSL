@@ -43,9 +43,13 @@ function getHeaders(extraHeaders: HeadersInit = {}): HeadersInit {
 }
 
 async function requestJson<T>(input: RequestInfo | URL, init: RequestInit = {}): Promise<T> {
+  const headers: Record<string, string> = { ...getHeaders(init.headers) as Record<string, string> };
+  if (init.body && typeof init.body === 'string') {
+    headers['Content-Type'] = 'application/json';
+  }
   const response = await fetch(input, {
     ...init,
-    headers: getHeaders(init.headers),
+    headers,
   });
 
   if (!response.ok) {
@@ -713,5 +717,48 @@ export async function deleteNewsArticle(id: number): Promise<{ message: string }
   return requestJson<{ message: string }>(getBackendAdminUrl(`/articles/${id}`), {
     method: 'DELETE',
   });
+}
+
+export interface LanduseComputeStatus {
+  jobId: number;
+  status: string;
+  triggeredBy: string;
+  totalKeys: number;
+  completedKeys: number;
+  totalYears: number;
+  completedYears: number;
+  errorMessage: string | null;
+  progressDetail: Record<string, Record<string, string>> | null;
+  startedAt: string | null;
+  completedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface LanduseInventoryItem {
+  landuseKey: string;
+  landuseName: string;
+  s3Years: number[];
+  computedYears: number[];
+  needsCompute: boolean;
+}
+
+export interface LanduseInventoryResponse {
+  items: LanduseInventoryItem[];
+}
+
+export async function getLanduseInventory(): Promise<LanduseInventoryResponse> {
+  return requestJson<LanduseInventoryResponse>(getBackendAdminUrl('/gis/landuse/inventory'));
+}
+
+export async function getLanduseComputeStatus(): Promise<LanduseComputeStatus> {
+  return requestJson<LanduseComputeStatus>(getBackendAdminUrl('/gis/landuse/compute-status'));
+}
+
+export async function triggerLanduseCompute(incremental: boolean): Promise<{ jobId: number; status: string; message: string }> {
+  return requestJson<{ jobId: number; status: string; message: string }>(
+    getBackendAdminUrl('/gis/landuse/compute'),
+    { method: 'POST', body: JSON.stringify({ incremental }) }
+  );
 }
 
