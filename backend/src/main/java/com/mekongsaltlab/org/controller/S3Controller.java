@@ -1,5 +1,6 @@
 package com.mekongsaltlab.org.controller;
 
+import com.mekongsaltlab.org.service.DownloadTokenService;
 import com.mekongsaltlab.org.service.S3Service;
 import lombok.RequiredArgsConstructor;
 import org.springframework.core.io.InputStreamResource;
@@ -33,6 +34,7 @@ public class S3Controller {
     );
     
     private final S3Service s3Service;
+    private final DownloadTokenService downloadTokenService;
     
     /**
      * Upload file to S3 (ADMIN + DATA_MANAGER only)
@@ -90,7 +92,43 @@ public class S3Controller {
                 .contentType(MediaType.APPLICATION_OCTET_STREAM)
                 .body(new InputStreamResource(inputStream));
     }
-    
+
+    @PostMapping("/download-token")
+    public ResponseEntity<Map<String, Object>> createDownloadToken(@RequestBody Map<String, String> body) {
+        String key = body.get("key");
+        if (key == null || key.isBlank()) {
+            return ResponseEntity.badRequest().body(Map.of("error", "key is required"));
+        }
+        String cleanKey = key.startsWith("/") ? key.substring(1) : key;
+        if (!cleanKey.startsWith("gis-data/")) {
+            return ResponseEntity.badRequest().body(Map.of("error", "Invalid key prefix"));
+        }
+        String token = downloadTokenService.createToken(cleanKey);
+        return ResponseEntity.ok(Map.of("token", token, "expiresIn", 300));
+    }
+
+    @GetMapping("/download-by-token")
+    public ResponseEntity<?> downloadByToken(@RequestParam String token) {
+        if (token == null || token.isBlank()) {
+            return ResponseEntity.badRequest().body(Map.of("error", "token is required"));
+        }
+        String key = downloadTokenService.resolveToken(token);
+        if (key == null) {
+            return ResponseEntity.status(410).body(Map.of("error", "Token expired or invalid"));
+        }
+        downloadTokenService.removeToken(token);
+        try {
+            InputStream inputStream = s3Service.downloadFile(key);
+            String filename = key.contains("/") ? key.substring(key.lastIndexOf("/") + 1) : key;
+            return ResponseEntity.ok()
+                    .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + filename + "\"")
+                    .contentType(MediaType.APPLICATION_OCTET_STREAM)
+                    .body(new InputStreamResource(inputStream));
+        } catch (Exception e) {
+            return ResponseEntity.status(500).body(Map.of("error", e.getMessage()));
+        }
+    }
+
     /**
      * List files in S3
      * Public access allowed for gis-data/ prefix (used by map viewer).
@@ -318,8 +356,6 @@ public class S3Controller {
                 return ResponseEntity.badRequest().body(Map.of("error", "Only gis-data/ prefix allowed"));
             }
 
-            System.out.println("[RenderFile] Requested key: " + key + " (cleaned: " + cleanKey + "), Range: " + range);
-
             String contentType = cleanKey.endsWith(".tif") || cleanKey.endsWith(".tiff")
                 ? "image/tiff" : "application/octet-stream";
 
@@ -328,8 +364,6 @@ public class S3Controller {
 
             // Forward the exact HTTP status from S3 (206 for range, 200 for full)
             int httpStatus = s3Meta.sdkHttpResponse().statusCode();
-            System.out.println("[RenderFile] S3 response status: " + httpStatus + ", Content-Length: " + s3Meta.contentLength());
-            s3Meta.sdkHttpResponse().headers().forEach((k, v) -> System.out.println("  S3 response header: " + k + " = " + v));
 
             // Forward Content-Range header from S3 if present
             String contentRange = s3Meta.sdkHttpResponse()

@@ -2761,11 +2761,24 @@ export const MapStage = React.memo(function MapStage({ startDateTime, endDateTim
                           <div className="map-player-item-actions">
                             {s3Key && (
                               <button className="map-player-item-dl" title="Download" type="button"
-                                onClick={(e) => { e.stopPropagation();
-                                  const a = document.createElement('a');
-                                  a.href = `/api/s3/download?key=${encodeURIComponent(s3Key)}`;
-                                  a.download = s3Key.split('/').pop() || 'download.tif';
-                                  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+                                onClick={async (e) => { e.stopPropagation();
+                                  try {
+                                    const tokenRes = await fetch('/api/s3/download-token', {
+                                      method: 'POST',
+                                      headers: { 'Content-Type': 'application/json' },
+                                      body: JSON.stringify({ key: s3Key })
+                                    });
+                                    if (!tokenRes.ok) return;
+                                    const { token } = await tokenRes.json();
+                                    const dlRes = await fetch(`/api/s3/download-by-token?token=${encodeURIComponent(token)}`);
+                                    if (!dlRes.ok) return;
+                                    const blob = await dlRes.blob();
+                                    const url = URL.createObjectURL(blob);
+                                    const a = document.createElement('a');
+                                    a.href = url; a.download = s3Key.split('/').pop() || 'download.tif';
+                                    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+                                    URL.revokeObjectURL(url);
+                                  } catch {}
                                   setShowDownloadDropdown(false);
                                 }}>
                                 <Download size={13} />
