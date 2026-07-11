@@ -22,7 +22,7 @@ import { ECOWITT_DEVICES, type EcowittDevice } from "../../lib/constants/data-so
 import { useS3DatasetLayers } from "./useS3DatasetLayers";
 import type { ManualStation } from "../../lib/admin-api";
 import { listWaterQualitySamples, getWaterQualitySample, getBackendAdminUrl, listS3Files, type WaterQualitySampleDto } from "../../lib/admin-api";
-import { MapPin, Activity, Image, Calendar, X, Play, Pause, SkipForward, SkipBack, Layers, Clock, Map as MapIcon, Download } from "lucide-react";
+import { MapPin, Activity, Image, Calendar, X, Play, Pause, SkipForward, SkipBack, Layers, Clock, Map as MapIcon, Download, SlidersHorizontal } from "lucide-react";
 import { TemporalTimelineControl } from "./temporal-timeline-control";
 import { useLanduseYearlyStats } from "./useLanduseYearlyStats";
 
@@ -1250,6 +1250,7 @@ export const MapStage = React.memo(function MapStage({ startDateTime, endDateTim
   const [showLayerMenu, setShowLayerMenu] = useState(false);
   const [showTimeline, setShowTimeline] = useState(true);
   const [showPlayerDropdown, setShowPlayerDropdown] = useState(false);
+  const [showOpacityPanel, setShowOpacityPanel] = useState(false);
   const [showUnitMenu, setShowUnitMenu] = useState(false);
   const [hoverTime, setHoverTime] = useState<string | null>(null);
   const [tooltipPos, setHoverPos] = useState({ x: 0, y: 0 });
@@ -2647,26 +2648,7 @@ export const MapStage = React.memo(function MapStage({ startDateTime, endDateTim
                         </span>
 
                         {/* Layer name */}
-                        <span className="map-player-item-name">{layer.name}</span>
-
-                        {/* Opacity slider — only when added */}
-                        {layer.added && (
-                          <input
-                            className="map-player-opacity-slider"
-                            type="range"
-                            min={0} max={1} step={0.05}
-                            value={layer.opacity ?? 0.7}
-                            title={`Opacity: ${Math.round((layer.opacity ?? 0.7) * 100)}%`}
-                            draggable={false}
-                            onMouseDown={(e) => e.stopPropagation()}
-                            onPointerDown={(e) => e.stopPropagation()}
-                            onClick={(e) => e.stopPropagation()}
-                            onChange={(e) => {
-                              const val = parseFloat(e.target.value);
-                              setPlayerLayers(prev => prev.map(l => getLayerKey(l) === layerKey ? { ...l, opacity: val } : l));
-                            }}
-                          />
-                        )}
+                        <span className="map-player-item-name" title={layer.name}>{layer.name}</span>
 
                         {/* Layer type badge */}
                         {layer.type && (
