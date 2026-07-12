@@ -450,6 +450,27 @@ function normalizeLanduseKey(key: string): string {
   return id;
 }
 
+const LAND_NAMES: Record<string, string> = {
+  'BHK':'Rural Residential','CLN':'Perennial Crops','LUC':'Rice Paddy','NTS':'Aquaculture',
+  'LUA':'Upland Rice','SKC':'Construction Materials','ONT':'Urban Residential','DGD':'Education',
+  'DHT':'Mixed Use','DVH':'Cultural','TTN':'Cropland','NTD':'Housing',
+  'NKH':'Scientific Aquaculture','CQP':'Government Office','CTS':'Public Works','DRA':'Waterways',
+  'DTT':'Special Use','ODT':'Urban Land','CAN':'Fruit Trees','DDT':'Heritage Site',
+  'CSD':'Production Facility','DYT':'Healthcare','SKX':'Business','RSX':'Production Forest',
+  'RPH':'Auxiliary Border','SKK':'Canal','SON':'River','COC':'Root Crops',
+  'DTL':'Tourism','DGT':'Transportation','RSM':'Surface Water','PNK':'Other Non-Agri',
+  'BKS':'Alluvial Land','DON':'Defense','TMD':'Commercial Services','TSC':'Non-Agri Production',
+  'TIN':'Religious','SHT':'Community','DLT':'Eco-Tourism','DXH':'Social Land',
+  'CKH':'Annual Crops','LNK':'Forestry','HNK':'Mixed Agri-Forestry','PHT':'Ancillary',
+  'MTC':'Specialized Water','GPC':'Family Land','NHA':'Residential','OTH':'Other'
+};
+
+const LAYER_NAMES: Record<string, string> = {
+  'Level 5':'Road Network','Level 30':'Land Parcels','Level 33':'Land Use Codes',
+  'Level 23':'Boundaries','Level 21':'Transport','Level 40':'Planning Boundaries',
+  'Level 6':'Auxiliary Lines','Level 7':'Auxiliary Lines'
+};
+
 // ---------------------------------------------------------------------------
 // SensorChart — interactive sparkline with hover crosshair
 // ---------------------------------------------------------------------------
@@ -971,6 +992,17 @@ export const MapStage = React.memo(function MapStage({ startDateTime, endDateTim
   const [landuseStats, setLanduseStats] = useState<Record<string, { areaHa: number; percentage: number; classPixels?: number } | null>>({});
   const landuseStatsFetching = useRef<Set<string>>(new Set());
 
+  const [hoveredLuFeature, setHoveredLuFeature] = useState<{
+    code: string; name: string; color: string; area: string; pctOfTotal: string;
+    layerName: string; geomType: string; linetype: string; entityHandle: string; subClass: string;
+  } | null>(null);
+
+  const [showLuStats, setShowLuStats] = useState(false);
+  const [luStatsResult, setLuStatsResult] = useState<{
+    totalParcels: number; totalHa: number;
+    codes: { code: string; name: string; color: string; areaHa: number }[];
+  } | null>(null);
+
   const hideOverlays = useCallback(() => {
     if (overlayVisibilityRef.current) return; // already saved
     const layers = layerRefs.current;
@@ -1181,6 +1213,36 @@ export const MapStage = React.memo(function MapStage({ startDateTime, endDateTim
     setPbError("");
     setShowPlaybackPicker(true);
   }, []);
+
+  function computeLuStats() {
+    if (!mapRef.current) return null;
+    const layers = mapRef.current.getLayers().getArray();
+    const luLayer = (layers as any[]).find(l => l.get('_landuseLayer'));
+    if (!luLayer) return null;
+    const pre = luLayer.get('_luStats') as { totalAreaHa: number; codeAreaHa: Record<string, number>; codeColor: Record<string, string> } | undefined;
+    if (!pre) return null;
+    const source = luLayer.getSource();
+    if (!source) return null;
+    const feats = source.getFeatures();
+    const counts: Record<string, number> = {};
+    for (let i = 0; i < feats.length; i++) {
+      const f = feats[i];
+      const code = f.get('_code') as string;
+      if (!code) continue;
+      counts[code] = (counts[code] || 0) + 1;
+    }
+    const codes = Object.keys(pre.codeAreaHa).sort((a, b) => pre.codeAreaHa[b] - pre.codeAreaHa[a]);
+    return {
+      totalParcels: Object.values(counts).reduce((a, b) => a + b, 0),
+      totalHa: pre.totalAreaHa,
+      codes: codes.map(c => ({
+        code: c,
+        name: LAND_NAMES[c] || c,
+        color: pre.codeColor[c] || '#ccc',
+        areaHa: pre.codeAreaHa[c] || 0,
+      })),
+    };
+  }
 
   const s3Result = useS3DatasetLayers(
     appliedDatasets, mapRef,
@@ -1919,6 +1981,66 @@ export const MapStage = React.memo(function MapStage({ startDateTime, endDateTim
           map.getTargetElement().style.cursor = "";
         }
 
+        // Check for landuse vector features
+        let luLayer: any = null;
+        const luFeature = map.forEachFeatureAtPixel(evt.pixel, (f, layer) => {
+          const feat = f as Feature;
+          if (feat.get('_code')) { luLayer = layer; return feat; }
+          return undefined;
+        }, { layerFilter: layer => (layer as any).get('_landuseLayer') === true });
+        if (luFeature) {
+          const props = luFeature.getProperties();
+          const code = props._code as string;
+          const color = (props._color as string) || '#888';
+          const geom = luFeature.getGeometry();
+          let areaHa = 0;
+          if (geom) {
+            try {
+              const gt = geom.getType();
+              if (gt === 'Polygon' || gt === 'MultiPolygon') {
+                const poly = geom.clone().transform('EPSG:3857', 'EPSG:4326') as any;
+                const coords = poly.getCoordinates();
+                let a = 0;
+                const polys = gt === 'MultiPolygon' ? coords : [coords];
+                for (let p = 0; p < polys.length; p++) {
+                  const ring = polys[p][0];
+                  for (let i = 0; i < ring.length - 1; i++) {
+                    const x1 = ring[i][0] * 111320 * Math.cos(ring[i][1] * Math.PI / 180);
+                    const y1 = ring[i][1] * 110540;
+                    const x2 = ring[i + 1][0] * 111320 * Math.cos(ring[i + 1][1] * Math.PI / 180);
+                    const y2 = ring[i + 1][1] * 110540;
+                    a += x1 * y2 - x2 * y1;
+                  }
+                }
+                areaHa = Math.abs(a) / 20000;
+              }
+            } catch {}
+          }
+          const area = areaHa > 1 ? areaHa.toFixed(1) + ' ha' : (areaHa * 10000).toFixed(0) + ' m²';
+
+          // Compute % of total from layer stats
+          let pctOfTotal = '';
+          try {
+            const luStats = (luLayer as any)?.get('_luStats');
+            if (luStats && luStats.totalAreaHa > 0 && luStats.codeAreaHa[code]) {
+              pctOfTotal = (luStats.codeAreaHa[code] * 100 / luStats.totalAreaHa).toFixed(1) + '%';
+            }
+          } catch {}
+
+          const layerName = LAYER_NAMES[props.Layer] || props.Layer || 'N/A';
+          const geomType = geom?.getType() === 'MultiPolygon' ? 'Multi Polygon' : geom?.getType() || '';
+          const linetype = props.Linetype && props.Linetype !== 'Continuous' ? props.Linetype : '';
+          const entityHandle = props.EntityHandle || '';
+          const subClass = props.SubClasses ? String(props.SubClasses).split(':').pop() || '' : '';
+
+          setHoveredLuFeature({
+            code, name: LAND_NAMES[code] || code, color, area, pctOfTotal,
+            layerName, geomType, linetype, entityHandle, subClass,
+          });
+        } else {
+          setHoveredLuFeature(null);
+        }
+
         const now = performance.now();
         if (now - pointermoveThrottleRef.current < 80) {
           if (pointermoveRafRef.current) cancelAnimationFrame(pointermoveRafRef.current);
@@ -1996,6 +2118,7 @@ export const MapStage = React.memo(function MapStage({ startDateTime, endDateTim
         setMouseCoords(null);
         setPixelValues({});
         setPixelValue(null);
+        setHoveredLuFeature(null);
         mapViewport.style.cursor = "";
       }
     });
@@ -2803,6 +2926,28 @@ export const MapStage = React.memo(function MapStage({ startDateTime, endDateTim
             )}
           </div>
 
+          {/* Stats Button */}
+          {Object.keys(effectiveRenderedLayers).some(k => k.startsWith('baseline-landuse-plan')) && (
+            <div className="map-player-control">
+              <button
+                className="map-layer-toggle"
+                onClick={() => {
+                  if (showLuStats) { setShowLuStats(false); return; }
+                  const r = computeLuStats();
+                  if (r) setLuStatsResult(r);
+                  setShowLuStats(true);
+                }}
+                type="button"
+                title="Land use statistics"
+                style={{ color: showLuStats ? '#2563eb' : undefined }}
+              >
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M18 20V10"/><path d="M12 20V4"/><path d="M6 20v-6"/>
+                </svg>
+              </button>
+            </div>
+          )}
+
           {/* Base Layer Switcher */}
           <div className="map-layer-switcher">
             <button
@@ -2959,7 +3104,7 @@ export const MapStage = React.memo(function MapStage({ startDateTime, endDateTim
           </div>
         )}
 
-        {(Object.keys(pixelValues).length > 0 && mouseCoords !== null) && (
+        {((Object.keys(pixelValues).length > 0 || hoveredLuFeature) && mouseCoords !== null) && (
           <div className={`geo-map-inspector ${isMobile ? 'geo-map-inspector--mobile' : ''}`}>
             {/* Header */}
             <div 
@@ -3023,8 +3168,36 @@ export const MapStage = React.memo(function MapStage({ startDateTime, endDateTim
                 {(() => {
                   // Merge actual and virtual hovered entries
                   const inspectorEntries = [...Object.entries(pixelValues)];
+                  const luInfo = hoveredLuFeature;
+                  if (luInfo) {
+                    inspectorEntries.push(['__landuse_vector__', 0]);
+                  }
 
                   return inspectorEntries.map(([key, val]) => {
+                    // Special virtual entry for hovered landuse vector
+                    if (key === '__landuse_vector__') {
+                      const lu = hoveredLuFeature!;
+                      return (
+                        <div key={key} className="geo-map-inspector-layer">
+                          <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', width:'100%', padding:'4px 0' }}>
+                            <span style={{ display:'flex', alignItems:'center', gap:'6px', fontSize:'0.82rem', fontWeight:700, color:'#0f172a', lineHeight:'1.35' }}>
+                              <span style={{ width:'12px', height:'12px', borderRadius:'2px', flexShrink:0, background:lu.color }} />
+                              {lu.name} ({lu.code})
+                            </span>
+                          </div>
+                          <div style={{ display:'flex', flexDirection:'column', gap:'4px', marginTop:'4px', paddingLeft:'18px', fontSize:'0.78rem' }}>
+                            {lu.area && <div style={{ display:'flex', justifyContent:'space-between' }}><span style={{ color:'#64748b', fontWeight:500 }}>Area</span><span style={{ fontWeight:700, color:'#0f172a' }}>{lu.area}</span></div>}
+                            {lu.pctOfTotal && <div style={{ display:'flex', justifyContent:'space-between' }}><span style={{ color:'#64748b', fontWeight:500 }}>% of Total</span><span style={{ fontWeight:700, color:'#0f172a' }}>{lu.pctOfTotal}</span></div>}
+                            <div style={{ display:'flex', justifyContent:'space-between' }}><span style={{ color:'#64748b', fontWeight:500 }}>Layer</span><span style={{ fontWeight:600, color:'#0f172a' }}>{lu.layerName}</span></div>
+                            <div style={{ display:'flex', justifyContent:'space-between' }}><span style={{ color:'#64748b', fontWeight:500 }}>Type</span><span style={{ fontWeight:600, color:'#0f172a' }}>{lu.geomType}</span></div>
+                            {lu.linetype && <div style={{ display:'flex', justifyContent:'space-between' }}><span style={{ color:'#64748b', fontWeight:500 }}>Linetype</span><span style={{ fontWeight:600, color:'#0f172a' }}>{lu.linetype}</span></div>}
+                            {lu.entityHandle && <div style={{ display:'flex', justifyContent:'space-between' }}><span style={{ color:'#64748b', fontWeight:500 }}>Entity</span><span style={{ fontWeight:600, color:'#888', fontSize:'0.7rem' }}>{lu.entityHandle}</span></div>}
+                            {lu.subClass && <div style={{ display:'flex', justifyContent:'space-between' }}><span style={{ color:'#64748b', fontWeight:500 }}>SubClass</span><span style={{ fontWeight:600, color:'#888', fontSize:'0.7rem' }}>{lu.subClass}</span></div>}
+                          </div>
+                        </div>
+                      );
+                    }
+
                     let layerInfo = renderedLayers[key] || renderedLayersRef.current[key];
                     let displayName = "";
                     if (layerInfo) {
@@ -3453,6 +3626,59 @@ export const MapStage = React.memo(function MapStage({ startDateTime, endDateTim
             )}
           </div>
         )}
+
+
+        {/* ---- Landuse Stats Panel ---- */}
+        {showLuStats && luStatsResult && (
+          <div style={{
+            position: 'absolute', top: '52px', right: '12px', zIndex: 100,
+            background: 'rgba(255,255,255,.97)', borderRadius: '8px',
+            padding: '12px 14px', boxShadow: '0 2px 12px rgba(0,0,0,.15)',
+            minWidth: '300px', maxWidth: '380px', maxHeight: '65vh',
+            overflowY: 'auto', fontSize: '12px',
+          }}>
+            <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'8px' }}>
+              <strong style={{ fontSize:'13px' }}>Land Use Statistics</strong>
+              <button onClick={() => setShowLuStats(false)}
+                style={{ background:'none', border:'none', cursor:'pointer', fontSize:'16px', lineHeight:1, color:'#888' }}
+                type="button">&times;</button>
+            </div>
+            <div style={{ display:'flex', gap:'10px', marginBottom:'10px', flexWrap:'wrap' as const }}>
+              <div style={{ flex:1, background:'#f5f5f5', borderRadius:'6px', padding:'6px 10px', textAlign:'center', minWidth:'70px' }}>
+                <div style={{ fontSize:'16px', fontWeight:700, color:'#333' }}>{luStatsResult.totalParcels}</div>
+                <div style={{ fontSize:'10px', color:'#888' }}>Parcels</div>
+              </div>
+              <div style={{ flex:1, background:'#f5f5f5', borderRadius:'6px', padding:'6px 10px', textAlign:'center', minWidth:'70px' }}>
+                <div style={{ fontSize:'16px', fontWeight:700, color:'#333' }}>{luStatsResult.totalHa.toFixed(1)}</div>
+                <div style={{ fontSize:'10px', color:'#888' }}>Total (ha)</div>
+              </div>
+              <div style={{ flex:1, background:'#f5f5f5', borderRadius:'6px', padding:'6px 10px', textAlign:'center', minWidth:'70px' }}>
+                <div style={{ fontSize:'16px', fontWeight:700, color:'#333' }}>{luStatsResult.codes.length}</div>
+                <div style={{ fontSize:'10px', color:'#888' }}>Land Use Types</div>
+              </div>
+            </div>
+            {(() => {
+              const total = luStatsResult.totalHa;
+              const items = luStatsResult.codes;
+              const mainItems = items.filter(i => i.areaHa / total * 100 >= 0.8);
+              const otherArea = items.filter(i => i.areaHa / total * 100 < 0.8).reduce((s, i) => s + i.areaHa, 0);
+              const rows = mainItems.map(i => ({ ...i, pct: i.areaHa / total * 100 }));
+              if (otherArea > 0) rows.push({ code:'', name:'Other (<0.8%)', color:'#aaa', areaHa:otherArea, pct: otherArea/total*100 });
+              return rows.map((r, idx) => (
+                <div key={idx} style={{ display:'flex', alignItems:'center', margin:'3px 0', gap:'6px' }}>
+                  <span style={{ width:'12px', height:'12px', borderRadius:'2px', flexShrink:0, background:r.color }} />
+                  <span style={{ width:'85px', fontSize:'11px', fontWeight:500, textAlign:'right', color:'#555', whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }} title={r.code}>{r.name}</span>
+                  <span style={{ flex:1, height:'16px', background:'#fff', border:'1px solid #ddd', borderRadius:'3px', overflow:'hidden' }}>
+                    <span style={{ display:'block', height:'100%', borderRadius:'2px', width:Math.max(r.pct,0.8)+'%', background:r.color, minWidth:'3px' }} />
+                  </span>
+                  <span style={{ width:'38px', fontSize:'10px', color:'#666', textAlign:'right', fontWeight:600 }}>{r.pct.toFixed(1)}%</span>
+                </div>
+              ));
+            })()}
+          </div>
+        )}
+
+        {/* ---- Mobile Popup Backdrop ---- */}
 
         {/* ---- Mobile Popup Backdrop ---- */}
         {isMobile && (popupDeviceId || selectedWqStation || showPlayerDropdown) && (

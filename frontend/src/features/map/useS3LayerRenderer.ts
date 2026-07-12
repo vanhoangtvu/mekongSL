@@ -34,6 +34,35 @@ const defaultVectorStyle = new Style({
   }),
 });
 
+const LAND_NAMES: Record<string, string> = {
+  'BHK':'Rural Residential','CLN':'Perennial Crops','LUC':'Rice Paddy','NTS':'Aquaculture',
+  'LUA':'Upland Rice','SKC':'Construction Materials','ONT':'Urban Residential','DGD':'Education',
+  'DHT':'Mixed Use','DVH':'Cultural','TTN':'Cropland','NTD':'Housing',
+  'NKH':'Scientific Aquaculture','CQP':'Government Office','CTS':'Public Works','DRA':'Waterways',
+  'DTT':'Special Use','ODT':'Urban Land','CAN':'Fruit Trees','DDT':'Heritage Site',
+  'CSD':'Production Facility','DYT':'Healthcare','SKX':'Business','RSX':'Production Forest',
+  'RPH':'Auxiliary Border','SKK':'Canal','SON':'River','COC':'Root Crops',
+  'DTL':'Tourism','DGT':'Transportation','RSM':'Surface Water','PNK':'Other Non-Agri',
+  'BKS':'Alluvial Land','DON':'Defense','TMD':'Commercial Services','TSC':'Non-Agri Production',
+  'TIN':'Religious','SHT':'Community','DLT':'Eco-Tourism','DXH':'Social Land',
+  'CKH':'Annual Crops','LNK':'Forestry','HNK':'Mixed Agri-Forestry','PHT':'Ancillary',
+  'MTC':'Specialized Water','GPC':'Family Land','NHA':'Residential','OTH':'Other'
+};
+
+function landuseStyleFunction(feature: any): Style {
+  const geomType = feature.getGeometry()?.getType();
+  const color = feature.get('_color');
+  if (geomType === 'Polygon' || geomType === 'MultiPolygon') {
+    return new Style({
+      stroke: new Stroke({ color: '#333', width: 0.4 }),
+      fill: new Fill({ color: (color || '#ccc') + 'cc' }),
+    });
+  }
+  return new Style({
+    stroke: new Stroke({ color: '#555', width: 0.7 }),
+  });
+}
+
 const FADE_MS = 700;
 
 function animateLayer(
@@ -393,8 +422,51 @@ export function useS3LayerRenderer(
 
             if (!isActive || !features?.length) { showNotification(`Cannot parse "${info.name}"`, "error"); return; }
 
+            const isLanduse = id.startsWith('baseline-landuse-plan');
             const vectorSource = new VectorSource({ features });
-            const vectorLayer = new VectorLayer({ source: vectorSource, style: defaultVectorStyle, opacity: 0 });
+            const vectorLayer = new VectorLayer({ source: vectorSource, style: isLanduse ? landuseStyleFunction : defaultVectorStyle, opacity: 0 });
+            if (isLanduse) {
+              vectorLayer.set('_landuseLayer', true);
+              // Pre-compute per-code area stats for % of Total in popup
+              let totalAreaHa = 0;
+              const codeAreaHa: Record<string, number> = {};
+              const codeColor: Record<string, string> = {};
+              const feats = vectorSource.getFeatures();
+              for (let fi = 0; fi < feats.length; fi++) {
+                const f = feats[fi];
+                const g = f.getGeometry();
+                if (!g) continue;
+                const gt = g.getType();
+                if (gt !== 'Polygon' && gt !== 'MultiPolygon') continue;
+                const code = f.get('_code') as string;
+                if (!code) continue;
+                let a = 0;
+                try {
+                  const gt = g.getType();
+                  if (gt === 'Polygon' || gt === 'MultiPolygon') {
+                    const poly = g.clone().transform('EPSG:3857', 'EPSG:4326') as any;
+                    const coords = poly.getCoordinates();
+                    const polys = gt === 'MultiPolygon' ? coords : [coords];
+                    for (let p = 0; p < polys.length; p++) {
+                      const ring = polys[p][0];
+                      for (let i = 0; i < ring.length - 1; i++) {
+                        const x1 = ring[i][0] * 111320 * Math.cos(ring[i][1] * Math.PI / 180);
+                        const y1 = ring[i][1] * 110540;
+                        const x2 = ring[i + 1][0] * 111320 * Math.cos(ring[i + 1][1] * Math.PI / 180);
+                        const y2 = ring[i + 1][1] * 110540;
+                        a += x1 * y2 - x2 * y1;
+                      }
+                    }
+                    a = Math.abs(a) / 20000;
+                  }
+                } catch {}
+                totalAreaHa += a;
+                if (!codeAreaHa[code]) codeAreaHa[code] = 0;
+                codeAreaHa[code] += a;
+                if (!codeColor[code]) codeColor[code] = (f.get('_color') as string) || '#ccc';
+              }
+              vectorLayer.set('_luStats', { totalAreaHa, codeAreaHa, codeColor });
+            }
             vectorLayer.setZIndex(150 + Object.keys(currentLayers).length);
 
             if (!isActive || !new Set(Object.keys(renderedLayers)).has(layerId) || currentLayers[layerId]) return;

@@ -208,7 +208,10 @@ export async function uploadS3File(file: File, key?: string, overwrite: boolean 
     formData.set('key', key.trim());
   }
 
-  const url = new URL(getBackendAdminUrl('/s3/upload'));
+  // Use direct backend URL to bypass Next.js proxy body size limit for large files
+  const apiBase = process.env.NEXT_PUBLIC_API_URL || (typeof window !== 'undefined' ? window.location.origin + '/api' : 'http://127.0.0.1:8084/api');
+  const base = apiBase.replace(/\/+$/, '');
+  const url = new URL(`${base}/s3/upload`);
   if (overwrite) {
     url.searchParams.set('overwrite', 'true');
   }

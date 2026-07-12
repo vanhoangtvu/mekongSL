@@ -126,12 +126,12 @@ export function GeoSearchSidebar({
         setExpandedCategories((prev) => { const n = new Set(prev); n.add(datasetId); return n; });
         setSelectedLayers((prev) => {
           const next = { ...prev };
-          for (const cid of allChildIds) next[cid] = ["raster"];
+          for (const cid of allChildIds) next[cid] = isAdminDataset(cid) ? ["vector"] : ["raster"];
           return next;
         });
         setSelectionOrder((prev) => {
           const existing = prev.filter((item) => !allChildIds.includes(item.id));
-          return [...existing, ...allChildIds.map(id => ({ id, type: "raster" as const }))];
+          return [...existing, ...allChildIds.map(id => ({ id, type: isAdminDataset(id) ? "vector" as const : "raster" as const }))];
         });
       }
       return;
@@ -146,12 +146,14 @@ export function GeoSearchSidebar({
       setSelectionOrder((prev) => prev.filter((item) => item.id !== datasetId));
       setShowTypePicker(null);
     } else {
-      setSelectedLayers((prev) => ({ ...prev, [datasetId]: ["raster"] }));
-      setSelectionOrder((prev) => [...prev.filter((item) => item.id !== datasetId), { id: datasetId, type: "raster" }]);
+      const defaultType = isAdminDataset(datasetId) ? "vector" : "raster";
+      setSelectedLayers((prev) => ({ ...prev, [datasetId]: [defaultType] }));
+      setSelectionOrder((prev) => [...prev.filter((item) => item.id !== datasetId), { id: datasetId, type: defaultType }]);
     }
   };
 
   const toggleLayerType = (datasetId: string, type: "raster" | "vector") => {
+    if (type === "raster" && isAdminDataset(datasetId)) return;
     setSelectedLayers((prev) => {
       const current = prev[datasetId] || [];
       const isSelected = current.includes(type);
@@ -173,6 +175,8 @@ export function GeoSearchSidebar({
   const closeTypePicker = () => {
      setShowTypePicker(null);
   };
+
+  const isAdminDataset = (id: string) => id.startsWith("admin-");
 
   const countSelected = () => {
     let count = 0;
@@ -278,7 +282,9 @@ export function GeoSearchSidebar({
                     {!category.children && category.gisData !== false && (category.group ?? "gis") === "gis" && (selectedLayers[category.id]?.length || 0) > 0 && (
                       <div className="geo-layer-type-col">
                         <div className="geo-layer-type-picker" style={{ display: 'flex', gap: '4px', alignItems: 'center' }}>
-                          <button className={`geo-layer-type-opt${selectedLayers[category.id]?.includes("raster") ? " is-selected" : ""}`} onClick={() => toggleLayerType(category.id, "raster")} type="button">R</button>
+                          {!isAdminDataset(category.id) && (
+                            <button className={`geo-layer-type-opt${selectedLayers[category.id]?.includes("raster") ? " is-selected" : ""}`} onClick={() => toggleLayerType(category.id, "raster")} type="button">R</button>
+                          )}
                           <button className={`geo-layer-type-opt${selectedLayers[category.id]?.includes("vector") ? " is-selected" : ""}`} onClick={() => toggleLayerType(category.id, "vector")} type="button">V</button>
                         </div>
                       </div>
@@ -335,7 +341,9 @@ export function GeoSearchSidebar({
                             {child.gisData !== false && !child.children && (category.group ?? "gis") === "gis" && (selectedLayers[child.id]?.length || 0) > 0 && (
                               <div className="geo-layer-type-col">
                                 <div className="geo-layer-type-picker" style={{ display: 'flex', gap: '4px', alignItems: 'center' }}>
-                                  <button className={`geo-layer-type-opt${selectedLayers[child.id]?.includes("raster") ? " is-selected" : ""}`} onClick={() => toggleLayerType(child.id, "raster")} type="button">R</button>
+                                  {!isAdminDataset(child.id) && (
+                                    <button className={`geo-layer-type-opt${selectedLayers[child.id]?.includes("raster") ? " is-selected" : ""}`} onClick={() => toggleLayerType(child.id, "raster")} type="button">R</button>
+                                  )}
                                   <button className={`geo-layer-type-opt${selectedLayers[child.id]?.includes("vector") ? " is-selected" : ""}`} onClick={() => toggleLayerType(child.id, "vector")} type="button">V</button>
                                 </div>
                               </div>
@@ -363,7 +371,9 @@ export function GeoSearchSidebar({
                                   {grandchild.gisData !== false && (category.group ?? "gis") === "gis" && (selectedLayers[grandchild.id]?.length || 0) > 0 && (
                                     <div className="geo-layer-type-col">
                                       <div className="geo-layer-type-picker" style={{ display: 'flex', gap: '4px', alignItems: 'center' }}>
-                                        <button className={`geo-layer-type-opt${selectedLayers[grandchild.id]?.includes("raster") ? " is-selected" : ""}`} onClick={() => toggleLayerType(grandchild.id, "raster")} type="button">R</button>
+                                        {!isAdminDataset(grandchild.id) && (
+                                          <button className={`geo-layer-type-opt${selectedLayers[grandchild.id]?.includes("raster") ? " is-selected" : ""}`} onClick={() => toggleLayerType(grandchild.id, "raster")} type="button">R</button>
+                                        )}
                                         <button className={`geo-layer-type-opt${selectedLayers[grandchild.id]?.includes("vector") ? " is-selected" : ""}`} onClick={() => toggleLayerType(grandchild.id, "vector")} type="button">V</button>
                                       </div>
                                     </div>

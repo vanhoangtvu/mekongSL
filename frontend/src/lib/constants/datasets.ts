@@ -48,7 +48,23 @@ export const DATASETS: DatasetItem[] = [
     slug: "baseline-environment",
     group: "gis",
     children: [
-      { id: "baseline-landuse-plan", name: "Landuse Planning", slug: "landuse-planning", scale: "Province, Community", timeScale: "year" },
+      {
+        id: "baseline-landuse-plan",
+        name: "Landuse Planning",
+        slug: "landuse-planning",
+        scale: "Province, Community",
+        children: [
+          { id: "baseline-landuse-plan/tra-vinh-chau-thanh", name: "Trà Vinh – Châu Thành District", slug: "tra-vinh-chau-thanh", timeScale: "year" },
+          { id: "baseline-landuse-plan/tra-vinh-cang-long", name: "Trà Vinh – Càng Long District", slug: "tra-vinh-cang-long", timeScale: "year" },
+          { id: "baseline-landuse-plan/tra-vinh-cau-ke", name: "Trà Vinh – Cầu Kè District", slug: "tra-vinh-cau-ke", timeScale: "year" },
+          { id: "baseline-landuse-plan/tra-vinh-tieu-can", name: "Trà Vinh – Tiểu Cần District", slug: "tra-vinh-tieu-can", timeScale: "year" },
+          { id: "baseline-landuse-plan/tra-vinh-cau-ngang", name: "Trà Vinh – Cầu Ngang District", slug: "tra-vinh-cau-ngang", timeScale: "year" },
+          { id: "baseline-landuse-plan/tra-vinh-tra-cu", name: "Trà Vinh – Trà Cú District", slug: "tra-vinh-tra-cu", timeScale: "year" },
+          { id: "baseline-landuse-plan/tra-vinh-duyen-hai", name: "Trà Vinh – Duyên Hải District", slug: "tra-vinh-duyen-hai", timeScale: "year" },
+          { id: "baseline-landuse-plan/tra-vinh-city", name: "Trà Vinh – Trà Vinh City", slug: "tra-vinh-city", timeScale: "year" },
+          { id: "baseline-landuse-plan/tra-vinh-duyen-hai-town", name: "Trà Vinh – Duyên Hải Town", slug: "tra-vinh-duyen-hai-town", timeScale: "year" },
+        ],
+      },
       { id: "baseline-soil", name: "Soil Type", slug: "soil-type", scale: "Province", timeScale: "year" },
       { id: "baseline-waterbody", name: "Water Body", slug: "water-body", scale: "Province", timeScale: "year" },
       {

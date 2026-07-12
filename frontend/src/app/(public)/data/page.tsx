@@ -249,7 +249,19 @@ const GIS_DATASETS = {
   'baseline-environment': {
     label: 'Baseline Environment',
     categories: [
-      { key: 'landuse-planning', label: 'Landuse Planning' },
+      { key: 'landuse-planning', label: 'Landuse Planning',
+        children: [
+          { key: 'tra-vinh-chau-thanh', label: 'Trà Vinh – Châu Thành District' },
+          { key: 'tra-vinh-cang-long', label: 'Trà Vinh – Càng Long District' },
+          { key: 'tra-vinh-cau-ke', label: 'Trà Vinh – Cầu Kè District' },
+          { key: 'tra-vinh-tieu-can', label: 'Trà Vinh – Tiểu Cần District' },
+          { key: 'tra-vinh-cau-ngang', label: 'Trà Vinh – Cầu Ngang District' },
+          { key: 'tra-vinh-tra-cu', label: 'Trà Vinh – Trà Cú District' },
+          { key: 'tra-vinh-duyen-hai', label: 'Trà Vinh – Duyên Hải District' },
+          { key: 'tra-vinh-city', label: 'Trà Vinh – Trà Vinh City' },
+          { key: 'tra-vinh-duyen-hai-town', label: 'Trà Vinh – Duyên Hải Town' },
+        ],
+      },
       { key: 'soil-type', label: 'Soil Type' },
       { key: 'water-body', label: 'Water Body' },
       {
@@ -2889,7 +2901,7 @@ function ScheduleConfig({ source }: { source: string }) {
         });
       }, 150);
       
-      const response = await uploadS3File(uploadFile, key);
+      const response = await uploadS3File(uploadFile, key, true);
       
       clearInterval(progressInterval);
       setUploadProgress(100);
