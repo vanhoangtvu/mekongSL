@@ -66,7 +66,6 @@ export const DATASETS: DatasetItem[] = [
         ],
       },
       { id: "baseline-soil", name: "Soil Type", slug: "soil-type", scale: "Province", timeScale: "year" },
-      { id: "baseline-waterbody", name: "Water Body", slug: "water-body", scale: "Province", timeScale: "year" },
       {
         id: "baseline-channel",
         name: "Channel System",
@@ -98,7 +97,6 @@ export const DATASETS: DatasetItem[] = [
           { id: "landuse-classification/rice-cultivation", name: "Rice Cultivation Zone", timeScale: "year" },
         ],
       },
-      { id: "baseline-salinity", name: "Salinity Intrusion", slug: "salinity-intrusion", source: "Province/Other Dataset", timeScale: "year" },
     ],
   },
   {
