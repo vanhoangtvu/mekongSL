@@ -184,14 +184,29 @@ export function useS3DatasetLayers(
         // Parent is the immediate parent (e.g. 'landuse-classification')
         // dsId is the current selection (e.g. 'landuse-classification/rice-shrimp')
         
+        // Only Channel System uses hierarchical S3 path (parent/child slugs)
+        const needsHierarchicalPath = dsId.startsWith('channel-system/');
+
         let datasetSlug: string, categorySlug: string;
 
         if (root && root.id !== dsId) {
           datasetSlug = getDatasetSlug(root.id) || root.id;
-          categorySlug = buildAncestorSlugPath(dsId, root.id);
+          const rootPrefix = root.id + "/";
+          let relativePath = dsId.startsWith(rootPrefix) ? dsId.slice(rootPrefix.length) : dsId;
+          if (needsHierarchicalPath && parent) {
+            relativePath = buildAncestorSlugPath(dsId, root.id);
+          } else if (relativePath === dsId && parent) {
+            relativePath = getDatasetSlug(dsId) || dsId;
+          }
+          categorySlug = relativePath;
         } else if (parent) {
           datasetSlug = getDatasetSlug(parent.id) || parent.id;
-          categorySlug = buildAncestorSlugPath(dsId, parent.id);
+          const parentPrefix = parent.id + "/";
+          let relativePath = dsId.startsWith(parentPrefix) ? dsId.slice(parentPrefix.length) : dsId;
+          if (relativePath === dsId) {
+            relativePath = getDatasetSlug(dsId) || dsId;
+          }
+          categorySlug = relativePath;
         } else {
           datasetSlug = getDatasetSlug(dsId) || dsId;
           categorySlug = datasetSlug;

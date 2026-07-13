@@ -192,6 +192,18 @@ type GisDatasetConfig = {
   categories: GisCategoryNode[];
 };
 
+const CHANNEL_ITEM_MAP: Record<string, string> = {
+  'main-river': 'channel-system/main-river',
+  'transport': 'channel-system/transport',
+  'dike': 'channel-system/dike',
+  'hydraulic-works': 'channel-system/hydraulic-works',
+  'bridge': 'channel-system/bridge',
+  'residential': 'channel-system/residential',
+  'pump-station': 'channel-system/pump-station',
+  'main-canal': 'channel-system/canal/main-canal',
+  'field-ditch': 'channel-system/canal/field-ditch',
+};
+
 function renderGisCategoryOptions(categories: GisCategoryNode[]) {
   return categories.flatMap((category) => {
     if (category.children?.length) {
@@ -200,10 +212,10 @@ function renderGisCategoryOptions(categories: GisCategoryNode[]) {
           {category.children.flatMap((child) => {
             if (child.children?.length) {
               return child.children.map((sub) => (
-                <option key={sub.key} value={`${category.key}/${child.key}/${sub.key}`}>{child.label} — {sub.label}</option>
+                <option key={sub.key} value={sub.key}>{child.label} — {sub.label}</option>
               ));
             }
-            return [<option key={child.key} value={`${category.key}/${child.key}`}>{child.label}</option>];
+            return [<option key={child.key} value={child.key}>{child.label}</option>];
           })}
         </optgroup>,
       ];
@@ -2745,7 +2757,8 @@ function ScheduleConfig({ source }: { source: string }) {
       if (gisDataset) {
         prefix += `${gisDataset}/`;
         if (gisCategory) {
-          prefix += `${gisCategory}/`;
+          let catPath = CHANNEL_ITEM_MAP[gisCategory] ?? gisCategory;
+          prefix += `${catPath}/`;
           if (gisYear) {
             prefix += `${gisYear}/`;
           }
@@ -2785,7 +2798,8 @@ function ScheduleConfig({ source }: { source: string }) {
     const cleanFilename = sanitizeFilename(filename);
     
     if (uploadGroup === 'gis') {
-      const parts = ['gis-data', gisDataset, gisCategory, gisYear];
+      let categoryPath = CHANNEL_ITEM_MAP[gisCategory] ?? gisCategory;
+      const parts = ['gis-data', gisDataset, categoryPath, gisYear];
       if (gisMonth) parts.push(gisMonth.padStart(2, '0'));
       if (gisDay) parts.push(gisDay.padStart(2, '0'));
       if (gisTime) parts.push(gisTime.replace(':', '-'));
