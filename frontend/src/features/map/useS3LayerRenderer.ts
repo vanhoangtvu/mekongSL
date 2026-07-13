@@ -46,7 +46,9 @@ const LAND_NAMES: Record<string, string> = {
   'BKS':'Alluvial Land','DON':'Defense','TMD':'Commercial Services','TSC':'Non-Agri Production',
   'TIN':'Religious','SHT':'Community','DLT':'Eco-Tourism','DXH':'Social Land',
   'CKH':'Annual Crops','LNK':'Forestry','HNK':'Mixed Agri-Forestry','PHT':'Ancillary',
-  'MTC':'Specialized Water','GPC':'Family Land','NHA':'Residential','OTH':'Other'
+  'MTC':'Specialized Water','GPC':'Family Land','NHA':'Residential','OTH':'Other',
+  'TON':'Canal / River','DCH':'Community Center','RPN':'Boundary Marker','DSH':'Activity Land',
+  'DBV':'Cultural Monument','BCS':'Public Works',
 };
 
 function landuseStyleFunction(feature: any): Style {
