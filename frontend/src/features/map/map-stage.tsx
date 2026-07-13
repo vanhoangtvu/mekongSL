@@ -464,7 +464,8 @@ const LAND_NAMES: Record<string, string> = {
   'CKH':'Annual Crops','LNK':'Forestry','HNK':'Mixed Agri-Forestry','PHT':'Ancillary',
   'MTC':'Specialized Water','GPC':'Family Land','NHA':'Residential','OTH':'Other',
   'TON':'Canal / River','DCH':'Community Center','RPN':'Boundary Marker','DSH':'Activity Land',
-  'DBV':'Cultural Monument','BCS':'Public Works',
+  'DBV':'Cultural Monument','BCS':'Public Works','DKV':'Construction Materials','DNL':'Cropland',
+  'DSK':'Sports / Recreation',
 };
 
 const LAYER_NAMES: Record<string, string> = {
