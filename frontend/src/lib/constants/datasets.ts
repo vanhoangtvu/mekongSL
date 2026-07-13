@@ -73,13 +73,8 @@ export const DATASETS: DatasetItem[] = [
         scale: "Province",
         children: [
           { id: "channel-system/main-river", name: "Sông cái", slug: "main-river", timeScale: "year" },
-          {
-            id: "channel-system/canal", name: "Kênh", slug: "canal",
-            children: [
-              { id: "channel-system/canal/main", name: "Kênh chính", slug: "main-canal", timeScale: "year" },
-              { id: "channel-system/canal/field-ditch", name: "Rạch nội đồng", slug: "field-ditch", timeScale: "year" },
-            ],
-          },
+          { id: "channel-system/main-canal", name: "Kênh chính", slug: "main-canal", timeScale: "year" },
+          { id: "channel-system/field-ditch", name: "Rạch nội đồng", slug: "field-ditch", timeScale: "year" },
           { id: "channel-system/transport", name: "Giao thông", slug: "transport", timeScale: "year" },
           { id: "channel-system/dike", name: "Đê bao", slug: "dike", timeScale: "year" },
           { id: "channel-system/hydraulic-works", name: "Công thủy lợi", slug: "hydraulic-works", timeScale: "year" },
