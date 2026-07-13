@@ -414,8 +414,14 @@ export function useS3LayerRenderer(
             else if (isXML) features = new KML({ extractStyles: true }).readFeatures(fullText, { dataProjection: "EPSG:4326", featureProjection: "EPSG:3857" });
             else if (isGeoJSON) {
               const fmt = new GeoJSON();
-              try { features = fmt.readFeatures(fullText, { featureProjection: "EPSG:3857" }); }
-              catch { features = fmt.readFeatures(fullText, { dataProjection: "EPSG:4326", featureProjection: "EPSG:3857" }); }
+              const coordMatch = fullText.match(/-?\d+\.?\d*\s*,\s*-?\d+\.?\d*/);
+              if (coordMatch) {
+                const [x, y] = coordMatch[0].split(',').map(Number);
+                const dataProj = Math.abs(x) > 180 || Math.abs(y) > 90 ? "EPSG:32648" : "EPSG:4326";
+                features = fmt.readFeatures(fullText, { dataProjection: dataProj, featureProjection: "EPSG:3857" });
+              } else {
+                features = fmt.readFeatures(fullText, { featureProjection: "EPSG:3857" });
+              }
             } else if (isWKT) features = [new WKT().readFeature(fullText, { dataProjection: "EPSG:4326", featureProjection: "EPSG:3857" })].filter(Boolean) as Feature[];
             else if (isIDRISI) features = parseVCT(buf, vdcText);
             else features = [];
