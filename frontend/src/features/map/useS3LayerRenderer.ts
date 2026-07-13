@@ -63,6 +63,17 @@ function landuseStyleFunction(feature: any): Style {
   });
 }
 
+function vctStyleFunction(attrName: string): (feature: any) => Style {
+  return (feature: any) => {
+    const val = feature.get(attrName || '_vct_attr');
+    const num = Number(val);
+    const hue = !isNaN(num) ? ((num * 60) % 360) : 0;
+    return new Style({
+      stroke: new Stroke({ color: `hsl(${hue}, 70%, 50%)`, width: 1.5 }),
+    });
+  };
+}
+
 const FADE_MS = 700;
 
 function animateLayer(
@@ -139,10 +150,10 @@ function detectVctUtm(v: DataView, geomType: number): boolean {
   } catch { return false; }
 }
 
-function parseVCT(buf: ArrayBuffer, vdcText: string): Feature[] {
+function parseVCT(buf: ArrayBuffer, vdcText: string): { features: Feature[]; attrName: string } {
   const v = new DataView(buf);
   const geomType = v.getUint8(0);
-  if (geomType < 1 || geomType > 3) return [];
+  if (geomType < 1 || geomType > 3) return { features: [], attrName: "" };
 
   let srcProj = "EPSG:4326";
   let attrName = "";
@@ -173,9 +184,11 @@ function parseVCT(buf: ArrayBuffer, vdcText: string): Feature[] {
   const features: Feature[] = [];
   let offset = 0x105;
   const setAttr = (f: Feature) => {
+    const raw = v.getFloat64(offset, true);
     if (attrName) {
-      const raw = v.getFloat64(offset, true);
       f.set(attrName, attrIsInt ? Math.round(raw) : raw);
+    } else {
+      f.set('_vct_attr', raw);
     }
   };
   try {
@@ -234,7 +247,7 @@ function parseVCT(buf: ArrayBuffer, vdcText: string): Feature[] {
       }
     }
   } catch { /* truncated */ }
-  return features;
+  return { features, attrName };
 }
 
 function getPrefix(key: string) { return key.split("__")[0]; }
@@ -456,6 +469,7 @@ export function useS3LayerRenderer(
             }
 
             let features: Feature[];
+            let vctAttrName = "";
             if (isSHP || isPK || isSQLite) { showNotification(`Format not supported`, "error"); return; }
             else if (isXML) features = new KML({ extractStyles: true }).readFeatures(fullText, { dataProjection: "EPSG:4326", featureProjection: "EPSG:3857" });
             else if (isGeoJSON) {
@@ -469,14 +483,24 @@ export function useS3LayerRenderer(
                 features = fmt.readFeatures(fullText, { featureProjection: "EPSG:3857" });
               }
             } else if (isWKT) features = [new WKT().readFeature(fullText, { dataProjection: "EPSG:4326", featureProjection: "EPSG:3857" })].filter(Boolean) as Feature[];
-            else if (isIDRISI) features = parseVCT(buf, vdcText);
+            else if (isIDRISI) {
+              const result = parseVCT(buf, vdcText);
+              features = result.features;
+              vctAttrName = result.attrName;
+            }
             else features = [];
 
             if (!isActive || !features?.length) { showNotification(`Cannot parse "${info.name}"`, "error"); return; }
 
             const isLanduse = id.startsWith('baseline-landuse-plan');
+            const useVctStyle = vctAttrName || features.some(f => f.get('_vct_attr') !== undefined);
+            const vectorStyle: any = isLanduse
+              ? landuseStyleFunction
+              : useVctStyle
+                ? vctStyleFunction(vctAttrName || '_vct_attr')
+                : defaultVectorStyle;
             const vectorSource = new VectorSource({ features });
-            const vectorLayer = new VectorLayer({ source: vectorSource, style: isLanduse ? landuseStyleFunction : defaultVectorStyle, opacity: 0 });
+            const vectorLayer = new VectorLayer({ source: vectorSource, style: vectorStyle, opacity: 0 });
             if (isLanduse) {
               vectorLayer.set('_landuseLayer', true);
               // Pre-compute per-code area stats for % of Total in popup
