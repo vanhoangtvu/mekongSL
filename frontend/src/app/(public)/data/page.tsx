@@ -200,10 +200,10 @@ function renderGisCategoryOptions(categories: GisCategoryNode[]) {
           {category.children.flatMap((child) => {
             if (child.children?.length) {
               return child.children.map((sub) => (
-                <option key={sub.key} value={sub.key}>{child.label} — {sub.label}</option>
+                <option key={sub.key} value={`${category.key}/${child.key}/${sub.key}`}>{child.label} — {sub.label}</option>
               ));
             }
-            return [<option key={child.key} value={child.key}>{child.label}</option>];
+            return [<option key={child.key} value={`${category.key}/${child.key}`}>{child.label}</option>];
           })}
         </optgroup>,
       ];

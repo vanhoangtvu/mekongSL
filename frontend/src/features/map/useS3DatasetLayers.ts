@@ -26,6 +26,19 @@ export type RenderedLayer = {
 
 function getPrefix(key: string) { return key.split("__")[0]; }
 
+function buildAncestorSlugPath(dsId: string, rootId: string): string {
+  const idChain: string[] = [];
+  let current = getDatasetById(dsId);
+  while (current && current.id !== rootId) {
+    idChain.unshift(current.id);
+    const parent = getParentDataset(current.id);
+    if (!parent) break;
+    current = parent;
+  }
+  const slugParts = idChain.map(id => getDatasetSlug(id) || id.split('/').pop() || id);
+  return slugParts.join('/');
+}
+
 /**
  * Multi-layer timelapse mode: manages a per-date frame cache, preloads adjacent dates,
  * and delegates all OL rendering to useS3LayerRenderer.
@@ -172,25 +185,13 @@ export function useS3DatasetLayers(
         // dsId is the current selection (e.g. 'landuse-classification/rice-shrimp')
         
         let datasetSlug: string, categorySlug: string;
-        
+
         if (root && root.id !== dsId) {
           datasetSlug = getDatasetSlug(root.id) || root.id;
-          // Get relative path from root
-          const rootPrefix = root.id + "/";
-          let relativePath = dsId.startsWith(rootPrefix) ? dsId.slice(rootPrefix.length) : dsId;
-          // Handle cases where child IDs don't have parent prefix (e.g., "hydro-salinity" under "hydrology")
-          if (relativePath === dsId && parent) {
-            relativePath = getDatasetSlug(dsId) || dsId;
-          }
-          categorySlug = relativePath;
+          categorySlug = buildAncestorSlugPath(dsId, root.id);
         } else if (parent) {
           datasetSlug = getDatasetSlug(parent.id) || parent.id;
-          const parentPrefix = parent.id + "/";
-          let relativePath = dsId.startsWith(parentPrefix) ? dsId.slice(parentPrefix.length) : dsId;
-          if (relativePath === dsId) {
-            relativePath = getDatasetSlug(dsId) || dsId;
-          }
-          categorySlug = relativePath;
+          categorySlug = buildAncestorSlugPath(dsId, parent.id);
         } else {
           datasetSlug = getDatasetSlug(dsId) || dsId;
           categorySlug = datasetSlug;
@@ -469,14 +470,10 @@ export function useS3DatasetLayers(
           let datasetSlug: string, categorySlug: string;
           if (root && root.id !== ds.id) {
             datasetSlug = getDatasetSlug(root.id) || root.id;
-            const rootPrefix = root.id + "/";
-            const relativePath = ds.id.startsWith(rootPrefix) ? ds.id.slice(rootPrefix.length) : ds.id;
-            categorySlug = relativePath;
+            categorySlug = buildAncestorSlugPath(ds.id, root.id);
           } else if (parent) {
             datasetSlug = getDatasetSlug(parent.id) || parent.id;
-            const parentPrefix = parent.id + "/";
-            const relativePath = ds.id.startsWith(parentPrefix) ? ds.id.slice(parentPrefix.length) : ds.id;
-            categorySlug = relativePath;
+            categorySlug = buildAncestorSlugPath(ds.id, parent.id);
           } else {
             datasetSlug = getDatasetSlug(ds.id) || ds.id;
             categorySlug = datasetSlug;
