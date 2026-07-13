@@ -1008,6 +1008,8 @@ export const MapStage = React.memo(function MapStage({ startDateTime, endDateTim
     totalParcels: number; totalHa: number;
     codes: { code: string; name: string; color: string; areaHa: number }[];
   } | null>(null);
+  const [luStatsDistricts, setLuStatsDistricts] = useState<string[]>([]);
+  const [luStatsDistrictIdx, setLuStatsDistrictIdx] = useState(0);
 
   const hideOverlays = useCallback(() => {
     if (overlayVisibilityRef.current) return; // already saved
@@ -1226,45 +1228,58 @@ export const MapStage = React.memo(function MapStage({ startDateTime, endDateTim
     const luLayers = (layers as any[]).filter(l => l.get('_landuseLayer'));
     if (!luLayers.length) return null;
 
-    let totalParcels = 0;
-    let totalHa = 0;
-    const codeAreaHa: Record<string, number> = {};
-    const codeColor: Record<string, string> = {};
-    const counts: Record<string, number> = {};
+    const districtNames: string[] = [];
+    const perDistrict: Array<{
+      totalParcels: number; totalHa: number;
+      codeAreaHa: Record<string, number>; codeColor: Record<string, string>;
+    }> = [];
 
     for (const luLayer of luLayers) {
-      const pre = luLayer.get('_luStats') as { totalAreaHa: number; codeAreaHa: Record<string, number>; codeColor: Record<string, string> } | undefined;
-      if (!pre) continue;
-      totalHa += pre.totalAreaHa;
-      for (const [c, a] of Object.entries(pre.codeAreaHa)) {
-        codeAreaHa[c] = (codeAreaHa[c] || 0) + a;
+      const dsKey = luLayer.get('_datasetKey') as string | undefined;
+      let dName = '';
+      if (dsKey) {
+        const baseId = dsKey.split('__')[0].replace(/-(raster|vector)$/, '');
+        const dsInfo = getDatasetById(baseId);
+        if (dsInfo?.name) {
+          const parts = dsInfo.name.split(' – ');
+          dName = parts.length > 1 ? parts[1] : dsInfo.name;
+        }
       }
-      for (const [c, col] of Object.entries(pre.codeColor)) {
-        if (!codeColor[c]) codeColor[c] = col as string;
-      }
+      districtNames.push(dName || `District ${districtNames.length + 1}`);
+
+      const pre = luLayer.get('_luStats') as any;
       const source = luLayer.getSource();
-      if (!source) continue;
-      const feats = source.getFeatures();
-      for (let i = 0; i < feats.length; i++) {
-        const f = feats[i];
-        const code = f.get('_code') as string;
-        if (!code) continue;
-        counts[code] = (counts[code] || 0) + 1;
+      const counts: Record<string, number> = {};
+      if (source) {
+        for (const f of source.getFeatures()) {
+          const code = f.get('_code') as string;
+          if (code) counts[code] = (counts[code] || 0) + 1;
+        }
       }
+      perDistrict.push({
+        totalParcels: Object.values(counts).reduce((a, b) => a + b, 0),
+        totalHa: pre?.totalAreaHa || 0,
+        codeAreaHa: pre?.codeAreaHa || {},
+        codeColor: pre?.codeColor || {},
+      });
     }
 
-    totalParcels = Object.values(counts).reduce((a, b) => a + b, 0);
-    const codes = Object.keys(codeAreaHa).sort((a, b) => codeAreaHa[b] - codeAreaHa[a]);
-    return {
-      totalParcels,
-      totalHa,
+    // Use first district as default
+    const first = perDistrict[0];
+    const codes = Object.keys(first.codeAreaHa).sort((a, b) => first.codeAreaHa[b] - first.codeAreaHa[a]);
+    const result = {
+      totalParcels: first.totalParcels,
+      totalHa: first.totalHa,
       codes: codes.map(c => ({
-        code: c,
-        name: LAND_NAMES[c] || c,
-        color: codeColor[c] || '#ccc',
-        areaHa: codeAreaHa[c] || 0,
+        code: c, name: LAND_NAMES[c] || c,
+        color: first.codeColor[c] || '#ccc',
+        areaHa: first.codeAreaHa[c] || 0,
       })),
     };
+
+    setLuStatsDistricts(districtNames);
+    setLuStatsDistrictIdx(0);
+    return result;
   }
 
   const s3Result = useS3DatasetLayers(
@@ -3709,6 +3724,48 @@ export const MapStage = React.memo(function MapStage({ startDateTime, endDateTim
                 style={{ background:'none', border:'none', cursor:'pointer', fontSize:'16px', lineHeight:1, color:'#888' }}
                 type="button">&times;</button>
             </div>
+
+            {/* District selector tabs */}
+            {luStatsDistricts.length > 1 && (
+              <div style={{ display:'flex', gap:'4px', marginBottom:'8px', flexWrap:'wrap' as const }}>
+                {luStatsDistricts.map((dName, idx) => (
+                  <button key={idx} type="button"
+                    onClick={() => {
+                      setLuStatsDistrictIdx(idx);
+                      // Recompute for this district
+                      const layers = mapRef.current?.getLayers().getArray() || [];
+                      const luLayers = (layers as any[]).filter(l => l.get('_landuseLayer'));
+                      const luLayer = luLayers[idx];
+                      if (!luLayer) return;
+                      const pre = luLayer.get('_luStats') as any;
+                      const source = luLayer.getSource();
+                      if (!source || !pre) return;
+                      const counts: Record<string, number> = {};
+                      for (const f of source.getFeatures()) {
+                        const code = f.get('_code') as string;
+                        if (code) counts[code] = (counts[code] || 0) + 1;
+                      }
+                      const codes = Object.keys(pre.codeAreaHa).sort((a: string, b: string) => pre.codeAreaHa[b] - pre.codeAreaHa[a]);
+                      setLuStatsResult({
+                        totalParcels: Object.values(counts).reduce((a: number, b: number) => a + b, 0),
+                        totalHa: pre.totalAreaHa,
+                        codes: codes.map((c: string) => ({
+                          code: c, name: LAND_NAMES[c] || c,
+                          color: pre.codeColor[c] || '#ccc',
+                          areaHa: pre.codeAreaHa[c] || 0,
+                        })),
+                      });
+                    }}
+                    style={{
+                      padding:'3px 10px', border:'1px solid #ddd', borderRadius:'4px',
+                      background: idx === luStatsDistrictIdx ? '#2563eb' : '#fff',
+                      color: idx === luStatsDistrictIdx ? '#fff' : '#333',
+                      cursor:'pointer', fontSize:'11px', fontWeight: idx === luStatsDistrictIdx ? 700 : 500,
+                    }}
+                  >{dName}</button>
+                ))}
+              </div>
+            )}
             <div style={{ display:'flex', gap:'10px', marginBottom:'10px', flexWrap:'wrap' as const }}>
               <div style={{ flex:1, background:'#f5f5f5', borderRadius:'6px', padding:'6px 10px', textAlign:'center', minWidth:'70px' }}>
                 <div style={{ fontSize:'16px', fontWeight:700, color:'#333' }}>{luStatsResult.totalParcels}</div>
