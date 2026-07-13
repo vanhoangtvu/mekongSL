@@ -197,9 +197,14 @@ function renderGisCategoryOptions(categories: GisCategoryNode[]) {
     if (category.children?.length) {
       return [
         <optgroup key={category.key} label={category.label}>
-          {category.children.map((child) => (
-            <option key={child.key} value={child.key}>{child.label}</option>
-          ))}
+          {category.children.flatMap((child) => {
+            if (child.children?.length) {
+              return child.children.map((sub) => (
+                <option key={sub.key} value={sub.key}>{child.label} — {sub.label}</option>
+              ));
+            }
+            return [<option key={child.key} value={child.key}>{child.label}</option>];
+          })}
         </optgroup>,
       ];
     }
