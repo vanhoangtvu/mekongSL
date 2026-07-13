@@ -997,6 +997,8 @@ export const MapStage = React.memo(function MapStage({ startDateTime, endDateTim
     layerName: string; geomType: string; linetype: string; entityHandle: string; subClass: string;
   } | null>(null);
 
+  const [hoveredVectorProps, setHoveredVectorProps] = useState<Record<string, string> | null>(null);
+
   const [showLuStats, setShowLuStats] = useState(false);
   const [luStatsResult, setLuStatsResult] = useState<{
     totalParcels: number; totalHa: number;
@@ -2038,8 +2040,20 @@ export const MapStage = React.memo(function MapStage({ startDateTime, endDateTim
             layerName, geomType, linetype, entityHandle, subClass,
           });
         } else {
-          setHoveredLuFeature(null);
+        setHoveredLuFeature(null);
+        setHoveredVectorProps(null);
         }
+
+        // Check for general vector feature properties
+        const rawProps = map.forEachFeatureAtPixel(evt.pixel, (f) => {
+          const feat = f as Feature;
+          const p = feat.getProperties();
+          if (p._code || p.deviceId || p.wqStationId) return undefined;
+          return p;
+        }) as Record<string, unknown> | undefined;
+        setHoveredVectorProps(rawProps
+          ? Object.fromEntries(Object.entries(rawProps).filter(([k]) => k !== 'geometry').map(([k, v]) => [k, String(v ?? '')]))
+          : null);
 
         const now = performance.now();
         if (now - pointermoveThrottleRef.current < 80) {
@@ -3104,7 +3118,7 @@ export const MapStage = React.memo(function MapStage({ startDateTime, endDateTim
           </div>
         )}
 
-        {((Object.keys(pixelValues).length > 0 || hoveredLuFeature) && mouseCoords !== null) && (
+        {((Object.keys(pixelValues).length > 0 || hoveredLuFeature || hoveredVectorProps) && mouseCoords !== null) && (
           <div className={`geo-map-inspector ${isMobile ? 'geo-map-inspector--mobile' : ''}`}>
             {/* Header */}
             <div 
@@ -3391,6 +3405,21 @@ export const MapStage = React.memo(function MapStage({ startDateTime, endDateTim
                     );
                   });
                 })()}
+
+                {/* General vector feature properties */}
+                {hoveredVectorProps && Object.keys(hoveredVectorProps).length > 0 && (
+                  <div className="geo-map-inspector-layer">
+                    <div style={{ fontSize:'0.82rem', fontWeight:700, color:'#0f172a', padding:'4px 0' }}>Vector Properties</div>
+                    <div style={{ display:'flex', flexDirection:'column', gap:'4px', marginTop:'4px', paddingLeft:'12px', fontSize:'0.78rem' }}>
+                      {Object.entries(hoveredVectorProps).map(([k, v]) => (
+                        <div key={k} style={{ display:'flex', justifyContent:'space-between' }}>
+                          <span style={{ color:'#64748b', fontWeight:500 }}>{k}</span>
+                          <span style={{ fontWeight:600, color:'#0f172a' }}>{v}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>
             )}
           </div>

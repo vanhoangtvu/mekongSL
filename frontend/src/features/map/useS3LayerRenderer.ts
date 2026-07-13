@@ -145,6 +145,8 @@ function parseVCT(buf: ArrayBuffer, vdcText: string): Feature[] {
   if (geomType < 1 || geomType > 3) return [];
 
   let srcProj = "EPSG:4326";
+  let attrName = "";
+  let attrIsInt = false;
   if (vdcText) {
     const refSys = (vdcText.match(/ref\.\s*system\s*[: ]+(\S+)/i)?.[1] ?? "").toLowerCase();
     const refUnits = (vdcText.match(/ref\.\s*units\s*[: ]+(\S+)/i)?.[1] ?? "").toLowerCase();
@@ -153,6 +155,13 @@ function parseVCT(buf: ArrayBuffer, vdcText: string): Feature[] {
       srcProj = zone ? `EPSG:326${zone.padStart(2, "0")}` : "EPSG:32648";
     } else if (refUnits === "m" || refSys === "plane") {
       srcProj = "EPSG:32648";
+    }
+    // Parse first column definition from VDC
+    const colMatch = vdcText.match(/column\s+\d+\s*:\s*(.+)/i);
+    if (colMatch) {
+      attrName = colMatch[1].trim();
+      const typeMatch = vdcText.match(/type\s*:\s*(.+)/i);
+      if (typeMatch) attrIsInt = typeMatch[1].trim().toLowerCase() === "integer";
     }
   } else if (detectVctUtm(v, geomType)) {
     srcProj = "EPSG:32648";
@@ -163,16 +172,24 @@ function parseVCT(buf: ArrayBuffer, vdcText: string): Feature[] {
 
   const features: Feature[] = [];
   let offset = 0x105;
+  const setAttr = (f: Feature) => {
+    if (attrName) {
+      const raw = v.getFloat64(offset, true);
+      f.set(attrName, attrIsInt ? Math.round(raw) : raw);
+    }
+  };
   try {
     while (offset < buf.byteLength) {
       if (geomType === 1) {
         if (offset + 24 > buf.byteLength) break;
-        const x = v.getFloat64(offset + 8, true);
-        const y = v.getFloat64(offset + 16, true);
+        const f = new Feature({ geometry: new OLPoint(toWeb(v.getFloat64(offset + 8, true), v.getFloat64(offset + 16, true))) });
+        setAttr(f);
+        features.push(f);
         offset += 24;
-        features.push(new Feature({ geometry: new OLPoint(toWeb(x, y)) }));
       } else if (geomType === 2) {
         if (offset + 44 > buf.byteLength) break;
+        const lineF = new Feature();
+        setAttr(lineF);
         offset += 40;
         const nNodes = v.getUint32(offset, true);
         offset += 4;
@@ -182,9 +199,12 @@ function parseVCT(buf: ArrayBuffer, vdcText: string): Feature[] {
           coords.push(toWeb(v.getFloat64(offset, true), v.getFloat64(offset + 8, true)));
           offset += 16;
         }
-        features.push(new Feature({ geometry: new OLLineString(coords) }));
+        lineF.setGeometry(new OLLineString(coords));
+        features.push(lineF);
       } else {
         if (offset + 48 > buf.byteLength) break;
+        const polyF = new Feature();
+        setAttr(polyF);
         offset += 40;
         const nParts = v.getUint32(offset, true);
         const nTotalNodes = v.getUint32(offset + 4, true);
@@ -209,7 +229,8 @@ function parseVCT(buf: ArrayBuffer, vdcText: string): Feature[] {
           }
           rings.push(ring);
         }
-        features.push(new Feature({ geometry: new OLPolygon(rings) }));
+        polyF.setGeometry(new OLPolygon(rings));
+        features.push(polyF);
       }
     }
   } catch { /* truncated */ }
