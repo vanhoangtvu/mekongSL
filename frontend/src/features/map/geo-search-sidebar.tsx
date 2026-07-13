@@ -126,12 +126,12 @@ export function GeoSearchSidebar({
         setExpandedCategories((prev) => { const n = new Set(prev); n.add(datasetId); return n; });
         setSelectedLayers((prev) => {
           const next = { ...prev };
-          for (const cid of allChildIds) next[cid] = isAdminDataset(cid) ? ["vector"] : ["raster"];
+          for (const cid of allChildIds) next[cid] = [getDefaultDatasetType(cid)];
           return next;
         });
         setSelectionOrder((prev) => {
           const existing = prev.filter((item) => !allChildIds.includes(item.id));
-          return [...existing, ...allChildIds.map(id => ({ id, type: isAdminDataset(id) ? "vector" as const : "raster" as const }))];
+          return [...existing, ...allChildIds.map(id => ({ id, type: getDefaultDatasetType(id) }))];
         });
       }
       return;
@@ -146,7 +146,7 @@ export function GeoSearchSidebar({
       setSelectionOrder((prev) => prev.filter((item) => item.id !== datasetId));
       setShowTypePicker(null);
     } else {
-      const defaultType = isAdminDataset(datasetId) ? "vector" : "raster";
+      const defaultType = getDefaultDatasetType(datasetId);
       setSelectedLayers((prev) => ({ ...prev, [datasetId]: [defaultType] }));
       setSelectionOrder((prev) => [...prev.filter((item) => item.id !== datasetId), { id: datasetId, type: defaultType }]);
     }
@@ -177,6 +177,13 @@ export function GeoSearchSidebar({
   };
 
   const isAdminDataset = (id: string) => id.startsWith("admin-");
+
+  const getDefaultDatasetType = (datasetId: string): "raster" | "vector" => {
+    if (isAdminDataset(datasetId)) return "vector";
+    const ds = getDatasetById(datasetId);
+    if (ds?.type === "vector" || ds?.type === "raster") return ds.type;
+    return "raster";
+  };
 
   const countSelected = () => {
     let count = 0;
