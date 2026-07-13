@@ -503,6 +503,7 @@ export function useS3LayerRenderer(
                 : defaultVectorStyle;
             const vectorSource = new VectorSource({ features });
             const vectorLayer = new VectorLayer({ source: vectorSource, style: vectorStyle, opacity: 0 });
+            vectorLayer.set('_datasetKey', layerId);
             if (isLanduse) {
               vectorLayer.set('_landuseLayer', true);
               // Pre-compute per-code area stats for % of Total in popup

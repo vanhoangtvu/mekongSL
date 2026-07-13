@@ -997,6 +997,7 @@ export const MapStage = React.memo(function MapStage({ startDateTime, endDateTim
   const [hoveredLuFeature, setHoveredLuFeature] = useState<{
     code: string; name: string; color: string; area: string; pctOfTotal: string;
     layerName: string; geomType: string; linetype: string; entityHandle: string; subClass: string;
+    district: string;
   } | null>(null);
 
   const [hoveredVectorProps, setHoveredVectorProps] = useState<Record<string, string> | null>(null);
@@ -1221,29 +1222,46 @@ export const MapStage = React.memo(function MapStage({ startDateTime, endDateTim
   function computeLuStats() {
     if (!mapRef.current) return null;
     const layers = mapRef.current.getLayers().getArray();
-    const luLayer = (layers as any[]).find(l => l.get('_landuseLayer'));
-    if (!luLayer) return null;
-    const pre = luLayer.get('_luStats') as { totalAreaHa: number; codeAreaHa: Record<string, number>; codeColor: Record<string, string> } | undefined;
-    if (!pre) return null;
-    const source = luLayer.getSource();
-    if (!source) return null;
-    const feats = source.getFeatures();
+    const luLayers = (layers as any[]).filter(l => l.get('_landuseLayer'));
+    if (!luLayers.length) return null;
+
+    let totalParcels = 0;
+    let totalHa = 0;
+    const codeAreaHa: Record<string, number> = {};
+    const codeColor: Record<string, string> = {};
     const counts: Record<string, number> = {};
-    for (let i = 0; i < feats.length; i++) {
-      const f = feats[i];
-      const code = f.get('_code') as string;
-      if (!code) continue;
-      counts[code] = (counts[code] || 0) + 1;
+
+    for (const luLayer of luLayers) {
+      const pre = luLayer.get('_luStats') as { totalAreaHa: number; codeAreaHa: Record<string, number>; codeColor: Record<string, string> } | undefined;
+      if (!pre) continue;
+      totalHa += pre.totalAreaHa;
+      for (const [c, a] of Object.entries(pre.codeAreaHa)) {
+        codeAreaHa[c] = (codeAreaHa[c] || 0) + a;
+      }
+      for (const [c, col] of Object.entries(pre.codeColor)) {
+        if (!codeColor[c]) codeColor[c] = col as string;
+      }
+      const source = luLayer.getSource();
+      if (!source) continue;
+      const feats = source.getFeatures();
+      for (let i = 0; i < feats.length; i++) {
+        const f = feats[i];
+        const code = f.get('_code') as string;
+        if (!code) continue;
+        counts[code] = (counts[code] || 0) + 1;
+      }
     }
-    const codes = Object.keys(pre.codeAreaHa).sort((a, b) => pre.codeAreaHa[b] - pre.codeAreaHa[a]);
+
+    totalParcels = Object.values(counts).reduce((a, b) => a + b, 0);
+    const codes = Object.keys(codeAreaHa).sort((a, b) => codeAreaHa[b] - codeAreaHa[a]);
     return {
-      totalParcels: Object.values(counts).reduce((a, b) => a + b, 0),
-      totalHa: pre.totalAreaHa,
+      totalParcels,
+      totalHa,
       codes: codes.map(c => ({
         code: c,
         name: LAND_NAMES[c] || c,
-        color: pre.codeColor[c] || '#ccc',
-        areaHa: pre.codeAreaHa[c] || 0,
+        color: codeColor[c] || '#ccc',
+        areaHa: codeAreaHa[c] || 0,
       })),
     };
   }
@@ -2037,9 +2055,24 @@ export const MapStage = React.memo(function MapStage({ startDateTime, endDateTim
           const entityHandle = props.EntityHandle || '';
           const subClass = props.SubClasses ? String(props.SubClasses).split(':').pop() || '' : '';
 
+          // Xác định huyện từ dataset key
+          let districtName = '';
+          try {
+            const dsKey = (luLayer as any)?.get('_datasetKey') as string | undefined;
+            if (dsKey) {
+              const baseId = dsKey.split('__')[0].replace(/-(raster|vector)$/, '');
+              const dsInfo = getDatasetById(baseId);
+              if (dsInfo?.name) {
+                // Tách tên huyện (vd: "Trà Vinh – Châu Thành District" -> "Châu Thành")
+                const parts = dsInfo.name.split(' – ');
+                districtName = parts.length > 1 ? parts[1] : dsInfo.name;
+              }
+            }
+          } catch {}
+
           setHoveredLuFeature({
             code, name: LAND_NAMES[code] || code, color, area, pctOfTotal,
-            layerName, geomType, linetype, entityHandle, subClass,
+            layerName, geomType, linetype, entityHandle, subClass, district: districtName,
           });
         } else {
         setHoveredLuFeature(null);
@@ -3204,6 +3237,7 @@ export const MapStage = React.memo(function MapStage({ startDateTime, endDateTim
                           <div style={{ display:'flex', flexDirection:'column', gap:'4px', marginTop:'4px', paddingLeft:'18px', fontSize:'0.78rem' }}>
                             {lu.area && <div style={{ display:'flex', justifyContent:'space-between' }}><span style={{ color:'#64748b', fontWeight:500 }}>Area</span><span style={{ fontWeight:700, color:'#0f172a' }}>{lu.area}</span></div>}
                             {lu.pctOfTotal && <div style={{ display:'flex', justifyContent:'space-between' }}><span style={{ color:'#64748b', fontWeight:500 }}>% of Total</span><span style={{ fontWeight:700, color:'#0f172a' }}>{lu.pctOfTotal}</span></div>}
+                            {lu.district && <div style={{ display:'flex', justifyContent:'space-between' }}><span style={{ color:'#64748b', fontWeight:500 }}>District</span><span style={{ fontWeight:600, color:'#0f172a' }}>{lu.district}</span></div>}
                             <div style={{ display:'flex', justifyContent:'space-between' }}><span style={{ color:'#64748b', fontWeight:500 }}>Layer</span><span style={{ fontWeight:600, color:'#0f172a' }}>{lu.layerName}</span></div>
                             <div style={{ display:'flex', justifyContent:'space-between' }}><span style={{ color:'#64748b', fontWeight:500 }}>Type</span><span style={{ fontWeight:600, color:'#0f172a' }}>{lu.geomType}</span></div>
                             {lu.linetype && <div style={{ display:'flex', justifyContent:'space-between' }}><span style={{ color:'#64748b', fontWeight:500 }}>Linetype</span><span style={{ fontWeight:600, color:'#0f172a' }}>{lu.linetype}</span></div>}
