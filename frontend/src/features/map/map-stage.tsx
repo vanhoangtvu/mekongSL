@@ -2050,7 +2050,7 @@ export const MapStage = React.memo(function MapStage({ startDateTime, endDateTim
           const p = feat.getProperties();
           if (p._code || p.deviceId || p.wqStationId) return undefined;
           return p;
-        }) as Record<string, unknown> | undefined;
+        }, { hitTolerance: 5 }) as Record<string, unknown> | undefined;
         setHoveredVectorProps(rawProps
           ? Object.fromEntries(Object.entries(rawProps).filter(([k]) => k !== 'geometry').map(([k, v]) => [k, String(v ?? '')]))
           : null);
