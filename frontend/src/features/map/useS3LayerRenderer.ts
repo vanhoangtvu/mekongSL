@@ -116,6 +116,29 @@ function removeLayerFromMap(
   delete refs[id];
 }
 
+function detectVctUtm(v: DataView, geomType: number): boolean {
+  try {
+    let coordOff = 0x105;
+    if (geomType === 1) {
+      coordOff += 8;
+    } else {
+      coordOff += 40;
+      const nParts = v.getUint32(coordOff, true);
+      if (geomType === 2) {
+        coordOff += 4;
+      } else {
+        coordOff += 8;
+        if (nParts > 1) coordOff += nParts * 4;
+        else coordOff += 4;
+      }
+    }
+    if (coordOff + 16 > v.byteLength) return false;
+    const x = v.getFloat64(coordOff, true);
+    const y = v.getFloat64(coordOff + 8, true);
+    return Math.abs(x) > 180 || Math.abs(y) > 90;
+  } catch { return false; }
+}
+
 function parseVCT(buf: ArrayBuffer, vdcText: string): Feature[] {
   const v = new DataView(buf);
   const geomType = v.getUint8(0);
@@ -131,6 +154,8 @@ function parseVCT(buf: ArrayBuffer, vdcText: string): Feature[] {
     } else if (refUnits === "m" || refSys === "plane") {
       srcProj = "EPSG:32648";
     }
+  } else if (detectVctUtm(v, geomType)) {
+    srcProj = "EPSG:32648";
   }
 
   const toWeb = (x: number, y: number): [number, number] =>
