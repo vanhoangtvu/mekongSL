@@ -263,17 +263,23 @@ const GIS_DATASETS = {
         ],
       },
       { key: 'soil-type', label: 'Soil Type' },
-      { key: 'water-body', label: 'Water Body' },
       {
         key: 'channel-system',
         label: 'Channel System',
         children: [
-          { key: 'river', label: 'River' },
-          { key: 'canal', label: 'Canal' },
-          { key: 'sluice', label: 'Sluice' },
+          { key: 'main-river', label: 'Main River' },
+          { key: 'canal', label: 'Canal',
+            children: [
+              { key: 'main-canal', label: 'Main Canal' },
+              { key: 'field-ditch', label: 'Field Ditch' },
+            ],
+          },
+          { key: 'transport', label: 'Transportation' },
+          { key: 'dike', label: 'Dike' },
+          { key: 'hydraulic-works', label: 'Hydraulic Works' },
+          { key: 'bridge', label: 'Bridge' },
+          { key: 'residential', label: 'Residential Area' },
           { key: 'pump-station', label: 'Pump Station' },
-          { key: 'dike-embankments', label: 'Dike & Embankments' },
-          { key: 'irrigation', label: 'Irrigation' },
         ],
       },
       { key: 'ground-water-storage', label: 'Ground Water Storage' },
@@ -291,7 +297,6 @@ const GIS_DATASETS = {
           { key: 'landuse-classification/rice-cultivation', label: 'Rice Cultivation Zone' },
         ],
       },
-      { key: 'salinity-intrusion', label: 'Salinity Intrusion' }
     ]
   },
   'ecology': {
