@@ -214,7 +214,19 @@ export function useS3DatasetLayers(
 
         const catName = dsInfo?.name || dsId;
         const basePrefix = `gis-data/${datasetSlug}/${categorySlug}/`;
-        
+
+        // Fallback paths for backward compatibility
+        const allBasePrefixes: string[] = [basePrefix];
+        const leafSlug2 = getDatasetSlug(dsId) || dsId.split('/').pop() || dsId;
+        if (leafSlug2 && leafSlug2 !== categorySlug) {
+          allBasePrefixes.push(`gis-data/${datasetSlug}/${leafSlug2}/`);
+        }
+        const parentSlug = parent ? getDatasetSlug(parent.id) : null;
+        const hierSlug = parentSlug ? `${parentSlug}/${leafSlug2}` : null;
+        if (hierSlug && hierSlug !== categorySlug) {
+          allBasePrefixes.push(`gis-data/${datasetSlug}/${hierSlug}/`);
+        }
+
         // Check if this is Landsat or Baseline (only use year, ignore month/day)
         const rootId = root?.id ?? "";
         const isLandsat = rootId === "landsat" || dsId.startsWith("landsat") || dsId.startsWith("band-") || dsId === "rgb";
@@ -230,11 +242,15 @@ export function useS3DatasetLayers(
         const searchYear = timelineDate ? y : new Date().getFullYear();
         const searchMd = String(m).padStart(2, "0");
         const searchDd = String(d).padStart(2, "0");
-        const prefixes = yearOnly
-          ? [`${basePrefix}${searchYear}/`, basePrefix]
-          : (timelineDate
-              ? [`${basePrefix}${y}/${md}/${dd}/`, `${basePrefix}${y}/${md}/`, `${basePrefix}${y}/`, basePrefix]
-              : [`${basePrefix}${searchYear}/${searchMd}/${searchDd}/`, `${basePrefix}${searchYear}/${searchMd}/`, `${basePrefix}${searchYear}/`, basePrefix]);
+
+        // Build search prefixes for all base paths (primary + fallbacks)
+        const prefixes = allBasePrefixes.flatMap(bp =>
+          yearOnly
+            ? [`${bp}${searchYear}/`, bp]
+            : (timelineDate
+                ? [`${bp}${y}/${md}/${dd}/`, `${bp}${y}/${md}/`, `${bp}${y}/`, bp]
+                : [`${bp}${searchYear}/${searchMd}/${searchDd}/`, `${bp}${searchYear}/${searchMd}/`, `${bp}${searchYear}/`, bp])
+        );
 
         let foundKey: string | null = null;
         let vdcKey: string | null = null;
