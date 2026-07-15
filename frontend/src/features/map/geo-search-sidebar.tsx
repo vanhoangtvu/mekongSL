@@ -178,7 +178,7 @@ export function GeoSearchSidebar({
 
   const isAdminDataset = (id: string) => id.startsWith("admin-");
 
-  const hasRasterOption = (id: string) => !isAdminDataset(id) && !id.startsWith('baseline-landuse-plan');
+  const hasRasterOption = (id: string) => !isAdminDataset(id) && !id.startsWith('baseline-landuse-plan') && !id.startsWith('channel-system/');
 
   const hasVectorOption = (id: string) => !id.startsWith('landuse-classification/') && !id.startsWith('hydro-');
 
