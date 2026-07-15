@@ -74,7 +74,7 @@ public class S3Controller {
      * Download file from S3 (All authenticated users)
      */
     @GetMapping(value = {"/download", "/download/{*key}"})
-    @PreAuthorize("isAuthenticated()")
+    @PreAuthorize("hasAnyRole('ADMIN', 'DATA_MANAGER')")
     public ResponseEntity<InputStreamResource> downloadFile(
         @PathVariable(required = false) String key,
         @RequestParam(value = "key", required = false) String queryKey
@@ -94,6 +94,7 @@ public class S3Controller {
     }
 
     @PostMapping("/download-token")
+    @PreAuthorize("hasAnyRole('ADMIN', 'DATA_MANAGER')")
     public ResponseEntity<Map<String, Object>> createDownloadToken(@RequestBody Map<String, String> body) {
         String key = body.get("key");
         if (key == null || key.isBlank()) {
@@ -108,6 +109,7 @@ public class S3Controller {
     }
 
     @GetMapping("/download-by-token")
+    @PreAuthorize("hasAnyRole('ADMIN', 'DATA_MANAGER')")
     public ResponseEntity<?> downloadByToken(@RequestParam String token) {
         if (token == null || token.isBlank()) {
             return ResponseEntity.badRequest().body(Map.of("error", "token is required"));

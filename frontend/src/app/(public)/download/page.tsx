@@ -129,8 +129,15 @@ export default function DownloadPage() {
 
   const dlFile = async (s3Key: string, id: string) => {
     setDlMsg(p => ({ ...p, [id]: "..." }));
-    try { await downloadWithAuth(s3Key); setDlMsg(p => ({ ...p, [id]: "Done" })); setTimeout(() => setDlMsg(p => { const n = { ...p }; delete n[id]; return n; }), 2000); }
-    catch { setDlMsg(p => ({ ...p, [id]: "Error" })); setTimeout(() => setDlMsg(p => { const n = { ...p }; delete n[id]; return n; }), 2000); }
+    try {
+      await downloadWithAuth(s3Key);
+      setDlMsg(p => ({ ...p, [id]: "Done" }));
+      setTimeout(() => setDlMsg(p => { const n = { ...p }; delete n[id]; return n; }), 2000);
+    } catch (e: any) {
+      const msg = e?.message?.includes('403') ? 'Access Denied' : 'Error';
+      setDlMsg(p => ({ ...p, [id]: msg }));
+      setTimeout(() => setDlMsg(p => { const n = { ...p }; delete n[id]; return n; }), 3000);
+    }
   };
 
   const dlHydroFile = async (key: string, label: string) => {
