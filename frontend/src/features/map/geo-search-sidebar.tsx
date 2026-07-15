@@ -180,7 +180,7 @@ export function GeoSearchSidebar({
 
   const hasRasterOption = (id: string) => !isAdminDataset(id) && !id.startsWith('baseline-landuse-plan');
 
-  const hasVectorOption = (id: string) => !id.startsWith('landuse-classification/');
+  const hasVectorOption = (id: string) => !id.startsWith('landuse-classification/') && !id.startsWith('hydro-');
 
   const getDefaultDatasetType = (datasetId: string): "raster" | "vector" => {
     if (isAdminDataset(datasetId)) return "vector";
