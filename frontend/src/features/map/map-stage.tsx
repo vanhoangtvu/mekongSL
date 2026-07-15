@@ -2946,6 +2946,7 @@ export const MapStage = React.memo(function MapStage({ startDateTime, endDateTim
                                       headers: { 'Content-Type': 'application/json' },
                                       body: JSON.stringify({ key: s3Key })
                                     });
+                                    if (tokenRes.status === 403) { alert('Access denied. Only administrators can download.'); setShowDownloadDropdown(false); return; }
                                     if (!tokenRes.ok) return;
                                     const { token } = await tokenRes.json();
                                     const dlRes = await fetch(`/api/s3/download-by-token?token=${encodeURIComponent(token)}`);
