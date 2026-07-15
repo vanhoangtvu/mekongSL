@@ -153,7 +153,7 @@ export function GeoSearchSidebar({
   };
 
   const toggleLayerType = (datasetId: string, type: "raster" | "vector") => {
-    if (type === "raster" && !hasRasterOption(datasetId)) return;
+    if ((type === "raster" && !hasRasterOption(datasetId)) || (type === "vector" && !hasVectorOption(datasetId))) return;
     setSelectedLayers((prev) => {
       const current = prev[datasetId] || [];
       const isSelected = current.includes(type);
@@ -179,6 +179,8 @@ export function GeoSearchSidebar({
   const isAdminDataset = (id: string) => id.startsWith("admin-");
 
   const hasRasterOption = (id: string) => !isAdminDataset(id) && !id.startsWith('baseline-landuse-plan');
+
+  const hasVectorOption = (id: string) => !id.startsWith('landuse-classification/');
 
   const getDefaultDatasetType = (datasetId: string): "raster" | "vector" => {
     if (isAdminDataset(datasetId)) return "vector";
@@ -294,7 +296,9 @@ export function GeoSearchSidebar({
                           {hasRasterOption(category.id) && (
                             <button className={`geo-layer-type-opt${selectedLayers[category.id]?.includes("raster") ? " is-selected" : ""}`} onClick={() => toggleLayerType(category.id, "raster")} type="button">R</button>
                           )}
-                          <button className={`geo-layer-type-opt${selectedLayers[category.id]?.includes("vector") ? " is-selected" : ""}`} onClick={() => toggleLayerType(category.id, "vector")} type="button">V</button>
+                          {hasVectorOption(category.id) && (
+                            <button className={`geo-layer-type-opt${selectedLayers[category.id]?.includes("vector") ? " is-selected" : ""}`} onClick={() => toggleLayerType(category.id, "vector")} type="button">V</button>
+                          )}
                         </div>
                       </div>
                     )}
@@ -353,7 +357,9 @@ export function GeoSearchSidebar({
                                   {hasRasterOption(child.id) && (
                                     <button className={`geo-layer-type-opt${selectedLayers[child.id]?.includes("raster") ? " is-selected" : ""}`} onClick={() => toggleLayerType(child.id, "raster")} type="button">R</button>
                                   )}
-                                  <button className={`geo-layer-type-opt${selectedLayers[child.id]?.includes("vector") ? " is-selected" : ""}`} onClick={() => toggleLayerType(child.id, "vector")} type="button">V</button>
+                                  {hasVectorOption(child.id) && (
+                                    <button className={`geo-layer-type-opt${selectedLayers[child.id]?.includes("vector") ? " is-selected" : ""}`} onClick={() => toggleLayerType(child.id, "vector")} type="button">V</button>
+                                  )}
                                 </div>
                               </div>
                             )}
@@ -411,7 +417,9 @@ export function GeoSearchSidebar({
                                           {hasRasterOption(grandchild.id) && (
                                             <button className={`geo-layer-type-opt${selectedLayers[grandchild.id]?.includes("raster") ? " is-selected" : ""}`} onClick={() => toggleLayerType(grandchild.id, "raster")} type="button">R</button>
                                           )}
-                                          <button className={`geo-layer-type-opt${selectedLayers[grandchild.id]?.includes("vector") ? " is-selected" : ""}`} onClick={() => toggleLayerType(grandchild.id, "vector")} type="button">V</button>
+                                          {hasVectorOption(grandchild.id) && (
+                                            <button className={`geo-layer-type-opt${selectedLayers[grandchild.id]?.includes("vector") ? " is-selected" : ""}`} onClick={() => toggleLayerType(grandchild.id, "vector")} type="button">V</button>
+                                          )}
                                         </div>
                                       </div>
                                     )}
