@@ -32,12 +32,9 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    const data = await res.arrayBuffer();
     const responseHeaders: Record<string, string> = {
       'Content-Type': res.headers.get('content-type') || 'image/tiff',
-      'Cache-Control': 'no-store, no-cache, must-revalidate',
-      'Pragma': 'no-cache',
-      'Accept-Ranges': 'bytes',
+      'Cache-Control': 'public, max-age=86400, immutable',
     };
     const contentRange = res.headers.get('content-range');
     if (contentRange) {
@@ -48,6 +45,15 @@ export async function GET(request: NextRequest) {
       responseHeaders['Content-Length'] = contentLength;
     }
 
+    if (res.body) {
+      return new NextResponse(res.body, {
+        status: res.status,
+        statusText: res.statusText,
+        headers: responseHeaders,
+      });
+    }
+
+    const data = await res.arrayBuffer();
     return new NextResponse(data, {
       status: res.status,
       headers: responseHeaders,

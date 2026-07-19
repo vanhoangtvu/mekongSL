@@ -6,7 +6,6 @@ import type OLMap from "ol/Map";
 import WebGLTileLayer from "ol/layer/WebGLTile";
 import VectorLayer from "ol/layer/Vector";
 import GeoTIFF from "ol/source/GeoTIFF";
-import { fromArrayBuffer } from "geotiff";
 import { getDatasetSlug, getParentDataset, getDatasetById, getRootDataset } from "../../lib/constants/datasets";
 import { listS3Files } from "../../lib/admin-api";
 import { showNotification } from "../../lib/notification";
@@ -145,7 +144,6 @@ export function useSingleLayer(
 
   const sourceCacheRef = useRef<Map<FrameKey, { source: GeoTIFF; ready: boolean }>>(new Map());
   const discoveredMetaRef = useRef<Map<FrameKey, RenderedLayer>>(new Map());
-  const rawDataCacheRef = useRef<Map<FrameKey, { data: Float32Array; width: number; height: number }>>(new Map());
 
   useEffect(() => {
     const dsKey = dataset ? `${dataset.id}-${dataset.type}` : undefined;
@@ -301,6 +299,7 @@ export function useSingleLayer(
             if (!vFile) continue;
             const baseLower = vFile.key!.replace(/\.\w+$/, "").toLowerCase();
             const vdcFile = allFiles.find(f => f.key?.toLowerCase() === baseLower + ".vdc");
+            const dbfFile = allFiles.find(f => f.key?.toLowerCase().endsWith(".dbf"));
             const ext = "." + (vFile.key!.split(".").pop() || "").toLowerCase();
             activeDateRef.current = dateStr;
             setRenderedLayers({
@@ -309,6 +308,7 @@ export function useSingleLayer(
                 proxyUrl: `/api/tif?key=${encodeURIComponent(vFile.key!)}`,
                 type: "vector", ext,
                 vdcUrl: vdcFile ? `/api/tif?key=${encodeURIComponent(vdcFile.key!)}` : undefined,
+                dbfUrl: dbfFile ? `/api/tif?key=${encodeURIComponent(dbfFile.key!)}` : undefined,
               },
             });
             isFirstApplyRef.current = false;
@@ -421,7 +421,6 @@ export function useSingleLayer(
           const proxyUrl = meta.proxyUrl as string;
           const url = proxyUrl.startsWith("http") ? proxyUrl : `${window.location.origin}${proxyUrl}`;
 
-          // Single fetch: reuse response for both GeoTIFF source + raw decode
           const resp = await fetch(url);
           const buf = await resp.arrayBuffer();
           const blob = new Blob([buf], { type: "image/tiff" });
@@ -435,23 +434,7 @@ export function useSingleLayer(
           await source.getView();
           sourceCacheRef.current.set(frameKey, { source, ready: true });
 
-          // Also decode raw values for pixel morphing transition
-          if (!rawDataCacheRef.current.has(frameKey)) {
-            try {
-              const tif = await fromArrayBuffer(buf.slice(0));
-              const img = await tif.getImage();
-              const rasters = await img.readRasters();
-              const rawData = rasters[0] as Float32Array;
-              console.log("[preload] raw decoded", { frameKey, w: img.getWidth(), h: img.getHeight(), len: rawData.length });
-              rawDataCacheRef.current.set(frameKey, {
-                data: rawData,
-                width: img.getWidth(),
-                height: img.getHeight(),
-              });
-            } catch (e2) {
-              console.warn("[preload] raw decode failed", frameKey, e2);
-            }
-          }
+          // Raw decode skipped — morphing transition not active by default
         } catch {
           console.warn("[preloadFrames] failed", frameKey);
         }

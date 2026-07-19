@@ -19,6 +19,8 @@ import proj4 from "proj4";
 import { register } from "ol/proj/proj4";
 import { DATASETS, getRootDataset, getDatasetSlug, getParentDataset, getDatasetById, getTimeScale, type TimeScale } from "../../lib/constants/datasets";
 import { ECOWITT_DEVICES, type EcowittDevice } from "../../lib/constants/data-sources";
+import { LAND_NAMES, LAYER_NAMES } from "../../lib/constants/landuse-codes";
+import { computePolygonAreaHa } from "../../lib/utils/geo-utils";
 import { useS3DatasetLayers } from "./useS3DatasetLayers";
 import type { ManualStation } from "../../lib/admin-api";
 import { listWaterQualitySamples, getWaterQualitySample, getBackendAdminUrl, listS3Files, type WaterQualitySampleDto } from "../../lib/admin-api";
@@ -450,29 +452,7 @@ function normalizeLanduseKey(key: string): string {
   return id;
 }
 
-const LAND_NAMES: Record<string, string> = {
-  'BHK':'Rural Residential','CLN':'Perennial Crops','LUC':'Rice Paddy','NTS':'Aquaculture',
-  'LUA':'Upland Rice','SKC':'Construction Materials','ONT':'Urban Residential','DGD':'Education',
-  'DHT':'Mixed Use','DVH':'Cultural','TTN':'Cropland','NTD':'Housing',
-  'NKH':'Scientific Aquaculture','CQP':'Government Office','CTS':'Public Works','DRA':'Waterways',
-  'DTT':'Special Use','ODT':'Urban Land','CAN':'Fruit Trees','DDT':'Heritage Site',
-  'CSD':'Production Facility','DYT':'Healthcare','SKX':'Business','RSX':'Production Forest',
-  'RPH':'Auxiliary Border','SKK':'Canal','SON':'River','COC':'Root Crops',
-  'DTL':'Tourism','DGT':'Transportation','RSM':'Surface Water','PNK':'Other Non-Agri',
-  'BKS':'Alluvial Land','DON':'Defense','TMD':'Commercial Services','TSC':'Non-Agri Production',
-  'TIN':'Religious','SHT':'Community','DLT':'Eco-Tourism','DXH':'Social Land',
-  'CKH':'Annual Crops','LNK':'Forestry','HNK':'Mixed Agri-Forestry','PHT':'Ancillary',
-  'MTC':'Specialized Water','GPC':'Family Land','NHA':'Residential','OTH':'Other',
-  'TON':'Canal / River','DCH':'Community Center','RPN':'Boundary Marker','DSH':'Activity Land',
-  'DBV':'Cultural Monument','BCS':'Public Works','DKV':'Construction Materials','DNL':'Cropland',
-  'DSK':'Sports / Recreation',
-};
-
-const LAYER_NAMES: Record<string, string> = {
-  'Level 5':'Road Network','Level 30':'Land Parcels','Level 33':'Land Use Codes',
-  'Level 23':'Boundaries','Level 21':'Transport','Level 40':'Planning Boundaries',
-  'Level 6':'Auxiliary Lines','Level 7':'Auxiliary Lines'
-};
+// LAND_NAMES and LAYER_NAMES moved to lib/constants/landuse-codes.ts
 
 // ---------------------------------------------------------------------------
 // SensorChart — interactive sparkline with hover crosshair
@@ -1009,8 +989,11 @@ export const MapStage = React.memo(function MapStage({ startDateTime, endDateTim
     codes: { code: string; name: string; color: string; areaHa: number }[];
   } | null>(null);
   const [luStatsDistricts, setLuStatsDistricts] = useState<string[]>([]);
+  const [luStatsAllDistricts, setLuStatsAllDistricts] = useState<Array<{
+    totalParcels: number; totalHa: number;
+    codeAreaHa: Record<string, number>; codeColor: Record<string, string>;
+  }>>([]);
   const [luStatsDistrictIdx, setLuStatsDistrictIdx] = useState(0);
-
   const hideOverlays = useCallback(() => {
     if (overlayVisibilityRef.current) return; // already saved
     const layers = layerRefs.current;
@@ -1229,7 +1212,7 @@ export const MapStage = React.memo(function MapStage({ startDateTime, endDateTim
     if (!luLayers.length) return null;
 
     const districtNames: string[] = [];
-    const perDistrict: Array<{
+    const allPerDistrict: Array<{
       totalParcels: number; totalHa: number;
       codeAreaHa: Record<string, number>; codeColor: Record<string, string>;
     }> = [];
@@ -1256,7 +1239,7 @@ export const MapStage = React.memo(function MapStage({ startDateTime, endDateTim
           if (code) counts[code] = (counts[code] || 0) + 1;
         }
       }
-      perDistrict.push({
+      allPerDistrict.push({
         totalParcels: Object.values(counts).reduce((a, b) => a + b, 0),
         totalHa: pre?.totalAreaHa || 0,
         codeAreaHa: pre?.codeAreaHa || {},
@@ -1264,22 +1247,24 @@ export const MapStage = React.memo(function MapStage({ startDateTime, endDateTim
       });
     }
 
-    // Use first district as default
-    const first = perDistrict[0];
-    const codes = Object.keys(first.codeAreaHa).sort((a, b) => first.codeAreaHa[b] - first.codeAreaHa[a]);
-    const result = {
-      totalParcels: first.totalParcels,
-      totalHa: first.totalHa,
+    setLuStatsDistricts(districtNames);
+    setLuStatsAllDistricts(allPerDistrict);
+    setLuStatsDistrictIdx(0);
+
+    return buildLuStatsResult(allPerDistrict[0]);
+  }
+
+  function buildLuStatsResult(dist: { totalParcels: number; totalHa: number; codeAreaHa: Record<string, number>; codeColor: Record<string, string> }) {
+    const codes = Object.keys(dist.codeAreaHa).sort((a, b) => dist.codeAreaHa[b] - dist.codeAreaHa[a]);
+    return {
+      totalParcels: dist.totalParcels,
+      totalHa: dist.totalHa,
       codes: codes.map(c => ({
         code: c, name: LAND_NAMES[c] || c,
-        color: first.codeColor[c] || '#ccc',
-        areaHa: first.codeAreaHa[c] || 0,
+        color: dist.codeColor[c] || '#ccc',
+        areaHa: dist.codeAreaHa[c] || 0,
       })),
     };
-
-    setLuStatsDistricts(districtNames);
-    setLuStatsDistrictIdx(0);
-    return result;
   }
 
   const s3Result = useS3DatasetLayers(
@@ -1290,7 +1275,7 @@ export const MapStage = React.memo(function MapStage({ startDateTime, endDateTim
     isTimelinePlaying && playbackQueue.length > 0 ? playbackQueue[playbackIndex].layers : undefined
   );
 
-  const { renderedLayers, layerRefs: s3LayerRefs, layersCacheRef, sourceCacheRef } = s3Result;
+  const { renderedLayers, layerRefs: s3LayerRefs, layersCacheRef, sourceCacheRef, loadingStatus } = s3Result;
 
   const effectiveRenderedLayers = useMemo(() => {
     if (isTimelinePlaying && playbackQueue.length > 0) {
@@ -1430,6 +1415,11 @@ export const MapStage = React.memo(function MapStage({ startDateTime, endDateTim
     }
     setPlayerLayers([...selected, ...unselected]);
     setPendingLayerId(null);
+  }, [appliedDatasets]);
+
+  // Auto-open Layers dropdown when datasets are applied
+  useEffect(() => {
+    if ((appliedDatasets?.length ?? 0) > 0) setShowPlayerDropdown(true);
   }, [appliedDatasets]);
 
   useEffect(() => {
@@ -1611,11 +1601,15 @@ export const MapStage = React.memo(function MapStage({ startDateTime, endDateTim
 
       if (queue.length === 0) throw new Error("No data found in S3 for the selected range.");
 
-      // Preload GeoTIFF sources
-      setPbProgressText(`Preloading ${queue.length} frames…`);
+      // Preload GeoTIFF sources (batch 6 concurrent) & render incrementally
+      const allEntries = queue.flatMap(item => Object.entries(item.layers));
+      setPbProgressText(`Loading ${allEntries.length} frames…`);
       let loaded = 0;
-      for (const item of queue) {
-        await Promise.all(Object.entries(item.layers).map(async ([frameKey, info]) => {
+      const BATCH_SIZE = 6;
+      let layersCreated = false;
+      for (let i = 0; i < allEntries.length; i += BATCH_SIZE) {
+        const batch = allEntries.slice(i, i + BATCH_SIZE);
+        await Promise.all(batch.map(async ([frameKey, info]) => {
           if (sourceCacheRef.current.get(frameKey)?.ready) return;
           try {
             const url = info.proxyUrl.startsWith("http") ? info.proxyUrl : `${window.location.origin}${info.proxyUrl}`;
@@ -1625,13 +1619,17 @@ export const MapStage = React.memo(function MapStage({ startDateTime, endDateTim
             sourceCacheRef.current.set(frameKey, { source, ready: true });
           } catch { /* skip bad frame */ }
         }));
-        loaded++;
-        setPbProgressText(`Loading pixels (${loaded}/${queue.length})…`);
-      }
+        loaded = Math.min(i + BATCH_SIZE, allEntries.length);
+        setPbProgressText(`Loading (${loaded}/${allEntries.length})…`);
 
-      setPlaybackQueue(queue);
-      setPlaybackIndex(0);
-      setIsTimelinePlaying(true);
+        // Render immediately after first batch — don't wait for all
+        if (!layersCreated) {
+          layersCreated = true;
+          setPlaybackQueue(queue);
+          setPlaybackIndex(0);
+          setIsTimelinePlaying(true);
+        }
+      }
     } catch (err: unknown) {
       setPbError(err instanceof Error ? err.message : "Failed to start playback.");
     } finally {
@@ -1761,6 +1759,8 @@ export const MapStage = React.memo(function MapStage({ startDateTime, endDateTim
     const ecowittLayer = new VectorLayer({
       source: ecowittSource,
       style: (feature) => {
+        const label = feature.get("name") as string || "";
+        const shortLabel = label.length > 10 ? label.substring(0, 10) + "…" : label;
         const selectedId = popupDeviceIdRef.current;
         if (selectedId && feature?.getId() === selectedId) {
           const now = Date.now();
@@ -1778,14 +1778,30 @@ export const MapStage = React.memo(function MapStage({ startDateTime, endDateTim
                 fill: new Fill({ color: `rgba(0, 130, 45, ${pulse})` }),
                 stroke: new Stroke({ color: '#fff', width: 2 }),
               }),
+              text: new Text({
+                text: shortLabel,
+                font: "10px sans-serif",
+                fill: new Fill({ color: "#fff" }),
+                stroke: new Stroke({ color: "rgba(0,0,0,0.85)", width: 2 }),
+                offsetY: -13,
+                textAlign: "center",
+              }),
             }),
           ];
         }
         return new Style({
           image: new Circle({
-            radius: 6,
+            radius: 5,
             fill: new Fill({ color: '#dc3545' }),
-            stroke: new Stroke({ color: '#fff', width: 2 }),
+            stroke: new Stroke({ color: '#fff', width: 1.5 }),
+          }),
+          text: new Text({
+            text: shortLabel,
+            font: "9px sans-serif",
+            fill: new Fill({ color: "#fff" }),
+            stroke: new Stroke({ color: "rgba(0,0,0,0.8)", width: 2 }),
+            offsetY: -11,
+            textAlign: "center",
           }),
         });
       },
@@ -1803,7 +1819,11 @@ export const MapStage = React.memo(function MapStage({ startDateTime, endDateTim
       style: (feature) => {
         const stationType = feature.get("stationType") as string | undefined;
         const isSelected = feature.get("selected") as boolean | undefined;
+        const stationId = feature.get("stationId") as string || "";
         const color = stationType === 'groundwater' ? '#0d6efd' : '#198754';
+        // Show stationId on the pin, e.g. "SL 7"
+        const label = stationId || feature.get("name") as string || "";
+        const shortLabel = label.length > 15 ? label.substring(0, 15) + "…" : label;
         if (isSelected) {
           const now = Date.now();
           const pulse = Math.sin(now / 150) * 0.2 + 0.8;
@@ -1820,14 +1840,30 @@ export const MapStage = React.memo(function MapStage({ startDateTime, endDateTim
                 fill: new Fill({ color: color + Math.round(pulse * 255).toString(16).padStart(2, '0') }),
                 stroke: new Stroke({ color: '#fff', width: 2 }),
               }),
+              text: new Text({
+                text: shortLabel,
+                font: "10px sans-serif",
+                fill: new Fill({ color: "#fff" }),
+                stroke: new Stroke({ color: "rgba(0,0,0,0.85)", width: 2 }),
+                offsetY: -13,
+                textAlign: "center",
+              }),
             }),
           ];
         }
         return new Style({
           image: new Circle({
-            radius: 7,
+            radius: 6,
             fill: new Fill({ color }),
-            stroke: new Stroke({ color: '#fff', width: 2 }),
+            stroke: new Stroke({ color: '#fff', width: 1.5 }),
+          }),
+          text: new Text({
+            text: shortLabel,
+            font: "9px sans-serif",
+            fill: new Fill({ color: "#fff" }),
+            stroke: new Stroke({ color: "rgba(0,0,0,0.8)", width: 2 }),
+            offsetY: -11,
+            textAlign: "center",
           }),
         });
       },
@@ -1963,36 +1999,10 @@ export const MapStage = React.memo(function MapStage({ startDateTime, endDateTim
         setSelectedWqStation(null);
       }
 
-      // Mobile: tap to inspect pixel values (skip if tapping a station)
+      // Mobile: tap to inspect pixel values + vector features (landuse, general)
       if (isMobileRef.current && !handled) {
         setMouseCoords(evt.coordinate as [number, number]);
-        const layers = layerRefs.current;
-        const collected: Record<string, number> = {};
-        let firstValue: number | null = null;
-        if (layers && typeof layers === 'object') {
-          const visibleLayers = Object.entries(layers)
-            .filter(([, layer]) => layer.getVisible())
-            .sort((a, b) => (b[1].getZIndex?.() ?? 0) - (a[1].getZIndex?.() ?? 0));
-          for (const [key, layer] of visibleLayers) {
-            try {
-              if (!('getData' in layer)) continue;
-              if (!renderedLayersRef.current[key]) continue;
-              const buf = (layer as import("ol/layer/WebGLTile").default).getData(evt.pixel);
-              if (buf && !(buf instanceof DataView) && buf.length > 0) {
-                const val = buf[0];
-                const info = renderedLayersRef.current[key];
-                
-                // Only collect if value is NOT background (0) or NoData
-                if (val !== 0 && val !== (info as { nodata?: number }).nodata) {
-                  collected[key] = val;
-                  if (firstValue === null) firstValue = val;
-                }
-              }
-            } catch { /* skip layer */ }
-          }
-        }
-        setPixelValues(collected);
-        setPixelValue(firstValue);
+        inspectAtPixel(evt);
       }
     });
 
@@ -2005,6 +2015,125 @@ export const MapStage = React.memo(function MapStage({ startDateTime, endDateTim
         }
       }, delay);
     });
+
+    // Combined pixel inspection: vector features (landuse + general) + raster getData
+    const inspectAtPixel = (pointEvt: { pixel: import("ol/pixel").Pixel }, skipRaster?: boolean) => {
+      const m = mapRef.current;
+      if (!m) return;
+
+      let luFeature: any = null;
+      let luLayer: any = null;
+      let vectorRawProps: Record<string, unknown> | null = null;
+
+      m.forEachFeatureAtPixel(pointEvt.pixel, (f, layer) => {
+        const feat = f as Feature;
+        const props = feat.getProperties();
+
+        if (!luFeature && props._code && (layer as any).get('_landuseLayer') === true) {
+          luFeature = feat;
+          luLayer = layer;
+        }
+        if (!vectorRawProps && !props._code && !props.deviceId && !props.wqStationId) {
+          vectorRawProps = props;
+          // Look up dataset name from layer refs
+          const layers = layerRefs.current;
+          if (layers && typeof layers === 'object') {
+            for (const [lk, ol] of Object.entries(layers)) {
+              if (ol === layer) {
+                const rl = renderedLayersRef.current[lk];
+                if (rl?.name) {
+                  vectorRawProps = { ...props, _layerName: rl.name };
+                }
+                break;
+              }
+            }
+          }
+        }
+        return undefined;
+      }, { hitTolerance: 5 });
+
+      // Process landuse
+      if (luFeature) {
+        const props = luFeature.getProperties();
+        const code = props._code as string;
+        const color = (props._color as string) || '#888';
+        const geom = luFeature.getGeometry();
+        const areaHa = computePolygonAreaHa(geom);
+        const area = areaHa > 1 ? areaHa.toFixed(1) + ' ha' : (areaHa * 10000).toFixed(0) + ' m²';
+        let pctOfTotal = '';
+        try {
+          const luStats = (luLayer as any)?.get('_luStats');
+          if (luStats && luStats.totalAreaHa > 0 && luStats.codeAreaHa[code]) {
+            pctOfTotal = (luStats.codeAreaHa[code] * 100 / luStats.totalAreaHa).toFixed(1) + '%';
+          }
+        } catch {}
+        const layerName = LAYER_NAMES[props.Layer] || props.Layer || 'N/A';
+        const geomType = geom?.getType() === 'MultiPolygon' ? 'Multi Polygon' : geom?.getType() || '';
+        const linetype = props.Linetype && props.Linetype !== 'Continuous' ? props.Linetype : '';
+        const entityHandle = props.EntityHandle || '';
+        const subClass = props.SubClasses ? String(props.SubClasses).split(':').pop() || '' : '';
+        let districtName = '';
+        try {
+          const dsKey = (luLayer as any)?.get('_datasetKey') as string | undefined;
+          if (dsKey) {
+            const baseId = dsKey.split('__')[0].replace(/-(raster|vector)$/, '');
+            const dsInfo = getDatasetById(baseId);
+            if (dsInfo?.name) {
+              const parts = dsInfo.name.split(' – ');
+              districtName = parts.length > 1 ? parts[1] : dsInfo.name;
+            }
+          }
+        } catch {}
+        setHoveredLuFeature({
+          code, name: LAND_NAMES[code] || code, color, area, pctOfTotal,
+          layerName, geomType, linetype, entityHandle, subClass, district: districtName,
+        });
+      } else {
+        setHoveredLuFeature(null);
+      }
+
+      // Process general vector
+      setHoveredVectorProps(vectorRawProps
+        ? Object.fromEntries(
+            Object.entries(vectorRawProps)
+              .filter(([k]) => k !== 'geometry')
+              .map(([k, v]) => [k === '_layerName' ? 'Dataset' : k, String(v ?? '')])
+          )
+        : null);
+
+      // Raster pixel data (getData) - skip when inspector collapsed
+      if (!skipRaster) {
+        const layers = layerRefs.current;
+        const collected: Record<string, number> = {};
+        let firstValue: number | null = null;
+        if (layers && typeof layers === 'object') {
+          const visibleLayers = Object.entries(layers)
+            .filter(([, layer]) => layer.getVisible())
+            .sort((a, b) => (b[1].getZIndex?.() ?? 0) - (a[1].getZIndex?.() ?? 0));
+          for (const [key, layer] of visibleLayers) {
+            try {
+              if (!('getData' in layer)) continue;
+              if (!renderedLayersRef.current[key]) continue;
+              const buf = (layer as import("ol/layer/WebGLTile").default).getData(pointEvt.pixel);
+              if (buf && !(buf instanceof DataView) && buf.length > 0) {
+                const val = buf[0];
+                const info = renderedLayersRef.current[key];
+                if (val !== 0 && val !== (info as { nodata?: number }).nodata) {
+                  collected[key] = val;
+                  if (firstValue === null) firstValue = val;
+                }
+              }
+            } catch { /* skip layer */ }
+          }
+        }
+        setPixelValues(collected);
+        setPixelValue(firstValue);
+      } else {
+        // Clear stale raster values when inspector collapsed
+        setPixelValues({});
+        setPixelValue(null);
+      }
+    };
 
     map.on("pointermove", (evt) => {
       const coordinate = evt.coordinate;
@@ -2019,93 +2148,15 @@ export const MapStage = React.memo(function MapStage({ startDateTime, endDateTim
           map.getTargetElement().style.cursor = "";
         }
 
-        // Check for landuse vector features
-        let luLayer: any = null;
-        const luFeature = map.forEachFeatureAtPixel(evt.pixel, (f, layer) => {
-          const feat = f as Feature;
-          if (feat.get('_code')) { luLayer = layer; return feat; }
-          return undefined;
-        }, { layerFilter: layer => (layer as any).get('_landuseLayer') === true });
-        if (luFeature) {
-          const props = luFeature.getProperties();
-          const code = props._code as string;
-          const color = (props._color as string) || '#888';
-          const geom = luFeature.getGeometry();
-          let areaHa = 0;
-          if (geom) {
-            try {
-              const gt = geom.getType();
-              if (gt === 'Polygon' || gt === 'MultiPolygon') {
-                const poly = geom.clone().transform('EPSG:3857', 'EPSG:4326') as any;
-                const coords = poly.getCoordinates();
-                let a = 0;
-                const polys = gt === 'MultiPolygon' ? coords : [coords];
-                for (let p = 0; p < polys.length; p++) {
-                  const ring = polys[p][0];
-                  for (let i = 0; i < ring.length - 1; i++) {
-                    const x1 = ring[i][0] * 111320 * Math.cos(ring[i][1] * Math.PI / 180);
-                    const y1 = ring[i][1] * 110540;
-                    const x2 = ring[i + 1][0] * 111320 * Math.cos(ring[i + 1][1] * Math.PI / 180);
-                    const y2 = ring[i + 1][1] * 110540;
-                    a += x1 * y2 - x2 * y1;
-                  }
-                }
-                areaHa = Math.abs(a) / 20000;
-              }
-            } catch {}
-          }
-          const area = areaHa > 1 ? areaHa.toFixed(1) + ' ha' : (areaHa * 10000).toFixed(0) + ' m²';
-
-          // Compute % of total from layer stats
-          let pctOfTotal = '';
-          try {
-            const luStats = (luLayer as any)?.get('_luStats');
-            if (luStats && luStats.totalAreaHa > 0 && luStats.codeAreaHa[code]) {
-              pctOfTotal = (luStats.codeAreaHa[code] * 100 / luStats.totalAreaHa).toFixed(1) + '%';
-            }
-          } catch {}
-
-          const layerName = LAYER_NAMES[props.Layer] || props.Layer || 'N/A';
-          const geomType = geom?.getType() === 'MultiPolygon' ? 'Multi Polygon' : geom?.getType() || '';
-          const linetype = props.Linetype && props.Linetype !== 'Continuous' ? props.Linetype : '';
-          const entityHandle = props.EntityHandle || '';
-          const subClass = props.SubClasses ? String(props.SubClasses).split(':').pop() || '' : '';
-
-          // Xác định huyện từ dataset key
-          let districtName = '';
-          try {
-            const dsKey = (luLayer as any)?.get('_datasetKey') as string | undefined;
-            if (dsKey) {
-              const baseId = dsKey.split('__')[0].replace(/-(raster|vector)$/, '');
-              const dsInfo = getDatasetById(baseId);
-              if (dsInfo?.name) {
-                // Tách tên huyện (vd: "Trà Vinh – Châu Thành District" -> "Châu Thành")
-                const parts = dsInfo.name.split(' – ');
-                districtName = parts.length > 1 ? parts[1] : dsInfo.name;
-              }
-            }
-          } catch {}
-
-          setHoveredLuFeature({
-            code, name: LAND_NAMES[code] || code, color, area, pctOfTotal,
-            layerName, geomType, linetype, entityHandle, subClass, district: districtName,
-          });
-        } else {
-        setHoveredLuFeature(null);
-        setHoveredVectorProps(null);
+        // When inspector is collapsed, still inspect vector features (landuse + general)
+        // but skip expensive raster getData queries
+        if (isInspectorCollapsed) {
+          setMouseCoords(coordinate as [number, number]);
+          inspectAtPixel(evt, true);
+          return;
         }
 
-        // Check for general vector feature properties
-        const rawProps = map.forEachFeatureAtPixel(evt.pixel, (f) => {
-          const feat = f as Feature;
-          const p = feat.getProperties();
-          if (p._code || p.deviceId || p.wqStationId) return undefined;
-          return p;
-        }, { hitTolerance: 5 }) as Record<string, unknown> | undefined;
-        setHoveredVectorProps(rawProps
-          ? Object.fromEntries(Object.entries(rawProps).filter(([k]) => k !== 'geometry').map(([k, v]) => [k, String(v ?? '')]))
-          : null);
-
+        // Throttle: run vector + raster queries at most every 80ms
         const now = performance.now();
         if (now - pointermoveThrottleRef.current < 80) {
           if (pointermoveRafRef.current) cancelAnimationFrame(pointermoveRafRef.current);
@@ -2113,67 +2164,14 @@ export const MapStage = React.memo(function MapStage({ startDateTime, endDateTim
             pointermoveRafRef.current = null;
             if (!mapRef.current) return;
             pointermoveThrottleRef.current = performance.now();
-            const layers = layerRefs.current;
-            const collected: Record<string, number> = {};
-            let firstValue: number | null = null;
-            if (layers && typeof layers === 'object') {
-              const visibleLayers = Object.entries(layers)
-                .filter(([, layer]) => layer.getVisible())
-                .sort((a, b) => (b[1].getZIndex?.() ?? 0) - (a[1].getZIndex?.() ?? 0));
-              for (const [key, layer] of visibleLayers) {
-                try {
-                  if (!('getData' in layer)) continue;
-                  if (!renderedLayersRef.current[key]) continue;
-                  const buf = (layer as import("ol/layer/WebGLTile").default).getData(evt.pixel);
-                  if (buf && !(buf instanceof DataView) && buf.length > 0) {
-                    const val = buf[0];
-                    const info = renderedLayersRef.current[key];
-                    if (val !== 0 && val !== (info as { nodata?: number }).nodata) {
-                      collected[key] = val;
-                      if (firstValue === null) firstValue = val;
-                    }
-                  }
-                } catch { /* skip layer */ }
-              }
-            }
-            setPixelValues(collected);
-            setPixelValue(firstValue);
+            inspectAtPixel(evt);
           });
           setMouseCoords(coordinate as [number, number]);
           return;
         }
         pointermoveThrottleRef.current = now;
         setMouseCoords(coordinate as [number, number]);
-
-        const layers = layerRefs.current;
-        const collected: Record<string, number> = {};
-        let firstValue: number | null = null;
-        if (layers && typeof layers === 'object') {
-          const visibleLayers = Object.entries(layers)
-            .filter(([, layer]) => layer.getVisible())
-            .sort((a, b) => (b[1].getZIndex?.() ?? 0) - (a[1].getZIndex?.() ?? 0));
-
-          for (const [key, layer] of visibleLayers) {
-            try {
-              if (!('getData' in layer)) continue;
-              // Only read from active rendered layers, not fading-out old layers
-              if (!renderedLayersRef.current[key]) continue;
-              const buf = (layer as import("ol/layer/WebGLTile").default).getData(evt.pixel);
-              if (buf && !(buf instanceof DataView) && buf.length > 0) {
-                const val = buf[0];
-                const info = renderedLayersRef.current[key];
-                
-                // Only collect if value is NOT background (0) or NoData
-                if (val !== 0 && val !== (info as { nodata?: number }).nodata) {
-                  collected[key] = val;
-                  if (firstValue === null) firstValue = val;
-                }
-              }
-            } catch { /* skip layer */ }
-          }
-        }
-        setPixelValues(collected);
-        setPixelValue(firstValue);
+        inspectAtPixel(evt);
       }
     });
 
@@ -2184,6 +2182,7 @@ export const MapStage = React.memo(function MapStage({ startDateTime, endDateTim
         setPixelValues({});
         setPixelValue(null);
         setHoveredLuFeature(null);
+        setHoveredVectorProps(null);
         mapViewport.style.cursor = "";
       }
     });
@@ -2746,6 +2745,9 @@ export const MapStage = React.memo(function MapStage({ startDateTime, endDateTim
                 <polyline points="2 12 12 17 22 12"/>
               </svg>
               <span>Layers</span>
+              {Object.values(loadingStatus).some(s => s === "listing" || s === "rendering") && (
+                <span className="map-layer-btn-badge-dot" />
+              )}
             </button>
 
             {showPlayerDropdown && (
@@ -2838,8 +2840,35 @@ export const MapStage = React.memo(function MapStage({ startDateTime, endDateTim
                           <span>{isMobile && layer.categoryName === "Landsat Imagery" ? "Landsat" : layer.categoryName}</span>
                         </span>
 
-                        {/* Layer name */}
-                        <span className="map-player-item-name" title={layer.name}>{layer.name}</span>
+                        {/* Clock icon (before name) + Layer name */}
+                        {(() => {
+                          const status = loadingStatus[layerKey];
+                          if (status && status !== "ready") {
+                            return (
+                              <>
+                                <Clock size={13} className="map-layer-name-clock" />
+                                <span className="map-player-item-name" title={layer.name}>{layer.name}</span>
+                              </>
+                            );
+                          }
+                          return <span className="map-player-item-name" title={layer.name}>{layer.name}</span>;
+                        })()}
+
+                        {/* Per-layer loading progress bar + text */}
+                        {(() => {
+                          const status = loadingStatus[layerKey];
+                          if (!status || status === "ready") return null;
+                          return (
+                            <div className="map-layer-loading">
+                              <div className="map-layer-loading-bar">
+                                <div className={`map-layer-loading-fill is-${status}`} />
+                              </div>
+                              <span className="map-layer-loading-text">
+                                {status === "listing" ? "Đang tìm dữ liệu..." : "Đang render lên bản đồ..."}
+                              </span>
+                            </div>
+                          );
+                        })()}
 
                         {/* Opacity slider — only when added */}
                         {layer.added && (
@@ -3289,6 +3318,8 @@ export const MapStage = React.memo(function MapStage({ startDateTime, endDateTim
                     };
                     const hydroPrefix = Object.keys(HYDRO_UNITS).find(p => key.startsWith(p));
                     const unit = hydroPrefix ? HYDRO_UNITS[hydroPrefix] : (unitMatch ? unitMatch[1] : "");
+                    // Use translated label, strip trailing time/year suffix for cleaner display
+                    const cleanName = label.replace(/\s*\(\d{4}(?:-\d{2}(?:-\d{2}(?:\s+\d{2}-\d{2})?)?)?\)\s*$/, '').trim();
                     const isExpanded = inspectorExpandedKey === key;
                     const s3Key = (layerInfo && (layerInfo.type === "raster" || layerInfo.type === "vector")) ? layerInfo.proxyUrl : "";
                     const dateMatch = s3Key.match(/\/(\d{4})\/(\d{2})\/(\d{2})\//);
@@ -3329,7 +3360,7 @@ export const MapStage = React.memo(function MapStage({ startDateTime, endDateTim
                                 flex: 1,
                                 paddingRight: '8px'
                               }}>
-                                {displayName}
+                                {cleanName || displayName}
                               </span>
                               <span style={{ fontSize: '0.8rem', color: '#64748b', transition: 'transform 0.2s', transform: isExpanded ? 'rotate(180deg)' : 'none' }}>▼</span>
                             </button>
@@ -3433,7 +3464,7 @@ export const MapStage = React.memo(function MapStage({ startDateTime, endDateTim
                         ) : (
                           // Non-landuse simple layer
                           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '6px 0' }}>
-                            <span className="geo-map-inspector-layer-name" style={{ color: '#475569', fontSize: '0.8rem', fontWeight: 600 }}>{displayName}</span>
+                            <span className="geo-map-inspector-layer-name" style={{ color: '#475569', fontSize: '0.8rem', fontWeight: 600 }}>{cleanName || displayName}</span>
                             <span className="geo-map-inspector-val value-highlight" style={{ fontSize: '0.85rem', fontWeight: 700, color: '#2563eb' }}>
                               {val.toFixed(2)}{unit ? ` ${unit}` : ""}
                             </span>
@@ -3730,32 +3761,12 @@ export const MapStage = React.memo(function MapStage({ startDateTime, endDateTim
             {luStatsDistricts.length > 1 && (
               <div style={{ display:'flex', gap:'4px', marginBottom:'8px', flexWrap:'wrap' as const }}>
                 {luStatsDistricts.map((dName, idx) => (
-                  <button key={idx} type="button"
+                  <button key={idx}
                     onClick={() => {
                       setLuStatsDistrictIdx(idx);
-                      // Recompute for this district
-                      const layers = mapRef.current?.getLayers().getArray() || [];
-                      const luLayers = (layers as any[]).filter(l => l.get('_landuseLayer'));
-                      const luLayer = luLayers[idx];
-                      if (!luLayer) return;
-                      const pre = luLayer.get('_luStats') as any;
-                      const source = luLayer.getSource();
-                      if (!source || !pre) return;
-                      const counts: Record<string, number> = {};
-                      for (const f of source.getFeatures()) {
-                        const code = f.get('_code') as string;
-                        if (code) counts[code] = (counts[code] || 0) + 1;
+                      if (luStatsAllDistricts[idx]) {
+                        setLuStatsResult(buildLuStatsResult(luStatsAllDistricts[idx]));
                       }
-                      const codes = Object.keys(pre.codeAreaHa).sort((a: string, b: string) => pre.codeAreaHa[b] - pre.codeAreaHa[a]);
-                      setLuStatsResult({
-                        totalParcels: Object.values(counts).reduce((a: number, b: number) => a + b, 0),
-                        totalHa: pre.totalAreaHa,
-                        codes: codes.map((c: string) => ({
-                          code: c, name: LAND_NAMES[c] || c,
-                          color: pre.codeColor[c] || '#ccc',
-                          areaHa: pre.codeAreaHa[c] || 0,
-                        })),
-                      });
                     }}
                     style={{
                       padding:'3px 10px', border:'1px solid #ddd', borderRadius:'4px',

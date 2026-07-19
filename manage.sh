@@ -10,8 +10,12 @@ BE_LOG="$BACKEND_DIR/backend.log"
 FE_LOG="$FRONTEND_DIR/app.log"
 BE_PORT=8084
 FE_PORT=3004
+TI_PORT=8001
 ENV_FILE="$FRONTEND_DIR/.env.local"
 FE_MODE_FILE="$FRONTEND_DIR/.frontend.mode"
+TITILER_DIR="$SCRIPT_DIR/scripts"
+TITILER_LOG="$SCRIPT_DIR/titiler.log"
+TITILER_ENV="$HOME/titiler-env"
 
 GREEN='\033[0;32m'; YELLOW='\033[1;33m'; RED='\033[0;31m'; CYAN='\033[0;36m'; BOLD='\033[1m'; NC='\033[0m'
 
@@ -41,6 +45,12 @@ find_be_pid() {
   if [[ -n "$pid" ]]; then echo "$pid"; return; fi
   local file_pid=$(get_pid "$BE_PID_FILE")
   if is_pid_running "$file_pid"; then echo "$file_pid"; return; fi
+  echo ""
+}
+
+find_ti_pid() {
+  local pid=$(find_pid_by_port "$TI_PORT")
+  if [[ -n "$pid" ]]; then echo "$pid"; return; fi
   echo ""
 }
 
@@ -250,6 +260,11 @@ print_status() {
 
   display_line "Backend"  "$be_pid" "$be_port" "$be_up" "$be_mem" "---"
   display_line "Frontend" "$fe_pid" "$fe_port" "$fe_up" "$fe_mem" "$fe_mode"
+  local ti_pid=$(find_ti_pid)
+  local ti_port=$(get_port "$ti_pid" "$TI_PORT")
+  local ti_up=$(get_uptime "$ti_pid")
+  local ti_mem=$(get_mem "$ti_pid")
+  display_line "TiTiler"  "$ti_pid" "$ti_port" "$ti_up" "$ti_mem" "Tile"
   print_line_left "" "─"
   
   if [[ -n "$current_ip" ]]; then
@@ -269,8 +284,9 @@ print_menu() {
   print_menu_row "2" "FE Dev mode"             "7" "Xem log backend"
   print_menu_row "3" "FE Production mode"      "8" "Xem log frontend"
   print_menu_row "4" "Dừng backend"           "9" "Đổi IP"
-  print_menu_row "5" "Dừng frontend"         "0" "Thoát"
-  print_menu_row "0" "Thoát"               "A" "Restart tất cả"
+  print_menu_row "5" "Dừng frontend"         "10" "Start TiTiler"
+  print_menu_row "0" "Thoát"               "11" "Stop TiTiler"
+  print_menu_row "C" "Auto COG convert"      ""  ""
 }
 
 pause() {
@@ -427,7 +443,12 @@ change_ip() {
   fi
   echo ""
   echo -e "  ${YELLOW}→ Cập nhật frontend/.env.local...${NC}"
-  echo "NEXT_PUBLIC_API_URL=http://$new_ip:8084/api" > "$ENV_FILE"
+  cat > "$ENV_FILE" << EOF
+NEXT_PUBLIC_API_URL=http://$new_ip:8084/api
+NEXT_PUBLIC_TITILER_URL=http://$new_ip:8001
+NEXT_PUBLIC_USE_TITILER=false
+NEXT_PUBLIC_SITE_URL=https://mekongsaltlab.org
+EOF
   echo -e "  ${GREEN}✓ Đã cập nhật .env.local${NC}"
   echo ""
   echo -e "  ${YELLOW}→ Khởi động lại dịch vụ để áp dụng IP mới...${NC}"
@@ -455,6 +476,38 @@ view_log() {
   tail -f -n 50 "$log_file" 2>/dev/null || true
 }
 
+start_titiler() {
+  local ti_pid=$(find_ti_pid)
+  if is_pid_running "$ti_pid"; then
+    echo -e "  ${YELLOW}TiTiler đang chạy (PID: $ti_pid)${NC}"; return
+  fi
+  if [[ ! -f "$TITILER_ENV/bin/activate" ]]; then
+    echo -e "  ${RED}Chưa cài TiTiler. Chạy: python3 -m venv ~/titiler-env && pip install titiler uvicorn${NC}"
+    return
+  fi
+  echo -e "  ${YELLOW}→ Khởi động TiTiler (port $TI_PORT)...${NC}"
+  if [[ -f "$SCRIPT_DIR/.env" ]]; then
+    set -a; source "$SCRIPT_DIR/.env"; set +a
+  fi
+  source "$TITILER_ENV/bin/activate"
+  nohup uvicorn titiler.application.main:app \
+    --host 0.0.0.0 --port "$TI_PORT" --workers 2 --log-level info \
+    > "$TITILER_LOG" 2>&1 &
+  local pid=$!
+  disown "$pid" 2>/dev/null || true
+  sleep 3
+  if find_ti_pid > /dev/null; then
+    echo -e "  ${GREEN}✓ TiTiler khởi động (PID: $(find_ti_pid), port $TI_PORT)${NC}"
+  else
+    echo -e "  ${RED}✗ TiTiler khởi động thất bại. Log: $TITILER_LOG${NC}"
+  fi
+}
+
+stop_titiler() {
+  local ti_pid=$(find_ti_pid)
+  stop_pid_graceful "$ti_pid" "TiTiler"
+}
+
 trap cleanup INT TERM
 
 while true; do
@@ -472,7 +525,10 @@ while true; do
     7) view_log "$BE_LOG" "backend" ;;
     8) view_log "$FE_LOG" "frontend" ;;
     9) change_ip; pause ;;
-    A|a) stop_backend || true; stop_frontend || true; sleep 1; start_backend || true; start_frontend || true; pause ;;
+    10) start_titiler; pause ;;
+    11) stop_titiler; pause ;;
+    C|c) echo ""; bash "$SCRIPT_DIR/scripts/auto-cog-watch.sh"; pause ;;
+    A|a) stop_backend || true; stop_frontend || true; stop_titiler || true; sleep 1; start_backend || true; start_frontend || true; start_titiler || true; pause ;;
     0) cleanup ;;
     *) echo -e "  ${RED}Lựa chọn không hợp lệ${NC}"; sleep 1 ;;
   esac

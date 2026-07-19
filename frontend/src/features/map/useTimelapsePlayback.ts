@@ -11,6 +11,7 @@ import { listS3Files } from "../../lib/admin-api";
 
 const OBS_HOURS = [0, 5, 10, 15, 20];
 const FRAME_INTERVAL_MS = 500;
+const PRELOAD_CONCURRENCY = 6;
 
 type RLayer = {
   name: string;
@@ -254,61 +255,63 @@ export function useTimelapsePlayback(
 
       if (queue.length === 0) throw new Error("No data found in S3 for the selected range.");
 
-      // Preload GeoTIFF sources
-      setPbProgressText(`Preloading ${queue.length} frames…`);
+      // Preload GeoTIFF sources with concurrency limit & render incrementally
+      const allEntries = queue.flatMap(item => Object.entries(item.layers));
+      setPbProgressText(`Loading ${allEntries.length} frames…`);
       let loaded = 0;
-      const preloadPromises: Promise<void>[] = [];
-      for (const item of queue) {
-        preloadPromises.push(
-          ...Object.entries(item.layers).map(async ([layerKey, info]) => {
-            if (sourceCacheRef.current.has(layerKey)) return;
-            try {
+      let layersCreated = false;
+      for (let i = 0; i < allEntries.length; i += PRELOAD_CONCURRENCY) {
+        const batch = allEntries.slice(i, i + PRELOAD_CONCURRENCY);
+        await Promise.all(batch.map(async ([layerKey, info]) => {
+          if (sourceCacheRef.current.has(layerKey)) return;
+          try {
+            const url = info.proxyUrl.startsWith("http") ? info.proxyUrl : `${window.location.origin}${info.proxyUrl}`;
+            const source = new GeoTIFF({
+              sources: [{ url, nodata: (info as { nodata?: number }).nodata ?? -9999 }],
+              convertToRGB: false, normalize: false, interpolate: false, projection: "EPSG:32648",
+            });
+            await source.getView();
+            sourceCacheRef.current.set(layerKey, source);
+          } catch { /* skip bad frame */ }
+        }));
+        loaded = Math.min(i + PRELOAD_CONCURRENCY, allEntries.length);
+        setPbProgressText(`Loading (${loaded}/${allEntries.length})…`);
+
+        // Render immediately after first batch — don't wait for all
+        if (!layersCreated) {
+          layersCreated = true;
+          const map = mapRef.current;
+          if (!map) continue;
+          const firstFrame = queue[0];
+          if (!firstFrame) continue;
+
+          const dsStyleCache: Record<string, Record<string, unknown>> = {};
+          for (const [layerKey, info] of Object.entries(firstFrame.layers)) {
+            const dsKey = getPrefix(layerKey);
+            if (playbackLayerRefs.current[dsKey]) continue;
+            const source = sourceCacheRef.current.get(layerKey);
+            if (!source) continue;
+
+            if (!dsStyleCache[dsKey]) {
               const url = info.proxyUrl.startsWith("http") ? info.proxyUrl : `${window.location.origin}${info.proxyUrl}`;
-              const source = new GeoTIFF({
-                sources: [{ url, nodata: (info as { nodata?: number }).nodata ?? -9999 }],
-                convertToRGB: false, normalize: false, interpolate: false, projection: "EPSG:32648",
-              });
-              await source.getView();
-              sourceCacheRef.current.set(layerKey, source);
-            } catch { /* skip bad frame */ }
-          })
-        );
-        loaded++;
-        setPbProgressText(`Loading pixels (${loaded}/${queue.length})…`);
-      }
-      await Promise.all(preloadPromises);
+              dsStyleCache[dsKey] = getRasterStyle(dsKey, url, info.nodata);
+            }
 
-      // Create WebGLTileLayer instances per dataset from the first frame
-      const map = mapRef.current;
-      if (!map) throw new Error("Map not available");
-      const firstFrame = queue[0];
-      if (!firstFrame) throw new Error("Empty queue");
+            const layer = new WebGLTileLayer({
+              opacity: 0.7,
+              source,
+              style: dsStyleCache[dsKey],
+            });
+            layer.setZIndex(500 + Object.keys(playbackLayerRefs.current).length);
+            map.addLayer(layer);
+            playbackLayerRefs.current[dsKey] = layer;
+          }
 
-      const dsStyleCache: Record<string, Record<string, unknown>> = {};
-      for (const [layerKey, info] of Object.entries(firstFrame.layers)) {
-        const dsKey = getPrefix(layerKey);
-        if (playbackLayerRefs.current[dsKey]) continue; // already created
-        const source = sourceCacheRef.current.get(layerKey);
-        if (!source) continue;
-
-        if (!dsStyleCache[dsKey]) {
-          const url = info.proxyUrl.startsWith("http") ? info.proxyUrl : `${window.location.origin}${info.proxyUrl}`;
-          dsStyleCache[dsKey] = getRasterStyle(dsKey, url, info.nodata);
+          setPlaybackQueue(queue);
+          setPlaybackIndex(0);
+          setIsPlaying(true);
         }
-
-        const layer = new WebGLTileLayer({
-          opacity: 0.7,
-          source,
-          style: dsStyleCache[dsKey],
-        });
-        layer.setZIndex(500 + Object.keys(playbackLayerRefs.current).length);
-        map.addLayer(layer);
-        playbackLayerRefs.current[dsKey] = layer;
       }
-
-      setPlaybackQueue(queue);
-      setPlaybackIndex(0);
-      setIsPlaying(true);
     } catch (err: unknown) {
       setPbError(err instanceof Error ? err.message : "Failed to start playback.");
     } finally {

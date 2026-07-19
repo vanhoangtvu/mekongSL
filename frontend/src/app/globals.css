@@ -3522,6 +3522,84 @@ html[data-theme="dark"] .map-player-item-type--ecology       { color: #86efac; b
   letter-spacing: 0.5px;
 }
 
+/* Clock icon before layer name when loading */
+.map-layer-name-clock {
+  flex-shrink: 0;
+  color: #f59e0b;
+  animation: mapLayerClockSpin 1s linear infinite;
+  margin-right: 4px;
+}
+@keyframes mapLayerClockSpin {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+
+/* Per-layer loading progress */
+.map-layer-loading {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  width: 100%;
+  padding: 2px 0 0;
+}
+.map-layer-loading-bar {
+  width: 100%;
+  height: 4px;
+  background: #e2e8f0;
+  border-radius: 99px;
+  overflow: hidden;
+}
+.map-layer-loading-fill {
+  height: 100%;
+  border-radius: 99px;
+  transition: width 0.4s ease;
+}
+.map-layer-loading-fill.is-listing {
+  width: 45%;
+  background: linear-gradient(90deg, #3b82f6, #60a5fa, #3b82f6);
+  background-size: 200% 100%;
+  animation: mapLayerLoadingShimmer 1.2s ease infinite;
+}
+.map-layer-loading-fill.is-rendering {
+  width: 75%;
+  background: linear-gradient(90deg, #f59e0b, #fbbf24, #f59e0b);
+  background-size: 200% 100%;
+  animation: mapLayerLoadingShimmer 1s ease infinite;
+}
+@keyframes mapLayerLoadingShimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+.map-layer-loading-text {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 0.68rem;
+  color: #64748b;
+}
+.map-layer-loading-spinner {
+  width: 10px;
+  height: 10px;
+  border: 2px solid #e2e8f0;
+  border-top-color: #3b82f6;
+  border-radius: 50%;
+  animation: mapLayerLoadingSpin 0.6s linear infinite;
+  flex-shrink: 0;
+}
+@keyframes mapLayerLoadingSpin {
+  to { transform: rotate(360deg); }
+}
+
+/* Loading badge on Layers button */
+.map-layer-btn-badge-dot {
+  width: 7px;
+  height: 7px;
+  background: #fbbf24;
+  border-radius: 50%;
+  animation: mapLayerLoadingSpin 0.8s linear infinite;
+  flex-shrink: 0;
+}
+
 /* The "+" / "✓" tick button */
 .map-player-item-tick {
   flex-shrink: 0;

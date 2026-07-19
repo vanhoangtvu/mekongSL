@@ -4,8 +4,10 @@ import { useEffect, useRef } from "react";
 import type React from "react";
 import type OLMap from "ol/Map";
 import WebGLTileLayer from "ol/layer/WebGLTile";
+import TileLayer from "ol/layer/Tile";
 import VectorLayer from "ol/layer/Vector";
 import VectorSource from "ol/source/Vector";
+import XYZ from "ol/source/XYZ";
 import Feature from "ol/Feature";
 import GeoJSON from "ol/format/GeoJSON";
 import KML from "ol/format/KML";
@@ -19,10 +21,47 @@ import OLPolygon from "ol/geom/Polygon";
 import type { RenderedLayer } from "./useS3DatasetLayers";
 import { showNotification } from "../../lib/notification";
 import { getRasterStyle, isLandsatBand } from "../../lib/constants/raster-colors";
+import { TITILER_CONFIG, buildTitilerTileUrl } from "../../lib/constants/titiler";
+import { parseDBF } from "../../lib/dbf-parser";
+import { computePolygonAreaHa } from "../../lib/utils/geo-utils";
 
 export { parseVCT, animateLayer, removeLayerFromMap, defaultVectorStyle, FADE_MS };
 
-const VECTOR_EXTS = [".vct", ".vdc", ".geojson", ".kml", ".shp", ".gpkg", ".zip"];
+const MAX_SOURCE_CACHE = 100;
+
+// Cache parsed vector files by URL so re-adding the same layer is instant
+const vectorDataCache = new Map<string, { features: Feature[]; vctAttrName: string }>();
+
+// Web Worker for parsing large GeoJSON files off main thread
+let vectorWorker: Worker | null = null;
+let workerIdCounter = 0;
+const workerCallbacks = new Map<string, (result: Record<string, unknown>) => void>();
+
+function getVectorWorker(): Worker {
+  if (!vectorWorker) {
+    vectorWorker = new Worker(new URL("../../lib/workers/vector-parser.ts", import.meta.url));
+    vectorWorker.onmessage = (e: MessageEvent<Record<string, unknown>>) => {
+      const cb = workerCallbacks.get(e.data.id as string);
+      if (cb) { cb(e.data); workerCallbacks.delete(e.data.id as string); }
+    };
+    vectorWorker.onerror = () => {};
+  }
+  return vectorWorker;
+}
+
+// Cache landuse styles by color to avoid creating 10,993 Style objects per render
+const landuseStyleCache = new Map<string, Style>();
+
+function trimSourceCache(cache: Map<string, { source: GeoTIFF; ready: boolean }>) {
+  if (cache.size <= MAX_SOURCE_CACHE) return;
+  const keys = [...cache.keys()];
+  const toEvict = cache.size - MAX_SOURCE_CACHE;
+  for (let i = 0; i < toEvict; i++) {
+    const entry = cache.get(keys[i]);
+    if (entry?.ready) try { entry.source.dispose(); } catch {}
+    cache.delete(keys[i]);
+  }
+}
 
 const defaultVectorStyle = new Style({
   stroke: new Stroke({ color: "#2563eb", width: 2.5 }),
@@ -34,36 +73,24 @@ const defaultVectorStyle = new Style({
   }),
 });
 
-const LAND_NAMES: Record<string, string> = {
-  'BHK':'Rural Residential','CLN':'Perennial Crops','LUC':'Rice Paddy','NTS':'Aquaculture',
-  'LUA':'Upland Rice','SKC':'Construction Materials','ONT':'Urban Residential','DGD':'Education',
-  'DHT':'Mixed Use','DVH':'Cultural','TTN':'Cropland','NTD':'Housing',
-  'NKH':'Scientific Aquaculture','CQP':'Government Office','CTS':'Public Works','DRA':'Waterways',
-  'DTT':'Special Use','ODT':'Urban Land','CAN':'Fruit Trees','DDT':'Heritage Site',
-  'CSD':'Production Facility','DYT':'Healthcare','SKX':'Business','RSX':'Production Forest',
-  'RPH':'Auxiliary Border','SKK':'Canal','SON':'River','COC':'Root Crops',
-  'DTL':'Tourism','DGT':'Transportation','RSM':'Surface Water','PNK':'Other Non-Agri',
-  'BKS':'Alluvial Land','DON':'Defense','TMD':'Commercial Services','TSC':'Non-Agri Production',
-  'TIN':'Religious','SHT':'Community','DLT':'Eco-Tourism','DXH':'Social Land',
-  'CKH':'Annual Crops','LNK':'Forestry','HNK':'Mixed Agri-Forestry','PHT':'Ancillary',
-  'MTC':'Specialized Water','GPC':'Family Land','NHA':'Residential','OTH':'Other',
-  'TON':'Canal / River','DCH':'Community Center','RPN':'Boundary Marker','DSH':'Activity Land',
-  'DBV':'Cultural Monument','BCS':'Public Works','DKV':'Construction Materials','DNL':'Cropland',
-  'DSK':'Sports / Recreation',
-};
+
 
 function landuseStyleFunction(feature: any): Style {
   const geomType = feature.getGeometry()?.getType();
-  const color = feature.get('_color');
+  const color = feature.get('_color') || '#ccc';
+  const key = geomType === 'Polygon' || geomType === 'MultiPolygon' ? `poly:${color}` : 'line';
+  let s = landuseStyleCache.get(key);
+  if (s) return s;
   if (geomType === 'Polygon' || geomType === 'MultiPolygon') {
-    return new Style({
+    s = new Style({
       stroke: new Stroke({ color: '#333', width: 0.4 }),
-      fill: new Fill({ color: (color || '#ccc') + 'cc' }),
+      fill: new Fill({ color: color + 'cc' }),
     });
+  } else {
+    s = new Style({ stroke: new Stroke({ color: '#555', width: 0.7 }) });
   }
-  return new Style({
-    stroke: new Stroke({ color: '#555', width: 0.7 }),
-  });
+  landuseStyleCache.set(key, s);
+  return s;
 }
 
 function vctStyleFunction(attrName: string): (feature: any) => Style {
@@ -77,7 +104,7 @@ function vctStyleFunction(attrName: string): (feature: any) => Style {
   };
 }
 
-const FADE_MS = 700;
+const FADE_MS = 200;
 
 function animateLayer(
   layer: WebGLTileLayer | VectorLayer,
@@ -256,6 +283,46 @@ function parseVCT(buf: ArrayBuffer, vdcText: string): { features: Feature[]; att
 function getPrefix(key: string) { return key.split("__")[0]; }
 
 /**
+ * Waits until a WebGLTileLayer has actually rendered non-background data on screen.
+ * Polls multiple pixels around the viewport center using requestAnimationFrame.
+ * Falls back after timeout to avoid blocking forever.
+ */
+function waitForLayerRender(
+  map: OLMap,
+  layer: WebGLTileLayer | VectorLayer,
+  nodata = -9999,
+  timeout = 15000,
+): Promise<void> {
+  return new Promise((resolve) => {
+    const view = map.getView();
+    const center = view.getCenter();
+    if (!center) { resolve(); return; }
+
+    const centerPx = map.getPixelFromCoordinate(center);
+    let attempts = 0;
+    const pollMs = 200;
+    const maxAttempts = Math.ceil(timeout / pollMs);
+
+    const poll = () => {
+      if (attempts++ > maxAttempts) { resolve(); return; }
+      for (let dx = -20; dx <= 20; dx += 20) {
+        for (let dy = -20; dy <= 20; dy += 20) {
+          try {
+            const buf = (layer as WebGLTileLayer).getData([centerPx[0] + dx, centerPx[1] + dy]);
+            if (buf && !(buf instanceof DataView) && buf.length > 0) {
+              const val = buf[0];
+              if (val !== 0 && val !== nodata) { resolve(); return; }
+            }
+          } catch { /* pixel outside viewport or not yet rendered */ }
+        }
+      }
+      setTimeout(poll, pollMs);
+    };
+    setTimeout(poll, pollMs);
+  });
+}
+
+/**
  * Syncs a `renderedLayers` map → actual OpenLayers layers on the map.
  * Cross-fades when replacing a layer with same dataset prefix.
  * Returns layerRefs so callers can read pixel values.
@@ -267,6 +334,7 @@ export function useS3LayerRenderer(
   activeDateRef: React.MutableRefObject<string>,
   sourceCacheRef?: React.MutableRefObject<Map<string, { source: GeoTIFF; ready: boolean }>>,
   targetOpacity = 0.7,
+  onLayerReady?: (id: string) => void,
 ) {
   const layerRefs = useRef<Record<string, WebGLTileLayer | VectorLayer>>({});
   const pendingReplaceRef = useRef<Record<string, { oldId: string; done: boolean }>>({});
@@ -320,6 +388,7 @@ export function useS3LayerRenderer(
         }
 
         currentLayers[id] = layer;
+        onLayerReady?.(id);
         layer.setZIndex(100 + Object.keys(currentLayers).length);
 
         if (pending && !pending.done && currentLayers[pending.oldId]) {
@@ -351,30 +420,56 @@ export function useS3LayerRenderer(
       const pending = pendingReplace[prefix];
 
       if (info.type === "raster") {
-        const url = info.proxyUrl.startsWith("http")
-          ? info.proxyUrl
-          : `${window.location.origin}${info.proxyUrl}`;
-
         const dsPrefix = getPrefix(id);
 
-        const cachedSrc = sourceCacheRef?.current?.get(id);
-        const source = cachedSrc?.ready
-          ? cachedSrc.source
-          : new GeoTIFF({
-              sources: [{ url, nodata: info.nodata }],
-              convertToRGB: false,
-              normalize: isLandsatBand(dsPrefix),
-              interpolate: false,
-              projection: "EPSG:32648",
+        // Try TiTiler XYZ tiles first (only for COG files which are under gis-data/cog/)
+        let rasterLayer: WebGLTileLayer = null!;
+        let titilerUsed = false;
+
+        const isCogFile = info.s3Key ? info.s3Key.startsWith('gis-data/cog/') : false;
+        if (TITILER_CONFIG.enabled && isCogFile) {
+          const tileUrl = buildTitilerTileUrl(info.s3Key!, dsPrefix);
+          if (tileUrl) {
+            const xyzSource = new XYZ({
+              url: tileUrl,
+              maxZoom: TITILER_CONFIG.maxZoom,
+              tileSize: 256,
             });
+            rasterLayer = new TileLayer({
+              opacity: 0,
+              source: xyzSource,
+              maxZoom: TITILER_CONFIG.maxZoom,
+            }) as unknown as WebGLTileLayer;
+            titilerUsed = true;
+          }
+        }
 
-        const rasterStyle = getRasterStyle(dsPrefix, url, info.nodata);
+        // Fallback to GeoTIFF rendering
+        if (!titilerUsed) {
+          const gtUrl = info.proxyUrl.startsWith("http")
+            ? info.proxyUrl
+            : `${window.location.origin}${info.proxyUrl}`;
 
-        const rasterLayer = new WebGLTileLayer({
-          opacity: 0,
-          source,
-          style: rasterStyle,
-        });
+          const cachedSrc = sourceCacheRef?.current?.get(id);
+          const src = cachedSrc?.ready
+            ? cachedSrc.source
+            : new GeoTIFF({
+                sources: [{ url: gtUrl, nodata: info.nodata }],
+                convertToRGB: false,
+                normalize: isLandsatBand(dsPrefix),
+                interpolate: false,
+                projection: "EPSG:32648",
+              });
+
+          const rasterStyle = getRasterStyle(dsPrefix, gtUrl, info.nodata);
+
+          rasterLayer = new WebGLTileLayer({
+            opacity: 0,
+            source: src,
+            style: rasterStyle,
+            maxZoom: 17,
+          });
+        }
 
         rasterLayer.setZIndex(100 + Object.keys(currentLayers).length);
         if (!safeMap.getLayers().getArray().includes(rasterLayer)) {
@@ -385,57 +480,58 @@ export function useS3LayerRenderer(
         dl[id] = rasterLayer;
         prebuiltLayersRef.current[activeDate] = dl;
 
-        const onSourceReady = () => {
-          if (source.getState() !== "ready" || !isActive) return;
+        // Show layer immediately - no fade, no polling
+        const showLayer = () => {
+          if (!isActive) return;
+          rasterLayer.setOpacity(targetOpacity);
+          onLayerReady?.(id);
           
-          // Populate source cache for future reuse
-          if (sourceCacheRef && !sourceCacheRef.current.has(id)) {
-            sourceCacheRef.current.set(id, { source, ready: true });
-          }
-
-          const targetOp = targetOpacity;
-
-          if (targetOpacity > 0.7) {
-            // Playback: instant opacity, skip fade
-            rasterLayer.setOpacity(targetOp);
-            if (pending && !pending.done && currentLayers[pending.oldId]) {
-              const old = currentLayers[pending.oldId] as WebGLTileLayer | VectorLayer;
-              removeLayerFromMap(safeMap, old, currentLayers, pending.oldId);
-              for (const dlX of Object.values(prebuiltLayersRef.current)) delete dlX[pending.oldId];
-              pending.done = true;
-              delete pendingReplace[prefix];
+          // Cache source for future reuse
+          if (!titilerUsed && sourceCacheRef) {
+            const gtSrc = (rasterLayer as WebGLTileLayer).getSource() as import("ol/source/GeoTIFF").default;
+            if (gtSrc && !sourceCacheRef.current.has(id)) {
+              sourceCacheRef.current.set(id, { source: gtSrc, ready: true });
+              trimSourceCache(sourceCacheRef.current);
             }
-          } else if (pending && !pending.done && currentLayers[pending.oldId]) {
-            const old = currentLayers[pending.oldId] as WebGLTileLayer | VectorLayer;
-
-            // Strict Opacity Sync: new layer controls old layer to keep sum at targetOpacity
-            animateLayer(rasterLayer, 0, targetOp, FADE_MS, old, targetOpacity).then(() => {
-              // Cleanup only after animation finishes
-              removeLayerFromMap(safeMap, old, currentLayers, pending.oldId);
-              for (const dlX of Object.values(prebuiltLayersRef.current)) delete dlX[pending.oldId];
-              pending.done = true;
-              delete pendingReplace[prefix];
-            });
-          } else {
-            animateLayer(rasterLayer, 0, targetOp, FADE_MS);
           }
-
-          if (Object.keys(currentLayers).filter(k => !pendingReplace[getPrefix(k)]).length <= 1) {
-            source.getView().then((vo) => {
-              if (!mapRef.current || !vo.extent || !vo.projection) return;
-              const proj = typeof vo.projection === "string" ? vo.projection : vo.projection.getCode();
-              safeMap.getView().fit(transformExtent(vo.extent, proj, "EPSG:3857"), {
-                padding: [48, 48, 48, 48], duration: 300, maxZoom: 15,
-              });
-            }).catch(() => {});
+          
+          // Remove old layer if replacing
+          if (pending && !pending.done && currentLayers[pending.oldId]) {
+            const old = currentLayers[pending.oldId] as WebGLTileLayer | VectorLayer;
+            removeLayerFromMap(safeMap, old, currentLayers, pending.oldId);
+            for (const dlX of Object.values(prebuiltLayersRef.current)) delete dlX[pending.oldId];
+            pending.done = true;
+            delete pendingReplace[prefix];
+          }
+          
+          // Fit view for first layer
+          if (!titilerUsed && Object.keys(currentLayers).filter(k => !pendingReplace[getPrefix(k)]).length <= 1) {
+            const gtSrc = (rasterLayer as WebGLTileLayer).getSource() as { getView?: () => Promise<{ extent?: number[]; projection?: unknown }> };
+            if (gtSrc?.getView) {
+              gtSrc.getView().then((vo) => {
+                if (!mapRef.current || !vo.extent || !vo.projection) return;
+                const proj = typeof vo.projection === "string" ? vo.projection : (vo.projection as { getCode?: () => string }).getCode?.() || "EPSG:3857";
+                safeMap.getView().fit(transformExtent(vo.extent, proj, "EPSG:3857"), {
+                  padding: [48, 48, 48, 48], duration: 0, maxZoom: 15,
+                });
+              }).catch(() => {});
+            }
           }
         };
-        if (cachedSrc?.ready) {
-          onSourceReady();
-        } else if (source.getState() === "ready") {
-          onSourceReady();
+
+        if (titilerUsed) {
+          showLayer();
         } else {
-          source.once("change", onSourceReady);
+          const gtSource = (rasterLayer as WebGLTileLayer).getSource() as import("ol/source/GeoTIFF").default;
+          const onSourceReady = () => {
+            if (gtSource.getState() !== "ready" || !isActive) return;
+            showLayer();
+          };
+          if (gtSource.getState() === "ready") {
+            showLayer();
+          } else {
+            gtSource.once("change", onSourceReady);
+          }
         }
 
       } else if (info.type === "vector") {
@@ -447,9 +543,20 @@ export function useS3LayerRenderer(
         const vdcUrl = info.vdcUrl
           ? (info.vdcUrl.startsWith("http") ? info.vdcUrl : `${window.location.origin}${info.vdcUrl}`)
           : null;
+        const dbfUrl = info.dbfUrl
+          ? (info.dbfUrl.startsWith("http") ? info.dbfUrl : `${window.location.origin}${info.dbfUrl}`)
+          : null;
 
         void (async () => {
           try {
+            // Check cache first — avoid re-download + re-parse the same GeoJSON file
+            const cachedResult = vectorDataCache.get(url);
+            if (cachedResult) {
+              const featuresClone = cachedResult.features.map(f => f.clone());
+              await finishVectorLayer(featuresClone, cachedResult.vctAttrName, url, vdcUrl, dbfUrl, id, layerId, ext, info, pending, prefix, safeMap, currentLayers, prebuiltLayersRef, activeDate, targetOpacity, isActive, renderedLayers);
+              return;
+            }
+
             const buf = await (await fetch(url)).arrayBuffer();
             if (!isActive) return;
             const previewText = new TextDecoder("utf-8", { fatal: false }).decode(buf.slice(0, 200));
@@ -476,14 +583,34 @@ export function useS3LayerRenderer(
             if (isSHP || isPK || isSQLite) { showNotification(`Format not supported`, "error"); return; }
             else if (isXML) features = new KML({ extractStyles: true }).readFeatures(fullText, { dataProjection: "EPSG:4326", featureProjection: "EPSG:3857" });
             else if (isGeoJSON) {
-              const fmt = new GeoJSON();
+              // Parse in Web Worker — keeps main thread responsive
+              const wid = `vec_${++workerIdCounter}`;
+              getVectorWorker().postMessage({ id: wid, type: 'geojson', buf }, [buf]);
+              const geoResult = await new Promise<Record<string, unknown>>((resolve, reject) => {
+                workerCallbacks.set(wid, resolve);
+                setTimeout(() => reject(new Error('Worker timeout')), 30000);
+              });
+              if (geoResult?.error) throw new Error(String(geoResult.error));
+
+              const geoJSON = geoResult.geoJSON as { type: string; features: unknown[] };
               const coordMatch = fullText.match(/-?\d+\.?\d*\s*,\s*-?\d+\.?\d*/);
+              const opts: Record<string, string | undefined> = {};
               if (coordMatch) {
                 const [x, y] = coordMatch[0].split(',').map(Number);
-                const dataProj = Math.abs(x) > 180 || Math.abs(y) > 90 ? "EPSG:32648" : "EPSG:4326";
-                features = fmt.readFeatures(fullText, { dataProjection: dataProj, featureProjection: "EPSG:3857" });
-              } else {
-                features = fmt.readFeatures(fullText, { featureProjection: "EPSG:3857" });
+                opts.dataProjection = Math.abs(x) > 180 || Math.abs(y) > 90 ? "EPSG:32648" : "EPSG:4326";
+                opts.featureProjection = "EPSG:3857";
+              } else opts.featureProjection = "EPSG:3857";
+
+              // Chunk Feature creation — yields between batches so UI stays responsive
+              const fmt = new GeoJSON();
+              features = [];
+              const allFeatures = geoJSON.features;
+              const chunkSize = 500;
+              for (let i = 0; i < allFeatures.length; i += chunkSize) {
+                const chunk = allFeatures.slice(i, i + chunkSize);
+                const batch = fmt.readFeatures({ type: "FeatureCollection", features: chunk }, opts);
+                features.push(...batch);
+                if (i + chunkSize < allFeatures.length) await new Promise(r => setTimeout(r, 0));
               }
             } else if (isWKT) features = [new WKT().readFeature(fullText, { dataProjection: "EPSG:4326", featureProjection: "EPSG:3857" })].filter(Boolean) as Feature[];
             else if (isIDRISI) {
@@ -495,87 +622,126 @@ export function useS3LayerRenderer(
 
             if (!isActive || !features?.length) { showNotification(`Cannot parse "${info.name}"`, "error"); return; }
 
-            const isLanduse = id.startsWith('baseline-landuse-plan');
-            const useVctStyle = vctAttrName || features.some(f => f.get('_vct_attr') !== undefined);
-            const vectorStyle: any = isLanduse
-              ? landuseStyleFunction
-              : useVctStyle
-                ? vctStyleFunction(vctAttrName || '_vct_attr')
-                : defaultVectorStyle;
-            const vectorSource = new VectorSource({ features });
-            const vectorLayer = new VectorLayer({ source: vectorSource, style: vectorStyle, opacity: 0 });
-            vectorLayer.set('_datasetKey', layerId);
-            if (isLanduse) {
-              vectorLayer.set('_landuseLayer', true);
-              // Pre-compute per-code area stats for % of Total in popup
-              let totalAreaHa = 0;
-              const codeAreaHa: Record<string, number> = {};
-              const codeColor: Record<string, string> = {};
-              const feats = vectorSource.getFeatures();
-              for (let fi = 0; fi < feats.length; fi++) {
-                const f = feats[fi];
-                const g = f.getGeometry();
-                if (!g) continue;
-                const gt = g.getType();
-                if (gt !== 'Polygon' && gt !== 'MultiPolygon') continue;
-                const code = f.get('_code') as string;
-                if (!code) continue;
-                let a = 0;
-                try {
-                  const gt = g.getType();
-                  if (gt === 'Polygon' || gt === 'MultiPolygon') {
-                    const poly = g.clone().transform('EPSG:3857', 'EPSG:4326') as any;
-                    const coords = poly.getCoordinates();
-                    const polys = gt === 'MultiPolygon' ? coords : [coords];
-                    for (let p = 0; p < polys.length; p++) {
-                      const ring = polys[p][0];
-                      for (let i = 0; i < ring.length - 1; i++) {
-                        const x1 = ring[i][0] * 111320 * Math.cos(ring[i][1] * Math.PI / 180);
-                        const y1 = ring[i][1] * 110540;
-                        const x2 = ring[i + 1][0] * 111320 * Math.cos(ring[i + 1][1] * Math.PI / 180);
-                        const y2 = ring[i + 1][1] * 110540;
-                        a += x1 * y2 - x2 * y1;
-                      }
-                    }
-                    a = Math.abs(a) / 20000;
-                  }
-                } catch {}
-                totalAreaHa += a;
-                if (!codeAreaHa[code]) codeAreaHa[code] = 0;
-                codeAreaHa[code] += a;
-                if (!codeColor[code]) codeColor[code] = (f.get('_color') as string) || '#ccc';
-              }
-              vectorLayer.set('_luStats', { totalAreaHa, codeAreaHa, codeColor });
+            // Cache parsed features by URL for instant re-use
+            vectorDataCache.set(url, { features, vctAttrName });
+            // Evict old entries (max 10)
+            if (vectorDataCache.size > 10) {
+              const firstKey = vectorDataCache.keys().next().value;
+              if (firstKey !== undefined) vectorDataCache.delete(firstKey);
             }
-            vectorLayer.setZIndex(150 + Object.keys(currentLayers).length);
 
-            if (!isActive || !new Set(Object.keys(renderedLayers)).has(layerId) || currentLayers[layerId]) return;
-            if (!safeMap.getLayers().getArray().includes(vectorLayer)) {
-              safeMap.addLayer(vectorLayer);
-            }
-            currentLayers[layerId] = vectorLayer;
-            const dl2 = prebuiltLayersRef.current[activeDate] ?? {};
-            dl2[layerId] = vectorLayer;
-            prebuiltLayersRef.current[activeDate] = dl2;
-
-            const targetOp = targetOpacity;
-            if (pending && !pending.done && currentLayers[pending.oldId]) {
-              const old = currentLayers[pending.oldId] as WebGLTileLayer | VectorLayer;
-              animateLayer(vectorLayer, 0, targetOp, FADE_MS);
-              animateLayer(old, old.getOpacity(), 0, FADE_MS).then(() => {
-                removeLayerFromMap(safeMap, old, currentLayers, pending.oldId);
-                for (const dl3 of Object.values(prebuiltLayersRef.current)) delete dl3[pending.oldId];
-                pending.done = true;
-                delete pendingReplace[prefix];
-              });
-            } else {
-              animateLayer(vectorLayer, 0, targetOp, FADE_MS);
-            }
-            const extent = vectorSource.getExtent();
-            if (extent && extent[0] !== Infinity) safeMap.getView().fit(extent, { padding: [48, 48, 48, 48], maxZoom: 16, duration: 300 });
+            await finishVectorLayer(features, vctAttrName, url, vdcUrl, dbfUrl, id, layerId, ext, info, pending, prefix, safeMap, currentLayers, prebuiltLayersRef, activeDate, targetOpacity, isActive, renderedLayers);
           } catch { showNotification(`Failed to load "${info.name}"`, "error"); }
         })();
       }
+    }
+
+    async function finishVectorLayer(
+      features: Feature[],
+      vctAttrName: string,
+      url: string,
+      vdcUrl: string | null,
+      dbfUrl: string | null,
+      id: string,
+      layerId: string,
+      ext: string,
+      info: { name?: string },
+      pending: { oldId: string; done: boolean } | undefined,
+      prefix: string,
+      safeMap: OLMap,
+      currentLayers: Record<string, WebGLTileLayer | VectorLayer>,
+      prebuiltLayersRef: React.MutableRefObject<Record<string, Record<string, WebGLTileLayer | VectorLayer>>>,
+      activeDate: string,
+      targetOpacity: number,
+      isActive: boolean,
+      renderedLayers: Record<string, RenderedLayer>,
+    ) {
+      if (!isActive) return;
+
+      if (dbfUrl) {
+        try {
+          const dbfResp = await fetch(dbfUrl);
+          if (dbfResp.ok) {
+            const dbfBuf = await dbfResp.arrayBuffer();
+            const dbfResult = parseDBF(dbfBuf);
+            const attrName = vctAttrName || "_vct_attr";
+            for (const f of features) {
+              const val = f.get(attrName);
+              if (val === undefined) continue;
+              const idx = Math.round(Number(val)) - 1;
+              if (idx >= 0 && idx < dbfResult.records.length) {
+                const rec = dbfResult.records[idx];
+                for (const [k, v] of Object.entries(rec)) {
+                  f.set(k, v);
+                }
+              }
+            }
+          }
+        } catch {}
+      }
+
+      const isLanduse = id.startsWith('baseline-landuse-plan');
+      const useVctStyle = vctAttrName || features.some(f => f.get('_vct_attr') !== undefined);
+      const vectorStyle: any = isLanduse
+        ? landuseStyleFunction
+        : useVctStyle
+          ? vctStyleFunction(vctAttrName || '_vct_attr')
+          : defaultVectorStyle;
+      const vectorSource = new VectorSource({ features });
+      const vectorLayer = new VectorLayer({ source: vectorSource, style: vectorStyle, opacity: 0 });
+      vectorLayer.set('_datasetKey', layerId);
+      if (isLanduse) {
+        vectorLayer.set('_landuseLayer', true);
+        let totalAreaHa = 0;
+        const codeAreaHa: Record<string, number> = {};
+        const codeColor: Record<string, string> = {};
+        const feats = vectorSource.getFeatures();
+        for (let fi = 0; fi < feats.length; fi++) {
+          const f = feats[fi];
+          const g = f.getGeometry();
+          if (!g) continue;
+          const gt = g.getType();
+          if (gt !== 'Polygon' && gt !== 'MultiPolygon') continue;
+          const code = f.get('_code') as string;
+          if (!code) continue;
+          const a = computePolygonAreaHa(g);
+          totalAreaHa += a;
+          if (!codeAreaHa[code]) codeAreaHa[code] = 0;
+          codeAreaHa[code] += a;
+          if (!codeColor[code]) codeColor[code] = (f.get('_color') as string) || '#ccc';
+        }
+        vectorLayer.set('_luStats', { totalAreaHa, codeAreaHa, codeColor });
+      }
+      vectorLayer.setZIndex(150 + Object.keys(currentLayers).length);
+
+      if (!isActive || !new Set(Object.keys(renderedLayers)).has(layerId) || currentLayers[layerId]) return;
+      if (!safeMap.getLayers().getArray().includes(vectorLayer)) {
+        safeMap.addLayer(vectorLayer);
+      }
+      currentLayers[layerId] = vectorLayer;
+      const dl2 = prebuiltLayersRef.current[activeDate] ?? {};
+      dl2[layerId] = vectorLayer;
+      prebuiltLayersRef.current[activeDate] = dl2;
+
+      const targetOp = targetOpacity;
+      if (pending && !pending.done && currentLayers[pending.oldId]) {
+        const old = currentLayers[pending.oldId] as WebGLTileLayer | VectorLayer;
+        animateLayer(vectorLayer, 0, targetOp, FADE_MS).then(() => {
+          onLayerReady?.(layerId);
+        });
+        animateLayer(old, old.getOpacity(), 0, FADE_MS).then(() => {
+          removeLayerFromMap(safeMap, old, currentLayers, pending.oldId);
+          for (const dl3 of Object.values(prebuiltLayersRef.current)) delete dl3[pending.oldId];
+          pending.done = true;
+          delete pendingReplace[prefix];
+        });
+      } else {
+        animateLayer(vectorLayer, 0, targetOp, FADE_MS).then(() => {
+          onLayerReady?.(layerId);
+        });
+      }
+      const extent = vectorSource.getExtent();
+      if (extent && extent[0] !== Infinity) safeMap.getView().fit(extent, { padding: [48, 48, 48, 48], maxZoom: 16, duration: 300 });
     }
 
     return () => { isActive = false; };

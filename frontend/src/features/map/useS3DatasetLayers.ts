@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type React from "react";
 import type OLMap from "ol/Map";
 import WebGLTileLayer from "ol/layer/WebGLTile";
@@ -13,15 +13,18 @@ import { useS3LayerRenderer } from "./useS3LayerRenderer";
 export type RenderedLayer = {
   name: string;
   proxyUrl: string;
+  s3Key?: string;
   type: "raster";
   bbox: [number, number, number, number];
   nodata: number;
 } | {
   name: string;
   proxyUrl: string;
+  s3Key?: string;
   type: "vector";
   ext: string;
   vdcUrl?: string;
+  dbfUrl?: string;
 };
 
 function getPrefix(key: string) { return key.split("__")[0]; }
@@ -61,6 +64,16 @@ export function useS3DatasetLayers(
   const sourceCacheRef = useRef<Map<string, { source: import("ol/source/GeoTIFF").default; ready: boolean }>>(new Map());
   // Track which dataset keys are being applied for the first time (fresh apply, not re-apply)
   const firstApplyKeysRef = useRef<Set<string>>(new Set());
+  // Loading status per dataset key: "listing" → "rendering" → "ready"
+  const [loadingStatus, setLoadingStatus] = useState<Record<string, "listing" | "rendering" | "ready">>({});
+
+  const handleLayerReady = useCallback((fullKey: string) => {
+    const prefix = getPrefix(fullKey);
+    setLoadingStatus(prev => {
+      if (prev[prefix] !== "rendering") return prev;
+      return { ...prev, [prefix]: "ready" };
+    });
+  }, []);
 
   // ── Main fetch effect ──
   useEffect(() => {
@@ -86,11 +99,16 @@ export function useS3DatasetLayers(
 
     const toRemove = prevKeys.filter(key => !next.has(getPrefix(key)));
 
-    // When removing: clear cache + prebuilt layers + firstApply flag for removed datasets
+    // When removing: clear cache + prebuilt layers + firstApply flag + loading status for removed datasets
     if (toRemove.length > 0) {
       setRenderedLayers(prev2 => {
         const next2 = { ...prev2 };
         for (const k of toRemove) delete next2[k];
+        return next2;
+      });
+      setLoadingStatus(prev => {
+        const next2 = { ...prev };
+        for (const rp of toRemove.map(getPrefix)) delete next2[rp];
         return next2;
       });
       for (const rp of toRemove.map(getPrefix)) {
@@ -147,8 +165,16 @@ export function useS3DatasetLayers(
 
         if (Object.keys(exact).length > 0) {
           setRenderedLayers(exact);
-          // If we have all requested datasets represented, we can skip fetching
           const foundPrefixes = new Set(Object.keys(exact).map(k => k.split("__")[0]));
+          // Cached data needs rendering on map, so set to "rendering"
+          setLoadingStatus(prev => {
+            const next2 = { ...prev };
+            for (const p of foundPrefixes) {
+              if (next2[p] === "listing") next2[p] = "rendering";
+            }
+            return next2;
+          });
+          // If we have all requested datasets represented, we can skip fetching
           if (dsPrefixes.every(p => foundPrefixes.has(p))) return;
         }
       }
@@ -159,6 +185,14 @@ export function useS3DatasetLayers(
       : [...next].filter(key => !prev.has(key));
 
     if (toAdd.length === 0) return;
+
+    // Mark all new datasets as "listing"
+    setLoadingStatus(prev => {
+      const next2 = { ...prev };
+      for (const k of toAdd) next2[k] = "listing";
+      return next2;
+    });
+
     let isActive = true;
 
     void (async () => {
@@ -174,7 +208,11 @@ export function useS3DatasetLayers(
         const dsInfoCheck = getDatasetById(dsId);
         const parentCheck = getParentDataset(dsId);
         if (dsInfoCheck?.gisData === false || parentCheck?.gisData === false) continue;
-        if (dsId === "wq-surface" || dsId === "wq-ground" || dsId === "weather") continue;
+        if (dsId === "wq-surface" || dsId === "wq-ground" || dsId === "weather") {
+          // Skip datasets that don't need S3 loading — mark ready immediately
+          setLoadingStatus(prev => ({ ...prev, [dsKey]: "ready" }));
+          continue;
+        }
 
         const parent = getParentDataset(dsId);
         const dsInfo = getDatasetById(dsId);
@@ -193,10 +231,13 @@ export function useS3DatasetLayers(
           datasetSlug = getDatasetSlug(root.id) || root.id;
           const rootPrefix = root.id + "/";
           let relativePath = dsId.startsWith(rootPrefix) ? dsId.slice(rootPrefix.length) : dsId;
+
           if (needsHierarchicalPath && parent) {
             relativePath = buildAncestorSlugPath(dsId, root.id);
           } else if (relativePath === dsId && parent) {
-            relativePath = getDatasetSlug(dsId) || dsId;
+            const parentSlug = getDatasetSlug(parent.id);
+            const leafSlug = getDatasetSlug(dsId) || dsId.split('/').pop() || dsId;
+            relativePath = parentSlug ? `${parentSlug}/${leafSlug}` : leafSlug;
           }
           categorySlug = relativePath;
         } else if (parent) {
@@ -217,6 +258,14 @@ export function useS3DatasetLayers(
 
         // Fallback paths for backward compatibility
         const allBasePrefixes: string[] = [basePrefix];
+        
+        // For Landuse Classification, also search COG-optimized path first
+        const isLanduseClass = dsId.startsWith("landuse-classification/");
+        if (isLanduseClass) {
+          const cogPrefix = basePrefix.replace("gis-data/", "gis-data/cog/");
+          allBasePrefixes.unshift(cogPrefix);
+        }
+        
         const leafSlug2 = getDatasetSlug(dsId) || dsId.split('/').pop() || dsId;
         if (leafSlug2 && leafSlug2 !== categorySlug) {
           allBasePrefixes.push(`gis-data/${datasetSlug}/${leafSlug2}/`);
@@ -254,6 +303,7 @@ export function useS3DatasetLayers(
 
         let foundKey: string | null = null;
         let vdcKey: string | null = null;
+        let dbfKey: string | null = null;
         let rasterFound = false;
 
         for (const prefix of prefixes) {
@@ -271,6 +321,8 @@ export function useS3DatasetLayers(
                 const baseLower = foundKey.replace(/\.\w+$/, "").toLowerCase();
                 const comp = files.find(f => f.key?.toLowerCase() === baseLower + ".vdc");
                 if (comp) vdcKey = comp.key!;
+                const dbf = files.find(f => f.key?.toLowerCase().endsWith(".dbf"));
+                if (dbf) dbfKey = dbf.key!;
                 break;
               }
             } else {
@@ -295,6 +347,7 @@ export function useS3DatasetLayers(
                     additions[frameKey] = {
                       name: parent ? `${parent.name} - ${catName} (${exactMatch})` : `${catName} (${exactMatch})`,
                       proxyUrl: `/api/tif?key=${encodeURIComponent(pickedTif.key!)}`,
+                      s3Key: pickedTif.key!,
                       type: "raster",
                       bbox: [594885, 1052655, 688485, 1117455],
                       nodata: -9999,
@@ -320,6 +373,7 @@ export function useS3DatasetLayers(
                     additions[frameKey] = {
                       name: parent ? `${parent.name} - ${catName} (${bestYear})` : `${catName} (${bestYear})`,
                       proxyUrl: `/api/tif?key=${encodeURIComponent(pickedTif.key!)}`,
+                      s3Key: pickedTif.key!,
                       type: "raster",
                       bbox: [594885, 1052655, 688485, 1117455],
                       nodata: -9999,
@@ -352,19 +406,25 @@ export function useS3DatasetLayers(
                   return m ? m[1] : "00-00";
                 }))].sort();
 
-                // Load ALL slots into cache for timelapse playback
+                // Cache only nearby slots (±3 around target) instead of ALL slots
+                const targetSlot = timeSlot || "00-00";
+                const targetIdx = allSlotsForDate.indexOf(targetSlot);
+                const nearbySlots = targetIdx >= 0
+                  ? allSlotsForDate.slice(Math.max(0, targetIdx - 3), targetIdx + 4)
+                  : allSlotsForDate.slice(0, 7);
+
                 let firstSlotKey: string | null = null;
-                for (const slot of allSlotsForDate) {
+                for (const slot of nearbySlots) {
                   const pickedTif = tifsForDate.find(f => f.key?.includes(`/${slot}/`));
                   if (pickedTif) {
                     const frameKey = `${dsKey}__${bestDate.replace(/\//g, "-")}__${slot}`;
-                    // Add to layersCacheRef directly
                     if (!layersCacheRef.current[bestDate.replace(/\//g, "-")]) {
                       layersCacheRef.current[bestDate.replace(/\//g, "-")] = {};
                     }
                     layersCacheRef.current[bestDate.replace(/\//g, "-")][frameKey] = {
                       name: parent ? `${parent.name} - ${catName} (${slot})` : `${catName} (${slot})`,
                       proxyUrl: `/api/tif?key=${encodeURIComponent(pickedTif.key!)}`,
+                      s3Key: pickedTif.key!,
                       type: "raster",
                       bbox: [594885, 1052655, 688485, 1117455],
                       nodata: -9999,
@@ -373,14 +433,12 @@ export function useS3DatasetLayers(
                     if (!firstSlotKey) {
                       firstSlotKey = frameKey;
                       rasterFound = true;
-                      // Only add ONE slot to additions (the initial visible layer)
-                      // If timeSlot is specified, find the closest one instead of the first one later.
                       additions[frameKey] = layersCacheRef.current[bestDate.replace(/\//g, "-")][frameKey];
                     }
                   }
                 }
-                
-                // If a specific timeSlot was requested, make sure we show the closest one initially instead of just the first one
+
+                // If a specific timeSlot was requested, find the closest cached slot
                 if (firstSlotKey && timeSlot) {
                   const targetMinutes = parseInt(timeSlot.split("-")[0]) * 60 + parseInt(timeSlot.split("-")[1]);
                   let bestKey = firstSlotKey;
@@ -401,7 +459,6 @@ export function useS3DatasetLayers(
                     }
                   }
                   
-                  // If closest is not the first one, swap it
                   if (bestKey !== firstSlotKey) {
                     delete additions[firstSlotKey];
                     additions[bestKey] = cacheForDate[bestKey];
@@ -417,17 +474,29 @@ export function useS3DatasetLayers(
         }
 
         if (!isActive) break;
-        if (isVector && !foundKey) { showNotification(`No vector data found for "${catName}" on ${dateStr}`, "error"); continue; }
-        if (!isVector && !rasterFound) { if (timelineDate) showNotification(`No raster data found for "${catName}" on ${dateStr}`, "info"); continue; }
-        if (isVector) {
-          additions[dsKey] = {
-            name: parent ? `${parent.name} - ${catName}` : catName,
-            proxyUrl: `/api/tif?key=${encodeURIComponent(foundKey!)}`,
-            type: "vector",
-            ext: "." + (foundKey!.split(".").pop() || "").toLowerCase(),
-            vdcUrl: vdcKey ? `/api/tif?key=${encodeURIComponent(vdcKey)}` : undefined,
-          };
+        if (isVector && !foundKey) {
+          showNotification(`No vector data found for "${catName}" on ${dateStr}`, "error");
+          setLoadingStatus(prev => ({ ...prev, [dsKey]: "ready" }));
+          continue;
         }
+        if (!isVector && !rasterFound) {
+          if (timelineDate) showNotification(`No raster data found for "${catName}" on ${dateStr}`, "info");
+          setLoadingStatus(prev => ({ ...prev, [dsKey]: "ready" }));
+          continue;
+        }
+          if (isVector) {
+            additions[dsKey] = {
+              name: parent ? `${parent.name} - ${catName}` : catName,
+              proxyUrl: `/api/tif?key=${encodeURIComponent(foundKey!)}`,
+              s3Key: foundKey!,
+              type: "vector",
+              ext: "." + (foundKey!.split(".").pop() || "").toLowerCase(),
+              vdcUrl: vdcKey ? `/api/tif?key=${encodeURIComponent(vdcKey)}` : undefined,
+              dbfUrl: dbfKey ? `/api/tif?key=${encodeURIComponent(dbfKey)}` : undefined,
+            };
+          }
+          // Per-dataset: immediately mark "rendering" right after this dataset's data is found
+          setLoadingStatus(prev => ({ ...prev, [dsKey]: "rendering" }));
       }
 
       if (!isActive) return;
@@ -528,8 +597,9 @@ export function useS3DatasetLayers(
                   const ext = "." + (vFile.key!.split(".").pop() || "").toLowerCase();
                   const baseLower = vFile.key!.replace(/\.\w+$/, "").toLowerCase();
                   const vdcFile = files.find(f => f.key?.toLowerCase() === baseLower + ".vdc");
+                  const dbfFile = files.find(f => f.key?.toLowerCase().endsWith(".dbf"));
                   const cache = layersCacheRef.current[dateStr] ?? {};
-                  cache[dsKey] = { name: parent?.name || dsInfo?.name || ds.id, proxyUrl: `/api/tif?key=${encodeURIComponent(vFile.key!)}`, type: "vector", ext, vdcUrl: vdcFile ? `/api/tif?key=${encodeURIComponent(vdcFile.key!)}` : undefined };
+                  cache[dsKey] = { name: parent?.name || dsInfo?.name || ds.id, proxyUrl: `/api/tif?key=${encodeURIComponent(vFile.key!)}`, s3Key: vFile.key!, type: "vector", ext, vdcUrl: vdcFile ? `/api/tif?key=${encodeURIComponent(vdcFile.key!)}` : undefined, dbfUrl: dbfFile ? `/api/tif?key=${encodeURIComponent(dbfFile.key!)}` : undefined };
                   layersCacheRef.current[dateStr] = cache;
                   break;
                 }
@@ -544,7 +614,7 @@ export function useS3DatasetLayers(
                     const timeMatch = tif.key!.match(/\/(\d{2}-\d{2})\//);
                     const timeLabel = timeMatch ? timeMatch[1] : "00-00";
                     const key = `${dsKey}__${dateStr}__${timeLabel}`;
-                    cache[key] = { name: parent ? `${parent.name} - ${catName} (${timeLabel})` : `${catName} (${timeLabel})`, proxyUrl: `/api/tif?key=${encodeURIComponent(tif.key!)}`, type: "raster", bbox: [594885, 1052655, 688485, 1117455], nodata: -9999 };
+                    cache[key] = { name: parent ? `${parent.name} - ${catName} (${timeLabel})` : `${catName} (${timeLabel})`, proxyUrl: `/api/tif?key=${encodeURIComponent(tif.key!)}`, s3Key: tif.key!, type: "raster", bbox: [594885, 1052655, 688485, 1117455], nodata: -9999 };
                   }
                   layersCacheRef.current[dateStr] = cache;
                   break;
@@ -557,7 +627,7 @@ export function useS3DatasetLayers(
     })();
 
     return () => { cancelled = true; };
-  }, [timelineDate, prefetchDate, allTimelineDates, appliedDatasets]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [timelineDate, prefetchDate, allTimelineDates, appliedDatasets]);
 
   const layerRefs = useS3LayerRenderer(
     renderedLayersOverride || renderedLayers,
@@ -565,7 +635,8 @@ export function useS3DatasetLayers(
     prebuiltLayersRef,
     activeDateRef,
     sourceCacheRef,
-    renderedLayersOverride ? 1 : undefined
+    renderedLayersOverride ? 1 : undefined,
+    handleLayerReady,
   );
   return { 
     renderedLayers, 
@@ -573,6 +644,7 @@ export function useS3DatasetLayers(
     layersCacheRef: layersCacheRef as React.MutableRefObject<Record<string, Record<string, RenderedLayer>>>,
     prebuiltLayersRef,
     activeDateRef,
-    sourceCacheRef
+    sourceCacheRef,
+    loadingStatus,
   };
 }

@@ -70,12 +70,17 @@ public class S3Controller {
         return ResponseEntity.ok(response);
     }
     
+    private static final List<String> PUBLIC_DOWNLOAD_PREFIXES = List.of(
+        "gis-data/", "station-data/", "news-images/"
+    );
+
     /**
-     * Download file from S3 (All authenticated users)
+     * Download file from S3
+     * Public access allowed for gis-data/, station-data/, news-images/ prefixes.
+     * Authentication required for other prefixes.
      */
     @GetMapping(value = {"/download", "/download/{*key}"})
-    @PreAuthorize("hasAnyRole('ADMIN', 'DATA_MANAGER')")
-    public ResponseEntity<InputStreamResource> downloadFile(
+    public ResponseEntity<?> downloadFile(
         @PathVariable(required = false) String key,
         @RequestParam(value = "key", required = false) String queryKey
     ) {
@@ -84,6 +89,18 @@ public class S3Controller {
             return ResponseEntity.badRequest().build();
         }
         String cleanKey = keyToDownload.startsWith("/") ? keyToDownload.substring(1) : keyToDownload;
+
+        // Check authentication for non-public prefixes
+        boolean isPublic = PUBLIC_DOWNLOAD_PREFIXES.stream().anyMatch(cleanKey::startsWith);
+        if (!isPublic) {
+            org.springframework.security.core.Authentication auth = 
+                org.springframework.security.core.context.SecurityContextHolder.getContext().getAuthentication();
+            if (auth == null || !auth.isAuthenticated() || 
+                auth instanceof org.springframework.security.authentication.AnonymousAuthenticationToken) {
+                return ResponseEntity.status(403).body(Map.of("error", "Authentication required for this prefix"));
+            }
+        }
+
         InputStream inputStream = s3Service.downloadFile(cleanKey);
         String filename = cleanKey.contains("/") ? cleanKey.substring(cleanKey.lastIndexOf("/") + 1) : cleanKey;
 
