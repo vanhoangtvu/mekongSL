@@ -66,16 +66,19 @@ function daysToDate(days: number): Date {
 }
 
 function buildYearDef(yearValue: number): TimelineRowDef {
-  const major = [1994, 1998, 2002, 2006, 2010, 2014, 2018, 2022, 2026];
+  const nowYear = new Date().getFullYear();
+  const major: number[] = [];
+  for (let y = Math.ceil(1994 / 4) * 4; y <= nowYear; y += 4) major.push(y);
+  if (major[0] !== 1994) major.unshift(1994);
   const minor: number[] = [];
-  for (let y = 1994; y <= 2026; y++) if (!major.includes(y)) minor.push(y);
+  for (let y = 1994; y <= nowYear; y++) if (!major.includes(y)) minor.push(y);
   return {
     scale: "year",
     label: "Year",
     icon: <span style={{ fontSize: "0.8rem", fontWeight: 700 }}>Y</span>,
     value: yearValue,
     fullMin: 1994,
-    fullMax: 2026,
+    fullMax: nowYear,
     majorTicks: major,
     mediumTicks: [],
     minorTicks: minor,
@@ -87,30 +90,33 @@ function buildYearDef(yearValue: number): TimelineRowDef {
 }
 
 function buildDayDef(dateStr: string, yearValue: number): TimelineRowDef {
+  const now = new Date();
+  const nowYear = now.getFullYear();
+  const nowMonth = now.getMonth() + 1;
+  const nowDay = now.getDate();
   let month = 1, day = 1;
   if (dateStr && dateStr !== "--") {
     const parts = dateStr.split("-").map(Number);
     month = parts[0] || 1;
     day = parts[1] || 1;
   } else {
-    const now = new Date();
-    month = now.getMonth() + 1;
-    day = now.getDate();
+    month = nowMonth;
+    day = nowDay;
   }
   const absDay = dateToDays(yearValue, month, day);
 
-  // Pre-generate major ticks: start of every month from 1990 to 2026
+  // Pre-generate major ticks: start of every month from 1990 to now
   const major: number[] = [];
-  for (let y = 1990; y <= 2026; y++) {
-    for (let m = 1; m <= 12; m++) {
+  for (let y = 1990; y <= nowYear; y++) {
+    for (let m = 1; m <= (y === nowYear ? nowMonth : 12); m++) {
       major.push(dateToDays(y, m, 1));
     }
   }
 
   // Pre-generate medium ticks: 10th and 20th of every month
   const medium: number[] = [];
-  for (let y = 1990; y <= 2026; y++) {
-    for (let m = 1; m <= 12; m++) {
+  for (let y = 1990; y <= nowYear; y++) {
+    for (let m = 1; m <= (y === nowYear ? nowMonth : 12); m++) {
       medium.push(dateToDays(y, m, 10));
       medium.push(dateToDays(y, m, 20));
     }
@@ -122,7 +128,7 @@ function buildDayDef(dateStr: string, yearValue: number): TimelineRowDef {
     icon: <span style={{ fontSize: "0.8rem", fontWeight: 700 }}>D</span>,
     value: absDay,
     fullMin: dateToDays(1990, 1, 1),
-    fullMax: dateToDays(2026, 12, 31),
+    fullMax: dateToDays(nowYear, nowMonth, nowDay),
     majorTicks: major,
     mediumTicks: medium,
     minorTicks: [],
@@ -141,6 +147,11 @@ function buildDayDef(dateStr: string, yearValue: number): TimelineRowDef {
 }
 
 function buildHourDef(hourStr: string, dateStr: string, yearValue: number): TimelineRowDef {
+  const now = new Date();
+  const nowYear = now.getFullYear();
+  const nowMonth = now.getMonth() + 1;
+  const nowDay = now.getDate();
+  const nowHour = now.getHours();
   const hour = parseInt(hourStr || "0", 10);
   let month = 1, day = 1;
   if (dateStr && dateStr !== "--") {
@@ -148,14 +159,13 @@ function buildHourDef(hourStr: string, dateStr: string, yearValue: number): Time
     month = parts[0] || 1;
     day = parts[1] || 1;
   } else {
-    const now = new Date();
-    month = now.getMonth() + 1;
-    day = now.getDate();
+    month = nowMonth;
+    day = nowDay;
   }
   const absHour = dateToDays(yearValue, month, day) * 24 + hour;
 
   const startDay = dateToDays(1990, 1, 1);
-  const endDay = dateToDays(2026, 12, 31);
+  const endDay = dateToDays(nowYear, nowMonth, nowDay);
 
   // Major ticks: start of every day (hour % 24 === 0)
   const major: number[] = [];
@@ -177,7 +187,7 @@ function buildHourDef(hourStr: string, dateStr: string, yearValue: number): Time
     icon: <span style={{ fontSize: "0.8rem", fontWeight: 700 }}>H</span>,
     value: absHour,
     fullMin: startDay * 24,
-    fullMax: endDay * 24 + 23,
+    fullMax: endDay * 24 + nowHour,
     majorTicks: major,
     mediumTicks: medium,
     minorTicks: [],
@@ -1126,17 +1136,6 @@ function TimelineRuler({
                 </g>
               )}
             </svg>
-            {isActive && visibleTicks.major.map((v, idx, arr) => {
-              const pct = valueToScreen(v);
-              if (pct < 3 || pct > 97) return null;
-              const minGap = isMobile ? (def.scale === "year" ? 9 : 14) : 6;
-              if (idx > 0 && pct - valueToScreen(arr[idx - 1]) < minGap) return null;
-              return (
-                <div key={`tlb-${v}`} className="ttc-tick-label" style={{ left: `${pct}%` }}>
-                  {def.formatTick(v)}
-                </div>
-              );
-            })}
             {isActive && (
               <>
                 <div className="ttc-range-label ttc-range-label--left">{def.formatSelected(viewState.start)}</div>
