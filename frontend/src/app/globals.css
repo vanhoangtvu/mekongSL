@@ -4787,6 +4787,12 @@ html[data-theme="dark"] .map-playback-btn:hover {
 
 /* ── Sidebar Drawer Overlay ── */
 @media (max-width: 767px) {
+  /* Lock body scroll & khớp height với .app-container */
+  body {
+    overflow: hidden;
+    min-height: 100dvh;
+  }
+
   /* Lock scroll trên trang map (public-home hoặc có .geo-layout) */
   .app-container.public-home,
   .app-container:has(.geo-layout) {

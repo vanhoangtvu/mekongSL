@@ -169,7 +169,11 @@ Mekong/
 
 | 📄 | |
 |----|---|
-| [deployment.md](docs/deployment.md) | Hướng dẫn triển khai |
+| [DEPLOY.md](DEPLOY.md) | **Hướng dẫn triển khai chi tiết (quan trọng!)** |
+| [deployment.md](docs/deployment.md) | Hướng dẫn triển khai (cũ) |
+| [performance-improvement-plan.md](docs/performance-improvement-plan.md) | Kế hoạch cải thiện hiệu năng |
+| [landuse-planning-optimization.md](docs/landuse-planning-optimization.md) | Tối ưu vector Landuse Planning |
+| [titiler-migration-plan.md](docs/titiler-migration-plan.md) | Kế hoạch triển khai TiTiler |
 | [api-auth.md](docs/api-auth.md) | Xác thực & JWT |
 | [roles.md](docs/roles.md) | Bảng phân quyền chi tiết |
 | [s3-storage.md](docs/s3-storage.md) | S3 Storage API |
