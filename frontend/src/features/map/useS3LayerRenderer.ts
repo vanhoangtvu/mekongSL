@@ -25,6 +25,22 @@ import { TITILER_CONFIG, buildTitilerTileUrl } from "../../lib/constants/titiler
 import { parseDBF } from "../../lib/dbf-parser";
 import { computePolygonAreaHa } from "../../lib/utils/geo-utils";
 
+// Backend tile URL: bypass Next.js proxy to reduce latency
+const TILE_API_BASE = (typeof process !== 'undefined' && process.env?.NEXT_PUBLIC_API_URL)
+  ? process.env.NEXT_PUBLIC_API_URL.replace(/\/api$/, '')
+  : '';
+
+// Resolve tile URL: use backend directly if config available, else fallback to proxy
+function resolveTileUrl(path: string | undefined): string {
+  if (!path) return '';
+  if (path.startsWith('http')) return path;
+  if (TILE_API_BASE && path.startsWith('/api/tif')) {
+    return path.replace('/api/tif', `${TILE_API_BASE}/api/s3/render`);
+  }
+  const origin = typeof window !== 'undefined' ? window.location.origin : '';
+  return `${origin}${path}`;
+}
+
 export { parseVCT, animateLayer, removeLayerFromMap, defaultVectorStyle, FADE_MS };
 
 const MAX_SOURCE_CACHE = 100;
@@ -377,9 +393,15 @@ export function useS3LayerRenderer(
     const cachedLayers = prebuiltLayersRef.current[activeDate];
     if (cachedLayers) {
       for (const [id, layer] of Object.entries(cachedLayers)) {
-        if (!renderedIds.has(id) || currentLayers[id]) continue;
+        if (!renderedIds.has(id)) continue;
         const prefix = getPrefix(id);
         const pending = pendingReplace[prefix];
+
+        if (currentLayers[id]) {
+          // Layer đã có trên map → vẫn gọi onLayerReady để cập nhật loading status
+          onLayerReady?.(id);
+          continue;
+        }
 
         // Safety: check if layer is already on the map (e.g. reused from a different ID)
         const mapLayers = safeMap.getLayers().getArray();
@@ -415,7 +437,11 @@ export function useS3LayerRenderer(
 
     // Phase 3: add new layers
     for (const [id, info] of Object.entries(renderedLayers)) {
-      if (currentLayers[id]) continue;
+      if (currentLayers[id]) {
+        // Layer đã có trên map → vẫn gọi onLayerReady để thoát khỏi trạng thái "rendering"
+        onLayerReady?.(id);
+        continue;
+      }
       const prefix = getPrefix(id);
       const pending = pendingReplace[prefix];
 
@@ -446,9 +472,7 @@ export function useS3LayerRenderer(
 
         // Fallback to GeoTIFF rendering
         if (!titilerUsed) {
-          const gtUrl = info.proxyUrl.startsWith("http")
-            ? info.proxyUrl
-            : `${window.location.origin}${info.proxyUrl}`;
+          const gtUrl = resolveTileUrl(info.proxyUrl);
 
           const cachedSrc = sourceCacheRef?.current?.get(id);
           const src = cachedSrc?.ready
@@ -504,8 +528,8 @@ export function useS3LayerRenderer(
             delete pendingReplace[prefix];
           }
           
-          // Fit view for first layer
-          if (!titilerUsed && Object.keys(currentLayers).filter(k => !pendingReplace[getPrefix(k)]).length <= 1) {
+          // Fit view chỉ cho layer đầu tiên (tránh zoom sai khi thêm layer mới)
+          if (!titilerUsed && Object.keys(currentLayers).filter(k => !pendingReplace[getPrefix(k)]).length === 0) {
             const gtSrc = (rasterLayer as WebGLTileLayer).getSource() as { getView?: () => Promise<{ extent?: number[]; projection?: unknown }> };
             if (gtSrc?.getView) {
               gtSrc.getView().then((vo) => {
@@ -535,17 +559,11 @@ export function useS3LayerRenderer(
         }
 
       } else if (info.type === "vector") {
-        const url = info.proxyUrl.startsWith("http")
-          ? info.proxyUrl
-          : `${window.location.origin}${info.proxyUrl}`;
+        const url = resolveTileUrl(info.proxyUrl);
         const layerId = id;
         const ext = info.ext;
-        const vdcUrl = info.vdcUrl
-          ? (info.vdcUrl.startsWith("http") ? info.vdcUrl : `${window.location.origin}${info.vdcUrl}`)
-          : null;
-        const dbfUrl = info.dbfUrl
-          ? (info.dbfUrl.startsWith("http") ? info.dbfUrl : `${window.location.origin}${info.dbfUrl}`)
-          : null;
+        const vdcUrl = info.vdcUrl ? resolveTileUrl(info.vdcUrl) : null;
+        const dbfUrl = info.dbfUrl ? resolveTileUrl(info.dbfUrl) : null;
 
         void (async () => {
           try {
@@ -687,8 +705,23 @@ export function useS3LayerRenderer(
         : useVctStyle
           ? vctStyleFunction(vctAttrName || '_vct_attr')
           : defaultVectorStyle;
-      const vectorSource = new VectorSource({ features });
-      const vectorLayer = new VectorLayer({ source: vectorSource, style: vectorStyle, opacity: 0 });
+      const vectorSource = new VectorSource({ 
+        features: features.sort((a, b) => {
+          // Sort by area ascending: larger polygons drawn first (behind)
+          // smaller/detail features drawn last (on top)
+          const ga = a.getGeometry();
+          const gb = b.getGeometry();
+          if (!ga) return 1;
+          if (!gb) return -1;
+          return computePolygonAreaHa(ga) - computePolygonAreaHa(gb);
+        }),
+      });
+      
+      const vectorLayer = new VectorLayer({ 
+        source: vectorSource, 
+        style: vectorStyle, 
+        opacity: 0,
+      });
       vectorLayer.set('_datasetKey', layerId);
       if (isLanduse) {
         vectorLayer.set('_landuseLayer', true);

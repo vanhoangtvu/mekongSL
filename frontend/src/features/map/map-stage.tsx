@@ -959,6 +959,15 @@ export const MapStage = React.memo(function MapStage({ startDateTime, endDateTim
   const [pixelValue, setPixelValue] = useState<number | null>(null);
   const [pixelValues, setPixelValues] = useState<Record<string, number>>({});
   const [mouseCoords, setMouseCoords] = useState<[number, number] | null>(null);
+  const mouseCoordsRef = useRef<[number, number] | null>(null);
+  // Only update state when coordinates actually change (avoid infinite render loops)
+  const updateMouseCoords = useCallback((coords: [number, number] | null) => {
+    const prev = mouseCoordsRef.current;
+    if (coords === null && prev === null) return;
+    if (coords !== null && prev !== null && coords[0] === prev[0] && coords[1] === prev[1]) return;
+    mouseCoordsRef.current = coords;
+    setMouseCoords(coords);
+  }, []);
   const [inspectorExpandedKey, setInspectorExpandedKey] = useState<string | null>(null);
   const flashCoordsRef = useRef<[number, number] | null>(null);
   const [flashCoords, setFlashCoords] = useState<[number, number] | null>(null);
@@ -971,7 +980,8 @@ export const MapStage = React.memo(function MapStage({ startDateTime, endDateTim
   const [activeLuId, setActiveLuId] = useState<string | null>(null);
   const luYearly = useLanduseYearlyStats(activeLuId);
   const [isInspectorCollapsed, setIsInspectorCollapsed] = useState(false);
-
+  const isInspectorCollapsedRef = useRef(false);
+  useEffect(() => { isInspectorCollapsedRef.current = isInspectorCollapsed; }, [isInspectorCollapsed]);
   const [landuseStats, setLanduseStats] = useState<Record<string, { areaHa: number; percentage: number; classPixels?: number } | null>>({});
   const landuseStatsFetching = useRef<Set<string>>(new Set());
 
@@ -1109,6 +1119,7 @@ export const MapStage = React.memo(function MapStage({ startDateTime, endDateTim
   const isTimelinePlayingRef = useRef(false);
 
   // Playback feature state
+  const [showTimelinePopup, setShowTimelinePopup] = useState(false);
   const [showPlaybackPicker, setShowPlaybackPicker] = useState(false);
   const [pbStartDate, setPbStartDate] = useState("");
   const [pbEndDate, setPbEndDate] = useState("");
@@ -1159,22 +1170,6 @@ export const MapStage = React.memo(function MapStage({ startDateTime, endDateTim
     setScaleOverride(scale);
   }, []);
 
-  const temporalYearValue = useMemo(() => {
-    const d = timelineDate ? new Date(timelineDate + "T00:00:00") : new Date();
-    return d.getFullYear();
-  }, [timelineDate]);
-
-  const temporalDayValue = useMemo(() => {
-    if (!timelineDate) return "01-01";
-    const parts = timelineDate.split("-");
-    return `${parts[1] || "01"}-${parts[2] || "01"}`;
-  }, [timelineDate]);
-
-  const temporalHourValue = useMemo(() => {
-    if (!timeSlot) return "0";
-    return `${parseInt(timeSlot.split("-")[0] || "0", 10)}`;
-  }, [timeSlot]);
-
   const temporalApplicableScales = useMemo<TimeScale[]>(() => {
     if (!appliedDatasets?.length) return ["year", "day", "hour"];
     const scales = new Set<TimeScale>();
@@ -1182,8 +1177,33 @@ export const MapStage = React.memo(function MapStage({ startDateTime, endDateTim
     return Array.from(scales);
   }, [appliedDatasets]);
 
+  const temporalYearValue = useMemo(() => {
+    const d = timelineDate ? new Date(timelineDate + "T00:00:00") : new Date();
+    return d.getFullYear();
+  }, [timelineDate]);
+
+  const temporalDayValue = useMemo(() => {
+    if (!timelineDate) {
+      // Không có timeline → dùng ngày hiện tại (cho hour slider có vị trí hợp lý)
+      const now = new Date();
+      return `${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+    }
+    // Nếu timelineDate là placeholder "YYYY-01-01" từ year mode và active scale ko phải day
+    if (activeTemporalScale !== "day" && timelineDate.endsWith("-01-01")) {
+      return "--";
+    }
+    const parts = timelineDate.split("-");
+    return `${parts[1] || "01"}-${parts[2] || "01"}`;
+  }, [timelineDate, activeTemporalScale]);
+
+  const temporalHourValue = useMemo(() => {
+    if (!timeSlot) return "0";
+    return `${parseInt(timeSlot.split("-")[0] || "0", 10)}`;
+  }, [timeSlot]);
+
   const handleTemporalYearChange = useCallback((year: number) => {
-    const newDate = `${year}-${temporalDayValue.replace("-", "-")}`;
+    const dayPart = temporalDayValue === '--' ? '01-01' : temporalDayValue;
+    const newDate = `${year}-${dayPart.replace("-", "-")}`;
     setTimelineDate(newDate);
     setTimeSlot(`${temporalHourValue.padStart(2, "0")}-00`);
   }, [temporalDayValue, temporalHourValue]);
@@ -1941,7 +1961,7 @@ export const MapStage = React.memo(function MapStage({ startDateTime, endDateTim
               setSelectedWqStation(null);
             } else {
               // Clear pixel inspector before flash
-              setMouseCoords(null);
+              updateMouseCoords(null);
               setPixelValues({});
               // Hide overlays so map is clear
               hideOverlays();
@@ -1975,7 +1995,7 @@ export const MapStage = React.memo(function MapStage({ startDateTime, endDateTim
               setPopupDeviceId(null);
             } else {
               // Clear pixel inspector before flash
-              setMouseCoords(null);
+              updateMouseCoords(null);
               setPixelValues({});
               // Hide overlays so map is clear
               hideOverlays();
@@ -2001,7 +2021,7 @@ export const MapStage = React.memo(function MapStage({ startDateTime, endDateTim
 
       // Mobile: tap to inspect pixel values + vector features (landuse, general)
       if (isMobileRef.current && !handled) {
-        setMouseCoords(evt.coordinate as [number, number]);
+        updateMouseCoords(evt.coordinate as [number, number]);
         inspectAtPixel(evt);
       }
     });
@@ -2150,8 +2170,8 @@ export const MapStage = React.memo(function MapStage({ startDateTime, endDateTim
 
         // When inspector is collapsed, still inspect vector features (landuse + general)
         // but skip expensive raster getData queries
-        if (isInspectorCollapsed) {
-          setMouseCoords(coordinate as [number, number]);
+        if (isInspectorCollapsedRef.current) {
+          updateMouseCoords(coordinate as [number, number]);
           inspectAtPixel(evt, true);
           return;
         }
@@ -2166,11 +2186,11 @@ export const MapStage = React.memo(function MapStage({ startDateTime, endDateTim
             pointermoveThrottleRef.current = performance.now();
             inspectAtPixel(evt);
           });
-          setMouseCoords(coordinate as [number, number]);
+          updateMouseCoords(coordinate as [number, number]);
           return;
         }
         pointermoveThrottleRef.current = now;
-        setMouseCoords(coordinate as [number, number]);
+        updateMouseCoords(coordinate as [number, number]);
         inspectAtPixel(evt);
       }
     });
@@ -2178,7 +2198,7 @@ export const MapStage = React.memo(function MapStage({ startDateTime, endDateTim
     const mapViewport = map.getViewport();
     mapViewport.addEventListener("pointerleave", () => {
       if (!isMobileRef.current) {
-        setMouseCoords(null);
+        updateMouseCoords(null);
         setPixelValues({});
         setPixelValue(null);
         setHoveredLuFeature(null);
@@ -2708,7 +2728,7 @@ export const MapStage = React.memo(function MapStage({ startDateTime, endDateTim
           aria-label="OpenLayers Map" 
           onMouseLeave={() => {
             if (!isMobile) {
-              setMouseCoords(null);
+              updateMouseCoords(null);
               setPixelValue(null);
             }
           }}
@@ -2963,7 +2983,7 @@ export const MapStage = React.memo(function MapStage({ startDateTime, endDateTim
                         <div key={getLayerKey(l)} className="map-player-item" style={{ flexWrap: 'nowrap' }}>
                           <div style={{ flex: 1, minWidth: 0 }}>
                             <span className="map-player-item-name" style={{ maxWidth: 200, display: 'block' }} title={l.name}>{l.name}</span>
-                            <span style={{ fontSize: '0.62rem', color: '#94a3b8' }}>{temporalDayValue}-{temporalYearValue}</span>
+                            <span style={{ fontSize: '0.62rem', color: '#94a3b8' }}>{temporalDayValue === '--' ? temporalYearValue : `${temporalDayValue}-${temporalYearValue}`}</span>
                           </div>
                           <div className="map-player-item-actions">
                             {s3Key && (
@@ -3017,6 +3037,8 @@ export const MapStage = React.memo(function MapStage({ startDateTime, endDateTim
                 onScaleChange={handleTemporalScaleChange}
                 onTimeLapse={handleTemporalTimeLapse}
                 isMobile={isMobile}
+                minimal={isMobile}
+                onExpand={() => setShowTimelinePopup(true)}
               />
             )}
           </div>
@@ -3222,7 +3244,7 @@ export const MapStage = React.memo(function MapStage({ startDateTime, endDateTim
                 {isMobile && (
                   <button
                     type="button"
-                    onClick={(e) => { e.stopPropagation(); setPixelValues({}); setMouseCoords(null); }}
+                    onClick={(e) => { e.stopPropagation(); setPixelValues({}); updateMouseCoords(null); }}
                     style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#64748b', display: 'flex', alignItems: 'center', padding: '2px' }}
                     aria-label="Close inspector"
                   >
@@ -3244,8 +3266,8 @@ export const MapStage = React.memo(function MapStage({ startDateTime, endDateTim
                       const utm = transform(lonLat, 'EPSG:4326', 'EPSG:32648');
                       return (
                         <>
-                          <span>{Math.round(utm[0]).toLocaleString()} m E</span>
-                          <span>{Math.round(utm[1]).toLocaleString()} m N</span>
+                          <span>{Math.round(utm[0])} m E</span>
+                          <span>{Math.round(utm[1])} m N</span>
                         </>
                       );
                     })() : (
@@ -3305,9 +3327,6 @@ export const MapStage = React.memo(function MapStage({ startDateTime, endDateTim
                       } else {
                         return null;
                       }
-                    }
-                    if (isLanduseLayer(key) && displayName.includes(" - ")) {
-                      displayName = displayName.substring(displayName.indexOf(" - ") + 3);
                     }
                     const label = translateLegendLabel(displayName);
                     const unitMatch = label.match(/\(([^)]+)\)/);
@@ -3867,6 +3886,43 @@ export const MapStage = React.memo(function MapStage({ startDateTime, endDateTim
               <Play size={14} fill="currentColor" />
               Play
             </button>
+          </div>
+        </div>
+      </>
+    )}
+
+    {/* Timeline Popup overlay on mobile */}
+    {showTimelinePopup && isMobile && (
+      <>
+        <div className="ttc-popup-backdrop" onClick={() => setShowTimelinePopup(false)} />
+        <div className="ttc-popup-wrapper">
+          <div className="ttc-popup-modal">
+          <div className="ttc-popup-header">
+            <span className="ttc-popup-title">Timeline</span>
+            <button className="ttc-popup-close" onClick={() => setShowTimelinePopup(false)} type="button">×</button>
+          </div>
+          <div className="ttc-popup-body">
+            <div className="ttc-force-desktop">
+            <TemporalTimelineControl
+              activeScale={activeTemporalScale}
+              yearValue={temporalYearValue}
+              dayValue={temporalDayValue}
+              hourValue={temporalHourValue}
+              applicableScales={temporalApplicableScales}
+              onYearChange={handleTemporalYearChange}
+              onDayChange={handleTemporalDayChange}
+              onHourChange={handleTemporalHourChange}
+              onScaleChange={handleTemporalScaleChange}
+              onTimeLapse={handleTemporalTimeLapse}
+              isMobile={isMobile}
+            />
+            </div>
+          </div>
+          <div className="ttc-popup-footer">
+            <button className="ttc-popup-apply" onClick={() => setShowTimelinePopup(false)} type="button">
+              Apply
+            </button>
+            </div>
           </div>
         </div>
       </>

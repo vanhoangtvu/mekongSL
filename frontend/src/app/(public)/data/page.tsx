@@ -202,6 +202,7 @@ const CHANNEL_ITEM_MAP: Record<string, string> = {
   'pump-station': 'channel-system/pump-station',
   'main-canal': 'channel-system/canal/main-canal',
   'field-ditch': 'channel-system/canal/field-ditch',
+  'irrigation-network': 'channel-system/canal/irrigation-network',
 };
 
 function renderGisCategoryOptions(categories: GisCategoryNode[]) {
@@ -245,7 +246,7 @@ const GIS_DATASETS = {
     label: 'Administration',
     categories: [
       { key: 'province', label: 'Province' },
-      { key: 'community', label: 'Community' },
+      { key: 'community', label: 'Commune' },
       { key: 'hamlet', label: 'Hamlet' }
     ]
   },
@@ -256,7 +257,7 @@ const GIS_DATASETS = {
     ]
   },
   'hydrology': {
-    label: 'Hydrology',
+    label: 'Hydrology Environment',
     categories: [
       { key: 'salinity', label: 'Salinity' },
       { key: 'tidal', label: 'Tidal' },
@@ -288,7 +289,8 @@ const GIS_DATASETS = {
           { key: 'canal', label: 'Canal',
             children: [
               { key: 'main-canal', label: 'Main Canal' },
-              { key: 'field-ditch', label: 'Field Ditch' },
+              { key: 'field-ditch', label: 'Sub Rivers' },
+              { key: 'irrigation-network', label: 'Irrigation Network' },
             ],
           },
           { key: 'transport', label: 'Transportation' },
@@ -299,7 +301,7 @@ const GIS_DATASETS = {
           { key: 'pump-station', label: 'Pump Station' },
         ],
       },
-      { key: 'ground-water-storage', label: 'Ground Water Storage' },
+      { key: 'ground-water-storage', label: 'Ground Water' },
       { key: 'road', label: 'Road' },
       {
         key: 'landuse-classification',

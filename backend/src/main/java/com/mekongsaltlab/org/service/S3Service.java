@@ -245,20 +245,33 @@ public class S3Service {
      */
     public List<S3FileResponse> listFiles(String prefix) {
         try {
-            ListObjectsV2Request listRequest = ListObjectsV2Request.builder()
-                    .bucket(bucketName)
-                    .prefix(prefix)
-                    .build();
+            List<S3FileResponse> allFiles = new java.util.ArrayList<>();
+            String continuationToken = null;
             
-            ListObjectsV2Response listResponse = s3Client.listObjectsV2(listRequest);
+            do {
+                ListObjectsV2Request.Builder builder = ListObjectsV2Request.builder()
+                        .bucket(bucketName)
+                        .prefix(prefix)
+                        .maxKeys(1000);
+                
+                if (continuationToken != null) {
+                    builder.continuationToken(continuationToken);
+                }
+                
+                ListObjectsV2Response listResponse = s3Client.listObjectsV2(builder.build());
+                
+                listResponse.contents().stream()
+                        .map(object -> new S3FileResponse(
+                                object.key(),
+                                object.size(),
+                                object.lastModified() == null ? null : object.lastModified().toString()
+                        ))
+                        .forEach(allFiles::add);
+                
+                continuationToken = listResponse.isTruncated() ? listResponse.nextContinuationToken() : null;
+            } while (continuationToken != null);
             
-            return listResponse.contents().stream()
-                    .map(object -> new S3FileResponse(
-                            object.key(),
-                            object.size(),
-                            object.lastModified() == null ? null : object.lastModified().toString()
-                    ))
-                    .collect(Collectors.toList());
+            return allFiles;
         } catch (S3Exception e) {
             log.error("Failed to list files from S3: {}", e.getMessage());
             throw new RuntimeException("Failed to list files: " + e.getMessage());

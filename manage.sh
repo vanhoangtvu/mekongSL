@@ -286,7 +286,7 @@ print_menu() {
   print_menu_row "4" "Dừng backend"           "9" "Đổi IP"
   print_menu_row "5" "Dừng frontend"         "10" "Start TiTiler"
   print_menu_row "0" "Thoát"               "11" "Stop TiTiler"
-  print_menu_row "C" "Auto COG convert"      ""  ""
+  print_menu_row "C" "Auto convert COG"   ""  ""
 }
 
 pause() {

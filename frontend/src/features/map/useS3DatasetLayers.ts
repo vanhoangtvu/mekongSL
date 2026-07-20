@@ -70,7 +70,8 @@ export function useS3DatasetLayers(
   const handleLayerReady = useCallback((fullKey: string) => {
     const prefix = getPrefix(fullKey);
     setLoadingStatus(prev => {
-      if (prev[prefix] !== "rendering") return prev;
+      // Cho phép chuyển từ "listing" hoặc "rendering" → "ready"
+      if (prev[prefix] !== "rendering" && prev[prefix] !== "listing") return prev;
       return { ...prev, [prefix]: "ready" };
     });
   }, []);
@@ -82,12 +83,11 @@ export function useS3DatasetLayers(
     const prevKeys = Object.keys(renderedLayers);
     const prev = new Set(prevKeys.map(k => getPrefix(k)));
 
-    const [y, m, d] = timelineDate
-      ? timelineDate.split("-").map(Number)
-      : (() => { const t = new Date(); return [t.getFullYear(), t.getMonth() + 1, t.getDate()]; })();
-    const md = String(m).padStart(2, "0");
-    const dd = String(d).padStart(2, "0");
-    const dateStr = timelineDate || `${y}-${md}-${dd}`;
+    const hasTimeline = !!timelineDate;
+    const [y, m, d] = hasTimeline ? timelineDate!.split("-").map(Number) : [0, 0, 0];
+    const md = hasTimeline ? String(m).padStart(2, "0") : "";
+    const dd = hasTimeline ? String(d).padStart(2, "0") : "";
+    const dateStr = timelineDate || "latest";
 
     const dateChanged = prevDateRef.current !== undefined && prevDateRef.current !== timelineDate;
     prevDateRef.current = timelineDate;
@@ -235,9 +235,14 @@ export function useS3DatasetLayers(
           if (needsHierarchicalPath && parent) {
             relativePath = buildAncestorSlugPath(dsId, root.id);
           } else if (relativePath === dsId && parent) {
-            const parentSlug = getDatasetSlug(parent.id);
             const leafSlug = getDatasetSlug(dsId) || dsId.split('/').pop() || dsId;
-            relativePath = parentSlug ? `${parentSlug}/${leafSlug}` : leafSlug;
+            // Nếu parent chính là root, không ghép parentSlug vì datasetSlug đã chứa root slug
+            if (parent.id === root.id) {
+              relativePath = leafSlug;
+            } else {
+              const parentSlug = getDatasetSlug(parent.id);
+              relativePath = parentSlug ? `${parentSlug}/${leafSlug}` : leafSlug;
+            }
           }
           categorySlug = relativePath;
         } else if (parent) {
@@ -266,6 +271,13 @@ export function useS3DatasetLayers(
           allBasePrefixes.unshift(cogPrefix);
         }
         
+        // For Landsat, also search COG path first
+        const rootId = root?.id ?? "";
+        if (rootId === "landsat") {
+          const cogPrefix = basePrefix.replace("gis-data/", "gis-data/cog/");
+          allBasePrefixes.unshift(cogPrefix);
+        }
+        
         const leafSlug2 = getDatasetSlug(dsId) || dsId.split('/').pop() || dsId;
         if (leafSlug2 && leafSlug2 !== categorySlug) {
           allBasePrefixes.push(`gis-data/${datasetSlug}/${leafSlug2}/`);
@@ -277,7 +289,6 @@ export function useS3DatasetLayers(
         }
 
         // Check if this is Landsat or Baseline (only use year, ignore month/day)
-        const rootId = root?.id ?? "";
         const isLandsat = rootId === "landsat" || dsId.startsWith("landsat") || dsId.startsWith("band-") || dsId === "rgb";
         const isBaseline = rootId === "baseline" || dsId.startsWith("baseline") || 
                           dsId.startsWith("channel-") || dsId.startsWith("landuse-") ||
@@ -287,18 +298,14 @@ export function useS3DatasetLayers(
         const isFlooding = rootId === "flooding" || dsId.startsWith("flooding");
         const yearOnly = isLandsat || isBaseline || isFlooding;
         
-        // For yearOnly datasets: use year only. For others: use full date path (always use current date if no timelineDate)
-        const searchYear = timelineDate ? y : new Date().getFullYear();
-        const searchMd = String(m).padStart(2, "0");
-        const searchDd = String(d).padStart(2, "0");
+        const searchYear = hasTimeline ? y : null;
 
-        // Build search prefixes for all base paths (primary + fallbacks)
         const prefixes = allBasePrefixes.flatMap(bp =>
           yearOnly
-            ? [`${bp}${searchYear}/`, bp]
-            : (timelineDate
+            ? (hasTimeline ? [`${bp}${searchYear}/`, bp] : [bp])
+            : (hasTimeline
                 ? [`${bp}${y}/${md}/${dd}/`, `${bp}${y}/${md}/`, `${bp}${y}/`, bp]
-                : [`${bp}${searchYear}/${searchMd}/${searchDd}/`, `${bp}${searchYear}/${searchMd}/`, `${bp}${searchYear}/`, bp])
+                : [bp])
         );
 
         let foundKey: string | null = null;
@@ -331,73 +338,68 @@ export function useS3DatasetLayers(
               
               // For Landsat/Baseline: extract year only. For others: extract full date
               const yearOf = (key: string) => { const m = key.match(/\/(\d{4})\//); return m ? m[1] : ""; };
-              const dateOf = (key: string) => { const m = key.match(/\/(\d{4})\/(\d{2})\/(\d{2})\//); return m ? `${m[1]}/${m[2]}/${m[3]}` : ""; };
+              const dateOf = (key: string) => { const m = key.match(/\/(\d{4})\/(\d{1,2})\/(\d{1,2})\//); return m ? `${m[1]}/${String(m[2]).padStart(2,'0')}/${String(m[3]).padStart(2,'0')}` : ""; };
               
               if (yearOnly) {
-                // Landsat/Baseline: filter by year only
-                const targetYear = String(searchYear);
                 const uniqueYears = [...new Set(allTifs.map(f => yearOf(f.key ?? "")))].filter(Boolean).sort();
-                const exactMatch = uniqueYears.find(y => y === targetYear);
-                
-                if (exactMatch) {
-                  const tifsForYear = allTifs.filter(f => yearOf(f.key ?? "") === exactMatch);
-                  const pickedTif = tifsForYear[0];
-                  if (pickedTif) {
-                    const frameKey = `${dsKey}__${exactMatch}__00-00`;
-                    additions[frameKey] = {
-                      name: parent ? `${parent.name} - ${catName} (${exactMatch})` : `${catName} (${exactMatch})`,
-                      proxyUrl: `/api/tif?key=${encodeURIComponent(pickedTif.key!)}`,
-                      s3Key: pickedTif.key!,
-                      type: "raster",
-                      bbox: [594885, 1052655, 688485, 1117455],
-                      nodata: -9999,
-                    };
-                    rasterFound = true;
-                    firstApplyKeysRef.current.delete(dsKey);
-                    break;
-                  }
+                if (!uniqueYears.length) {
+                  if (isActive) showNotification(`No data for "${catName}"`, "info");
+                  break;
                 }
-                
-                // First load: fall back to nearest year ≤ target
-                if (firstApplyKeysRef.current.has(dsKey)) {
-                  const lte = timelineDate ? uniqueYears.filter(y2 => y2 <= targetYear) : uniqueYears;
-                  if (!lte.length) {
+
+                let bestYear: string;
+
+                if (!hasTimeline) {
+                  bestYear = uniqueYears[uniqueYears.length - 1];
+                } else {
+                  const targetYear = String(searchYear);
+                  const exactMatch = uniqueYears.find(y => y === targetYear);
+
+                  if (exactMatch) {
+                    bestYear = exactMatch;
+                  } else if (firstApplyKeysRef.current.has(dsKey)) {
+                    const lte = uniqueYears.filter(y2 => y2 <= targetYear);
+                    if (!lte.length) {
+                      if (isActive) showNotification(`No data for "${catName}" in year ${searchYear}`, "info");
+                      break;
+                    }
+                    bestYear = lte[lte.length - 1];
+                  } else {
                     if (isActive) showNotification(`No data for "${catName}" in year ${searchYear}`, "info");
                     break;
                   }
-                  const bestYear = lte[lte.length - 1];
-                  const tifsForYear = allTifs.filter(f => yearOf(f.key ?? "") === bestYear);
-                  const pickedTif = tifsForYear[0];
-                  if (pickedTif) {
-                    const frameKey = `${dsKey}__${bestYear}__00-00`;
-                    additions[frameKey] = {
-                      name: parent ? `${parent.name} - ${catName} (${bestYear})` : `${catName} (${bestYear})`,
-                      proxyUrl: `/api/tif?key=${encodeURIComponent(pickedTif.key!)}`,
-                      s3Key: pickedTif.key!,
-                      type: "raster",
-                      bbox: [594885, 1052655, 688485, 1117455],
-                      nodata: -9999,
-                    };
-                    rasterFound = true;
-                    firstApplyKeysRef.current.delete(dsKey);
-                    break;
-                  }
                 }
-                
-                // User dragged to a year with no data
-                if (isActive) showNotification(`No data for "${catName}" in year ${searchYear}`, "info");
-                break;
+
+                const tifsForYear = allTifs.filter(f => yearOf(f.key ?? "") === bestYear);
+                const pickedTif = tifsForYear[0];
+                if (pickedTif) {
+                  const frameKey = `${dsKey}__${bestYear}__00-00`;
+                  additions[frameKey] = {
+                    name: parent ? `${parent.name} - ${catName} (${bestYear})` : `${catName} (${bestYear})`,
+                    proxyUrl: `/api/tif?key=${encodeURIComponent(pickedTif.key!)}`,
+                    s3Key: pickedTif.key!,
+                    type: "raster",
+                    bbox: [594885, 1052655, 688485, 1117455],
+                    nodata: -9999,
+                  };
+                  rasterFound = true;
+                  firstApplyKeysRef.current.delete(dsKey);
+                  break;
+                }
               } else {
                 // Non-Landsat: filter by full date
                 const targetDateStr = `${y}/${md}/${dd}`;
                 const uniqueDates = [...new Set(allTifs.map(f => dateOf(f.key ?? "")))].filter(Boolean).sort();
 
                 const lte = timelineDate ? uniqueDates.filter(d2 => d2 <= targetDateStr) : uniqueDates;
+                let bestDate: string;
                 if (!lte.length) {
-                  if (isActive && timelineDate) showNotification(`No raster data for "${catName}" before ${dateStr}`, "info");
-                  break;
+                  if (!timelineDate) break;
+                  // Timeline set nhưng ko có data trước ngày đó → lấy data gần nhất có thể
+                  bestDate = uniqueDates[uniqueDates.length - 1];
+                } else {
+                  bestDate = lte[lte.length - 1];
                 }
-                const bestDate = lte[lte.length - 1];
                 const tifsForDate = allTifs.filter(f => dateOf(f.key ?? "") === bestDate);
 
                 // Get all available slots for this date
@@ -434,6 +436,12 @@ export function useS3DatasetLayers(
                       firstSlotKey = frameKey;
                       rasterFound = true;
                       additions[frameKey] = layersCacheRef.current[bestDate.replace(/\//g, "-")][frameKey];
+                      // Chỉ cập nhật timeline nếu ngày thực tế khác với timelineDate hiện tại
+                      // (tránh cascade reset loading status khi re-fetch)
+                      const actualDate = bestDate.replace(/\//g, "-");
+                      if (actualDate !== timelineDate) {
+                        onActualSlot?.(actualDate, slot);
+                      }
                     }
                   }
                 }
@@ -589,7 +597,7 @@ export function useS3DatasetLayers(
               const files = [...allFiles].sort((a, b) => (b.key ?? "").localeCompare(a.key ?? ""));
 
 
-              const dateOf = (key: string) => { const m2 = key.match(/\/(\d{4})\/(\d{2})\/(\d{2})\//); return m2 ? `${m2[1]}/${m2[2]}/${m2[3]}` : ""; };
+              const dateOf = (key: string) => { const m2 = key.match(/\/(\d{4})\/(\d{1,2})\/(\d{1,2})\//); return m2 ? `${m2[1]}/${String(m2[2]).padStart(2,'0')}/${String(m2[3]).padStart(2,'0')}` : ""; };
 
               if (ds.type === "vector") {
                 const vFile = files.find(f => (f.key?.toLowerCase() ?? "").endsWith(".vct"));

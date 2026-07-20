@@ -1,8 +1,7 @@
 #!/bin/bash
 # Auto-optimize GIS data on S3
 # - Raster: GeoTIFF → COG (tiled, compressed, overviews)
-# - Vector: GeoJSON → FlatGeobuf (binary, fast parse)
-# Original files are PRESERVED. Optimized versions stored in gis-data/cog/ and gis-data/fgb/
+# Original files are PRESERVED. Optimized versions stored in gis-data/cog/
 #
 # Usage: ./scripts/auto-cog-watch.sh                         # scan + convert once
 # Usage: ./scripts/auto-cog-watch.sh --watch                  # run continuously
@@ -52,8 +51,18 @@ convert_file() {
   local cog_key="${orig_key/gis-data\//gis-data\/cog\/}"
   cog_key="${cog_key%.tif}_cog.tif"
   
-  # Kiểm tra COG đã tồn tại chưa
-  if curl -s "$BACKEND/api/s3/exists?key=$cog_key" 2>/dev/null | grep -q '"exists":true'; then
+  # Check if COG already exists (use token for auth)
+  local check_url="$BACKEND/api/s3/list?prefix=${cog_key%/*}/"
+  local exists=$(curl -s -H "Authorization: Bearer $TOKEN" "$check_url" 2>/dev/null | python3 -c "
+import sys, json
+d = json.load(sys.stdin)
+for f in d.get('files', []):
+    if f['key'] == '$cog_key':
+        print('yes')
+        break
+" 2>/dev/null)
+  
+  if [ "$exists" = "yes" ] && ! $FORCE; then
     echo "  ⏭ $fname → COG already exists"
     return 0
   fi
@@ -110,9 +119,11 @@ convert_file() {
 }
 
 scan_and_convert() {
-  echo "🔍 Scanning S3 for non-COG .tif files (landuse-classification)..."
+  echo "🔍 Scanning S3 for files to optimize..."
+  echo ""
   
-  # List original .tif files (exclude _cog.tif)
+  # ── Phase 1: Raster (GeoTIFF → COG) ──
+  echo "📡 Raster: checking landuse-classification TIF files..."
   curl -s "$BACKEND/api/s3/list?prefix=gis-data/baseline-environment/landuse-classification/" 2>/dev/null | \
     python3 -c "
 import sys, json
@@ -126,6 +137,22 @@ for f in files:
     convert_file "$key"
   done
   
+  echo ""
+  echo "📡 Raster: checking landsat-imagery TIF files..."
+  curl -s "$BACKEND/api/s3/list?prefix=gis-data/landsat-imagery/" 2>/dev/null | \
+    python3 -c "
+import sys, json
+d = json.load(sys.stdin)
+files = d.get('files', [])
+for f in files:
+    key = f['key']
+    if key.endswith('.tif') and not key.endswith('_cog.tif') and 'cog' not in key.split('/')[-1]:
+        print(key)
+" 2>/dev/null | while read key; do
+    convert_file "$key"
+  done
+  
+  echo ""
   echo "✅ Scan complete"
 }
 

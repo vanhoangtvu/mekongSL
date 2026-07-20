@@ -38,7 +38,7 @@ export const DATASETS: DatasetItem[] = [
     group: "gis",
     children: [
       { id: "admin-province", name: "Province", slug: "province", source: "GIS website Vinh Long", scale: "Province scale", timeScale: "year" },
-      { id: "admin-community", name: "Community", slug: "community", scale: "Province scale", timeScale: "year" },
+      { id: "admin-community", name: "Commune", slug: "community", scale: "Province scale", timeScale: "year" },
       { id: "admin-hamlet", name: "Hamlet", slug: "hamlet", scale: "Province scale", timeScale: "year" },
     ],
   },
@@ -77,7 +77,8 @@ export const DATASETS: DatasetItem[] = [
             id: "channel-system/canal", name: "Canal", slug: "canal",
             children: [
               { id: "channel-system/canal/main", name: "Main Canal", slug: "main-canal", type: "vector", timeScale: "year" },
-              { id: "channel-system/canal/field-ditch", name: "Field Ditch", slug: "field-ditch", type: "vector", timeScale: "year" },
+              { id: "channel-system/canal/field-ditch", name: "Sub Rivers", slug: "field-ditch", type: "vector", timeScale: "year" },
+              { id: "channel-system/canal/irrigation-network", name: "Irrigation Network", slug: "irrigation-network", type: "vector", timeScale: "year" },
             ],
           },
           { id: "channel-system/transport", name: "Transportation", slug: "transport", type: "vector", timeScale: "year" },
@@ -88,7 +89,7 @@ export const DATASETS: DatasetItem[] = [
           { id: "channel-system/pump-station", name: "Pump Station", slug: "pump-station", type: "vector", timeScale: "year" },
         ],
       },
-      { id: "baseline-groundwater", name: "Ground Water Storage", slug: "ground-water-storage", scale: "Province", timeScale: "year" },
+      { id: "baseline-groundwater", name: "Ground Water", slug: "ground-water-storage", scale: "Province", timeScale: "year" },
       { id: "baseline-road", name: "Road", slug: "road", scale: "Province", timeScale: "year" },
       {
         id: "baseline-landuse-class",
@@ -129,7 +130,7 @@ export const DATASETS: DatasetItem[] = [
   },
   {
     id: "hydrology",
-    name: "Hydrology",
+    name: "Hydrology Environment",
     slug: "hydrology",
     group: "gis",
     children: [

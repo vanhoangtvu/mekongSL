@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useCallback, useRef, useState, useEffect, useMemo } from "react";
+import React, { useCallback, useRef, useState, useMemo, useEffect } from "react";
 import {
   ChevronDown,
   ChevronUp,
@@ -87,9 +87,16 @@ function buildYearDef(yearValue: number): TimelineRowDef {
 }
 
 function buildDayDef(dateStr: string, yearValue: number): TimelineRowDef {
-  const parts = dateStr ? dateStr.split("-").map(Number) : [1, 1];
-  const month = parts[0] || 1;
-  const day = parts[1] || 1;
+  let month = 1, day = 1;
+  if (dateStr && dateStr !== "--") {
+    const parts = dateStr.split("-").map(Number);
+    month = parts[0] || 1;
+    day = parts[1] || 1;
+  } else {
+    const now = new Date();
+    month = now.getMonth() + 1;
+    day = now.getDate();
+  }
   const absDay = dateToDays(yearValue, month, day);
 
   // Pre-generate major ticks: start of every month from 1990 to 2026
@@ -135,9 +142,16 @@ function buildDayDef(dateStr: string, yearValue: number): TimelineRowDef {
 
 function buildHourDef(hourStr: string, dateStr: string, yearValue: number): TimelineRowDef {
   const hour = parseInt(hourStr || "0", 10);
-  const parts = dateStr ? dateStr.split("-").map(Number) : [1, 1];
-  const month = parts[0] || 1;
-  const day = parts[1] || 1;
+  let month = 1, day = 1;
+  if (dateStr && dateStr !== "--") {
+    const parts = dateStr.split("-").map(Number);
+    month = parts[0] || 1;
+    day = parts[1] || 1;
+  } else {
+    const now = new Date();
+    month = now.getMonth() + 1;
+    day = now.getDate();
+  }
   const absHour = dateToDays(yearValue, month, day) * 24 + hour;
 
   const startDay = dateToDays(1990, 1, 1);
@@ -194,6 +208,8 @@ interface TemporalTimelineControlProps {
   onScaleChange: (scale: TimeScale) => void;
   onTimeLapse: () => void;
   isMobile?: boolean;
+  minimal?: boolean;
+  onExpand?: () => void;
 }
 
 export function TemporalTimelineControl({
@@ -208,6 +224,8 @@ export function TemporalTimelineControl({
   onScaleChange,
   onTimeLapse,
   isMobile,
+  minimal,
+  onExpand,
 }: TemporalTimelineControlProps) {
   const [collapsed, setCollapsed] = useState(true);
   const yearDef = buildYearDef(yearValue);
@@ -217,49 +235,217 @@ export function TemporalTimelineControl({
   const defs: TimelineRowDef[] = [yearDef, dayDef, hourDef];
   const scaleIndex = defs.findIndex((r) => r.scale === activeScale);
 
+  const dateLabel = dayValue !== "--"
+    ? `${dayValue}-${yearValue}`
+    : String(yearValue);
+
   return (
-    <div className="ttc-card">
-      <div className={`ttc-rows ${collapsed ? "ttc-rows--collapsed" : ""}`}>
-        {defs.map((def, idx) => {
-          const isActive = idx === scaleIndex;
-          const isApplicable = applicableScales.includes(def.scale);
-          if (collapsed && !isActive) return null;
-          return (
-            <TimelineRuler
-              key={def.scale}
-              def={def}
-              isActive={isActive}
-              isApplicable={isApplicable}
-              onActivate={() => onScaleChange(def.scale)}
-              onChange={(v) => {
-                if (def.scale === "year") onYearChange(v);
-                else if (def.scale === "day") {
-                  const d = daysToDate(v);
-                  if (d.getFullYear() !== yearValue) {
-                    onYearChange(d.getFullYear());
-                  }
-                  onDayChange(d.getMonth() + 1, d.getDate());
-                } else if (def.scale === "hour") {
-                  const d = daysToDate(Math.floor(v / 24));
-                  const h = ((v % 24) + 24) % 24;
-                  if (d.getFullYear() !== yearValue) {
-                    onYearChange(d.getFullYear());
-                  }
-                  const curDayStr = `${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-                  if (curDayStr !== dayValue) {
-                    onDayChange(d.getMonth() + 1, d.getDate());
-                  }
-                  onHourChange(h);
-                }
-              }}
-              isMobile={isMobile}
-              onTimeLapse={onTimeLapse}
-              collapsed={collapsed}
-              onToggleCollapse={() => setCollapsed(!collapsed)}
-            />
-          );
-        })}
+    <>
+      <div className="ttc-mobile-only">
+        <MinimalTimelineBar
+          activeScale={activeScale}
+          yearValue={yearValue}
+          dayValue={dayValue}
+          hourValue={hourValue}
+          onYearChange={onYearChange}
+          onDayChange={onDayChange}
+          onHourChange={onHourChange}
+          onExpand={onExpand!}
+        />
       </div>
+      <div className="ttc-desktop-only">
+        <div className="ttc-card">
+          <div className={`ttc-rows ${collapsed ? "ttc-rows--collapsed" : ""}`}>
+            {defs.map((def, idx) => {
+              const isActive = idx === scaleIndex;
+              const isApplicable = applicableScales.includes(def.scale);
+              if (!isApplicable) return null;
+              if (collapsed && !isActive) return null;
+              return (
+                <TimelineRuler
+                  key={def.scale}
+                  def={def}
+                  isActive={isActive}
+                  isApplicable={isApplicable}
+                  onActivate={() => onScaleChange(def.scale)}
+                  onChange={(v) => {
+                    if (def.scale === "year") onYearChange(v);
+                    else if (def.scale === "day") {
+                      const d = daysToDate(v);
+                      if (d.getFullYear() !== yearValue) {
+                        onYearChange(d.getFullYear());
+                      }
+                      onDayChange(d.getMonth() + 1, d.getDate());
+                    } else if (def.scale === "hour") {
+                      const d = daysToDate(Math.floor(v / 24));
+                      const h = ((v % 24) + 24) % 24;
+                      if (d.getFullYear() !== yearValue) {
+                        onYearChange(d.getFullYear());
+                      }
+                      const curDayStr = `${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+                      if (curDayStr !== dayValue) {
+                        onDayChange(d.getMonth() + 1, d.getDate());
+                      }
+                      onHourChange(h);
+                    }
+                  }}
+                  isMobile={isMobile}
+                  onTimeLapse={onTimeLapse}
+                  collapsed={collapsed}
+                  onToggleCollapse={() => setCollapsed(!collapsed)}
+                />
+              );
+            })}
+          </div>
+        </div>
+      </div>
+    </>
+  );
+}
+
+// ── Minimal draggable timeline bar (mobile) ──
+function MinimalTimelineBar({
+  activeScale,
+  yearValue,
+  dayValue,
+  hourValue,
+  onYearChange,
+  onDayChange,
+  onHourChange,
+  onExpand,
+}: {
+  activeScale: TimeScale;
+  yearValue: number;
+  dayValue: string;
+  hourValue: string;
+  onYearChange: (year: number) => void;
+  onDayChange: (month: number, day: number) => void;
+  onHourChange: (hour: number) => void;
+  onExpand: () => void;
+}) {
+  const trackRef = useRef<HTMLDivElement>(null);
+  const wasDragged = useRef(false);
+  const startX = useRef(0);
+  const previewRef = useRef<string | null>(null);
+  const [, forceRender] = useState(0);
+
+  const { min, max, current } = useMemo(() => {
+    if (activeScale === "year") {
+      return { min: 1994, max: 2026, current: yearValue };
+    }
+    if (activeScale === "day") {
+      const parts = dayValue.split("-").map(Number);
+      const m = parts[0] || 1;
+      const d = parts[1] || 1;
+      const date = new Date(yearValue, m - 1, d);
+      const start = new Date(yearValue, 0, 0);
+      const doy = Math.round((date.getTime() - start.getTime()) / 86400000);
+      const isLeap = (yearValue % 4 === 0 && yearValue % 100 !== 0) || (yearValue % 400 === 0);
+      return { min: 1, max: isLeap ? 366 : 365, current: doy };
+    }
+    const h = parseInt(hourValue || "0", 10);
+    return { min: 0, max: 23, current: h };
+  }, [activeScale, yearValue, dayValue, hourValue]);
+
+  const pct = max === min ? 0 : Math.round(((current - min) / (max - min)) * 100);
+
+  const dateLabel = dayValue !== "--"
+    ? `${dayValue}-${yearValue}`
+    : String(yearValue);
+
+  const displayLabel = (previewRef.current && previewRef.current !== dateLabel)
+    ? previewRef.current
+    : dateLabel;
+
+  const valueFromX = useCallback((clientX: number) => {
+    const el = trackRef.current;
+    if (!el) return null;
+    const rect = el.getBoundingClientRect();
+    const x = Math.max(0, Math.min(clientX - rect.left, rect.width));
+    const ratio = x / rect.width;
+    let newVal = Math.round(min + ratio * (max - min));
+    return Math.max(min, Math.min(max, newVal));
+  }, [min, max]);
+
+  const setValueFromX = useCallback((clientX: number) => {
+    const newVal = valueFromX(clientX);
+    if (newVal === null || newVal === current) return;
+
+    if (activeScale === "year") {
+      onYearChange(newVal);
+    } else if (activeScale === "day") {
+      const date = new Date(yearValue, 0, newVal);
+      onDayChange(date.getMonth() + 1, date.getDate());
+    } else {
+      onHourChange(newVal);
+    }
+  }, [valueFromX, activeScale, current, yearValue, onYearChange, onDayChange, onHourChange]);
+
+  const makePreviewLabel = useCallback((newVal: number) => {
+    if (activeScale === "year") return String(newVal);
+    if (activeScale === "day") {
+      const date = new Date(yearValue, 0, newVal);
+      const d = String(date.getDate()).padStart(2, "0");
+      const m = String(date.getMonth() + 1).padStart(2, "0");
+      return `${d}/${m}/${date.getFullYear()}`;
+    }
+    return `${String(newVal).padStart(2, "0")}:00`;
+  }, [activeScale, yearValue]);
+
+  const onPointerDown = useCallback((e: React.PointerEvent) => {
+    wasDragged.current = false;
+    startX.current = e.clientX;
+    previewRef.current = null;
+    const el = trackRef.current;
+    if (el) el.setPointerCapture(e.pointerId);
+  }, []);
+
+  const onPointerMove = useCallback((e: React.PointerEvent) => {
+    if (Math.abs(e.clientX - startX.current) < 4) return;
+    wasDragged.current = true;
+
+    const newVal = valueFromX(e.clientX);
+    if (newVal !== null) {
+      previewRef.current = makePreviewLabel(newVal);
+      forceRender(n => n + 1);
+    }
+
+    setValueFromX(e.clientX);
+  }, [valueFromX, makePreviewLabel, setValueFromX]);
+
+  const onPointerUp = useCallback(() => {
+    previewRef.current = null;
+    forceRender(n => n + 1);
+  }, []);
+
+  const onPointerCancel = useCallback(() => {
+    previewRef.current = null;
+    forceRender(n => n + 1);
+  }, []);
+
+  const onClick = useCallback(() => {
+    if (wasDragged.current) return;
+    onExpand();
+  }, [onExpand]);
+
+  return (
+    <div className="ttc-minimal">
+      <div
+        className="ttc-minimal-track"
+        ref={trackRef}
+        onPointerDown={onPointerDown}
+        onPointerMove={onPointerMove}
+        onPointerUp={onPointerUp}
+        onPointerCancel={onPointerCancel}
+        onClick={onClick}
+        style={{ touchAction: "none" }}
+      >
+        <div className="ttc-minimal-rail" />
+        <div className="ttc-minimal-fill" style={{ width: `${pct}%` }} />
+        <div className="ttc-minimal-dot" style={{ left: `${pct}%` }} />
+        <div className="ttc-minimal-toucharea" />
+      </div>
+      <span className="ttc-minimal-date">{displayLabel}</span>
     </div>
   );
 }
@@ -943,7 +1129,8 @@ function TimelineRuler({
             {isActive && visibleTicks.major.map((v, idx, arr) => {
               const pct = valueToScreen(v);
               if (pct < 3 || pct > 97) return null;
-              if (idx > 0 && pct - valueToScreen(arr[idx - 1]) < 6) return null;
+              const minGap = isMobile ? (def.scale === "year" ? 9 : 14) : 6;
+              if (idx > 0 && pct - valueToScreen(arr[idx - 1]) < minGap) return null;
               return (
                 <div key={`tlb-${v}`} className="ttc-tick-label" style={{ left: `${pct}%` }}>
                   {def.formatTick(v)}
