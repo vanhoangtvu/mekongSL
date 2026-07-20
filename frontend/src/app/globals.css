@@ -5129,6 +5129,21 @@ html[data-theme="dark"] .map-playback-btn:hover {
     color: var(--accent);
   }
 
+  /* ── Mobile: hide less important controls for better proportion ── */
+  .map-player-item {
+    gap: 0.3rem;
+    padding: 0.4rem 0.4rem;
+  }
+  .map-player-item-type span {
+    display: none;
+  }
+  .map-player-opacity-slider {
+    display: none;
+  }
+  .map-player-item-type-badge {
+    display: none;
+  }
+
   /* ── Water Quality Popup: Floating Card ── */
   .map-station-popup {
     position: absolute !important;
