@@ -1,0 +1,25 @@
+file format : IDRISI Vector A.1
+file title  : 
+id type     : integer
+file type   : binary
+object type : line
+ref. system : utm-48n
+ref. units  : m
+unit dist.  : 1
+min. X      : 594885
+max. X      : 688995
+min. Y      : 1052295
+max. Y      : 1117455
+pos'n error : unknown
+resolution  : unknown
+min. value  : 0
+max. value  : 127
+display min : 0
+display max : 127
+value units : unspecified
+value error : unknown
+flag value  : none
+flag def'n  : none
+legend cats : 0
+lineage     : This file was created by the POLYVEC module with the command line: 
+lineage     : G:\linnqa\District_travinh.rst*3*G:\linnqa\District_travinh_poly.vct*G:\linnqa\District_travinh_line.vct*G:\linnqa\District_travinh_point.vct*Y*0

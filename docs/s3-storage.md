@@ -1,6 +1,6 @@
 # S3 Storage API
 
-## Thong tin ket noi
+## Thông tin kết nối
 
 - **Endpoint**: https://backup.hci.vn
 - **Bucket**: c01-mekong-prod-01
@@ -8,27 +8,51 @@
 - **Access**: Path-style (custom S3-compatible endpoint)
 - **Max file size**: 100MB
 
-## Cau truc S3 Bucket
+---
+
+## Cấu trúc S3 Bucket
 
 ```
 c01-mekong-prod-01/
-├── gis-data/                          # GIS raster/vector layers
-│   └── {dataset}/{category}/{year}/{month}/{day}/{time}/{type}/{file}
-├── station-data/                      # Station data files
-│   └── {stationCode}/{parameter}/{year}/{month}/{day}/{time}/{file}
-├── monitoring-data/                   # Monitoring data files
-│   └── {monitoringCode}/{parameter}/{year}/{month}/{day}/{time}/{file}
-├── news-images/                       # Article images
-├── uploads/                           # Auto-generated key uploads
-└── backups/                           # MySQL backups
+├── gis-data/                              # Dữ liệu GIS (953+ files)
+│   ├── hydrology/                         # Thủy văn (salinity, tidal, pH)
+│   │   └── {type}/{year}/{month}/{day}/{time}/raster/{file}.tif
+│   ├── landsat-imagery/                   # Landsat 7 bands (84 files)
+│   │   └── band-{1..7}/{year}/raster/{file}.tif
+│   ├── baseline-environment/              # Môi trường nền
+│   │   ├── landuse-classification/        # Raster (35 files)
+│   │   │   └── {class}/{year}/raster/{file}.tif
+│   │   ├── landuse-planning/              # Vector GeoJSON (3 districts)
+│   │   │   └── {district}/{year}/vector/{file}.geojson
+│   │   └── channel-system/               # Vector (canal, dike, bridge...)
+│   ├── administration/                   # Vector (province, commune, hamlet)
+│   ├── flooding-modeling/               # Raster (2 files)
+│   ├── cog/                              # File COG đã tối ưu (tự động sinh)
+│   │   ├── baseline-environment/landuse-classification/  (35 files)
+│   │   └── landsat-imagery/band-{1..7}/               (84 files)
+│   └── fgb/                              # FlatGeobuf (hiện không dùng)
+│
+├── station-data/                          # Dữ liệu trạm
+│   └── manual-stations/                   # Ảnh hiện trường
+│       └── station_import_*.jpeg
+├── monitoring-data/                       # Dữ liệu giám sát
+└── news-images/                           # Ảnh bài viết
 ```
+
+> **Lưu ý quan trọng:**
+> - File gốc giữ nguyên tại `gis-data/`. File COG tối ưu lưu tại `gis-data/cog/`.
+> - Frontend tự động ưu tiên tải file COG, fallback về file gốc nếu không có.
+> - `gis-data/` listing trả về **toàn bộ 953+ files** (đã fix pagination, không còn bị truncate).
+
+---
 
 ## API Endpoints
 
 ### 1. Upload File
+
 ```bash
 POST /api/s3/upload
-Authorization: Bearer <token>  # DATA_MANAGER hoac ADMIN
+Authorization: Bearer <token>  # DATA_MANAGER hoặc ADMIN
 Content-Type: multipart/form-data
 
 Parameters:
@@ -39,18 +63,18 @@ Parameters:
 
 **Examples:**
 ```bash
-# Upload voi key tu dong (uploads/YYYYMMDD_HHmmss_filename)
+# Upload với key tự động
 curl -X POST http://localhost:8084/api/s3/upload \
   -H "Authorization: Bearer $TOKEN" \
   -F "file=@data.tif"
 
-# Upload voi key tuy chinh
+# Upload với key tùy chọn
 curl -X POST http://localhost:8084/api/s3/upload \
   -H "Authorization: Bearer $TOKEN" \
   -F "key=gis-data/hydrology/salinity/2026/raster/map.tif" \
   -F "file=@map.tif"
 
-# Upload voi overwrite
+# Upload với overwrite
 curl -X POST "http://localhost:8084/api/s3/upload?overwrite=true" \
   -H "Authorization: Bearer $TOKEN" \
   -F "key=gis-data/test.tif" \
@@ -61,40 +85,60 @@ curl -X POST "http://localhost:8084/api/s3/upload?overwrite=true" \
 ```json
 {
   "key": "gis-data/hydrology/salinity/2026/raster/map.tif",
-  "url": "https://backup.hci.vn/c01-mekong-prod-01/gis-data/hydrology/salinity/2026/raster/map.tif",
+  "url": "https://backup.hci.vn/c01-mekong-prod-01/gis-data/...",
   "message": "File uploaded successfully"
 }
 ```
 
 ### 2. Download File
+
 ```bash
 GET /api/s3/download?key={key}
-# PUBLIC - khong can token
+# PUBLIC cho prefix: gis-data/, station-data/, news-images/
+# Yêu cầu auth cho các prefix khác
+```
 
-# Hoac dung path variable:
-GET /api/s3/download/{key}
+**Examples:**
+```bash
+# Public - không cần token (gis-data/, station-data/, news-images/)
+curl "http://localhost:8084/api/s3/download?key=gis-data/hydrology/.../file.tif" -o output.tif
+
+# Yêu cầu auth (monitoring-data/ và các prefix khác)
+curl "http://localhost:8084/api/s3/download?key=monitoring-data/.../file.tif" \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+### 3. Render GeoTIFF (cho map viewer)
+
+```bash
+GET /api/s3/render?key={key}
+# PUBLIC (chỉ gis-data/ prefix)
+# Hỗ trợ HTTP Range requests (partial content)
 ```
 
 **Example:**
 ```bash
-curl "http://localhost:8084/api/s3/download?key=gis-data/salinity.tif" -o output.tif
+curl "http://localhost:8084/api/s3/render?key=gis-data/hydrology/.../file.tif"
+# → image/tiff với Content-Range header (cho tiled rendering)
 ```
 
-### 3. List Files
+### 4. List Files
+
 ```bash
 GET /api/s3/list?prefix={prefix}
 
 # gis-data/ prefix: PUBLIC
-# Cac prefix khac: Yeu cau authentication
+# Các prefix khác: Yêu cầu authentication
 ```
 
-**Example:**
+**Examples:**
 ```bash
-# Public (khong can token)
+# Public (không cần token)
 curl "http://localhost:8084/api/s3/list?prefix=gis-data/"
+# → 953+ files (đã fix pagination, không truncate)
 
 # Authenticated
-curl "http://localhost:8084/api/s3/list?prefix=uploads/" \
+curl "http://localhost:8084/api/s3/list?prefix=station-data/" \
   -H "Authorization: Bearer $TOKEN"
 ```
 
@@ -102,23 +146,84 @@ curl "http://localhost:8084/api/s3/list?prefix=uploads/" \
 ```json
 {
   "files": [
-    { "key": "gis-data/raster/salinity_313_900.tif", "size": 1234567, "lastModified": "2026-05-25T10:30:00Z" }
+    { "key": "gis-data/hydrology/salinity/.../file.tif", "size": 30364, "lastModified": "2026-05-25T10:30:00Z" }
   ],
   "count": 1
 }
 ```
 
-### 4. List Folders (voi delimiter)
+### 5. List Folders (with delimiter)
+
 ```bash
 GET /api/s3/folders?prefix={prefix}
 Authorization: Bearer <token>
+```
 
-# Response:
+**Response:**
+```json
 {
   "folders": ["gis-data/hydrology/", "gis-data/landsat-imagery/"],
   "files": [{ "key": "...", "size": 123, "lastModified": "..." }],
   "prefix": "gis-data/"
 }
+```
+
+### 6. Delete File
+
+```bash
+DELETE /api/s3/delete?key={key}
+Authorization: Bearer <token>  # DATA_MANAGER hoặc ADMIN
+```
+
+### 7. Other Endpoints
+
+| Method | Endpoint | Auth | Mô tả |
+|--------|----------|:----:|-------|
+| POST | `/api/s3/copy` | ADMIN/DATA_MANAGER | Copy file |
+| POST | `/api/s3/rename` | ADMIN/DATA_MANAGER | Rename file |
+| POST | `/api/s3/create-folder` | ADMIN/DATA_MANAGER | Tạo folder |
+| POST | `/api/s3/rename-folder` | ADMIN/DATA_MANAGER | Rename folder |
+| GET | `/api/s3/exists` | Authenticated | Kiểm tra file tồn tại |
+| GET | `/api/s3/signed-url` | Authenticated | Tạo signed URL |
+| GET | `/api/s3/stats` | ADMIN/DATA_MANAGER | Thống kê storage |
+| GET | `/api/s3/render` | Public (gis-data/) | Render GeoTIFF |
+| POST | `/api/s3/download-token` | ADMIN/DATA_MANAGER | Tạo token download |
+| GET | `/api/s3/download-by-token` | ADMIN/DATA_MANAGER | Download bằng token |
+
+---
+
+## Cơ chế bảo vệ
+
+- **Upload**: chỉ ADMIN/DATA_MANAGER
+- **Delete**: chỉ ADMIN/DATA_MANAGER  
+- **Download**: Public cho `gis-data/`, `station-data/`, `news-images/`
+- **List**: Public cho `gis-data/` prefix
+- **Key validation**: Upload key phải bắt đầu bằng `gis-data/`, `station-data/`, `monitoring-data/`, `news-images/`
+
+---
+
+## Tối ưu COG
+
+Frontend ưu tiên tải file COG từ `gis-data/cog/`:
+
+```javascript
+// Frontend tự động:
+// 1. Tìm trong gis-data/cog/... (COG ~300KB, load nhanh)
+// 2. Nếu không có → fallback về gis-data/... (gốc 6.8MB)
+```
+
+Convert thủ công:
+```bash
+gdal_translate input.tif output_cog.tif \
+  -co TILED=YES -co BLOCKXSIZE=256 \
+  -co COMPRESS=DEFLATE -of GTiff
+gdaladdo -r AVERAGE output_cog.tif 2 4 8 16
+```
+
+Tự động qua script:
+```bash
+./scripts/auto-cog-watch.sh
+```
 ```
 
 ### 5. Delete File (hoac Folder)

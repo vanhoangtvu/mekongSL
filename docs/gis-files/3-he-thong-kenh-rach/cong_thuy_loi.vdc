@@ -1,0 +1,25 @@
+file format : IDRISI Vector A.1
+file title  : Vector data imported from ArcView ShapeFile Type Point
+id type     : integer
+file type   : binary
+object type : point
+ref. system : UTM-48N
+ref. units  : m
+unit dist.  : 1
+min. X      : 610098.946120263
+max. X      : 668952.7977709
+min. Y      : 1056395.51767975
+max. Y      : 1113043.48903728
+pos'n error : unknown
+resolution  : unknown
+min. value  : 1
+max. value  : 852
+display min : 1
+display max : 852
+value units : classes
+value error : unknown
+flag value  : none
+flag def'n  : none
+legend cats : 0
+lineage     : This file was created by SHAPEIDR with the command line:
+lineage     : SHAPEIDR 1*C:\Users\Hii\Desktop\GISfiles\congthuyloi.shp*C:\Users\Hii\Desktop\GT\cong thuy loi.vct*UTM-48N*m*1.0

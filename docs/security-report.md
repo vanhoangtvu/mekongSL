@@ -1,33 +1,92 @@
-# Bao cao bao mat he thong Mekong WebGIS
+# Báo cáo bảo mật hệ thống Mekong WebGIS
 
-## Tong quan bao mat
+## Tổng quan bảo mật
 
-He thong da duoc bao mat o **4 tang**:
-1. **Frontend** - Route protection + AuthGuard + AuthService
-2. **Next.js API Layer** - Backend-for-frontend proxy routes
-3. **Backend** - Spring Security + JWT + 3-tier RBAC
-4. **S3 Storage** - Prefix validation + Signed URLs
+Hệ thống đã được bảo mật ở **4 tầng**:
+1. **Frontend** — Route protection + AuthGuard + AuthService
+2. **Next.js API Layer** — Backend-for-frontend proxy routes
+3. **Backend** — Spring Security + JWT + 3-tier RBAC
+4. **S3 Storage** — Prefix validation + phân quyền download
 
 ---
 
-## Chi tiet bao mat
+## Chi tiết bảo mật
 
-### 1. Authentication (Xac thuc)
+### 1. Authentication (Xác thực)
 
 #### Backend (Spring Boot)
-- JWT token voi expiration 24h (cau hinh duoc)
-- Password hashing voi BCrypt
-- Token validation tren moi request qua JwtAuthenticationFilter
-- UserDetailsService load user tu bang `users`
+- JWT token với expiration 24h (cấu hình được)
+- Password hashing với BCrypt
+- Token validation trên mỗi request qua JwtAuthenticationFilter
+- UserDetailsService load user từ bảng `users`
 - Stateless sessions (SessionCreationPolicy.STATELESS)
 
 #### Frontend (Next.js)
-- Token luu trong localStorage (AuthService)
+- Token lưu trong localStorage (AuthService)
 - Token validation (decode JWT, check expiration)
 - Auto logout khi token expired
-- Redirect to /auth khi chua dang nhap
-- Landing page routing theo role
+- Redirect to /auth khi chưa đăng nhập
 
+### 2. Authorization (Phân quyền)
+
+**3 roles:** USER → DATA_MANAGER → ADMIN
+
+**Endpoint public:**
+```
+/api/auth/**                  → Đăng ký, đăng nhập
+GET /api/s3/download          → gis-data/, station-data/, news-images/
+GET /api/s3/render            → gis-data/ prefix
+GET /api/s3/list              → gis-data/ prefix
+GET /api/gis/manual-stations  → Công khai
+GET /api/gis/water-quality    → Công khai
+GET /api/articles/public      → Công khai
+GET /api/gis/landuse-yearly-stats → Công khai
+GET /swagger-ui, /v3/api-docs → API docs
+```
+
+**Endpoint yêu cầu auth:**
+```
+POST /api/s3/upload           → ADMIN/DATA_MANAGER
+DELETE /api/s3/delete         → ADMIN/DATA_MANAGER
+POST /api/s3/copy/rename      → ADMIN/DATA_MANAGER
+GET /api/admin/users          → ADMIN
+POST /api/backup              → ADMIN
+GIS CRUD                      → ADMIN/DATA_MANAGER
+Articles CRUD                 → ADMIN/DATA_MANAGER
+```
+
+### 3. S3 Security
+
+- Upload key phải bắt đầu bằng: `gis-data/`, `station-data/`, `monitoring-data/`, `news-images/`
+- Download: public cho `gis-data/`, `station-data/`, `news-images/`
+- Các prefix khác yêu cầu auth
+- Signed URL với expiration linh hoạt
+- Download-token cơ chế tạm thời (300s)
+
+### 4. Database Security
+
+- MySQL user/password trong `application.yaml` (file cấu hình)
+- JPA Hibernate `ddl-auto: update` (tự động tạo bảng)
+- SQL injection được bảo vệ qua JPA/Hibernate
+
+### 5. Network Security
+
+- Backend listen `0.0.0.0:8084` (có thể giới hạn bằng firewall)
+- CORS giới hạn origins cụ thể
+- CSRF disabled (API stateless)
+
+---
+
+## Khuyến nghị
+
+| Mục | Hiện tại | Khuyến nghị |
+|-----|---------|-------------|
+| JWT Secret | Default hoặc env | Nên dùng key mạnh 256-bit trong production |
+| HTTPS | Chưa bắt buộc | Nên dùng reverse proxy (Nginx) + Let's Encrypt |
+| Rate limiting | Chưa có | Nên thêm để tránh brute force |
+| S3 Public download | Đã giới hạn prefix | OK, có thể thêm rate limiting |
+| Logging | Spring Boot logs | Nên thêm audit log cho sensitive actions |
+| Backup | Chưa có automatic | Đã có endpoint /api/backup, cần cron job |
 ---
 
 ### 2. Authorization (Phan quyen)

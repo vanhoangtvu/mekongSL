@@ -13,6 +13,7 @@ import GeoJSON from "ol/format/GeoJSON";
 import KML from "ol/format/KML";
 import GeoTIFF from "ol/source/GeoTIFF";
 import { Style, Fill, Stroke, Circle as CircleStyle } from "ol/style";
+import OlText from "ol/style/Text";
 import WKT from "ol/format/WKT";
 import { transformExtent, transform } from "ol/proj";
 import OLPoint from "ol/geom/Point";
@@ -110,14 +111,148 @@ function landuseStyleFunction(feature: any): Style {
 }
 
 function vctStyleFunction(attrName: string): (feature: any) => Style {
+  const cache = new Map<string, Style>();
   return (feature: any) => {
     const val = feature.get(attrName || '_vct_attr');
     const num = Number(val);
     const hue = !isNaN(num) ? ((num * 60) % 360) : 0;
-    return new Style({
-      stroke: new Stroke({ color: `hsl(${hue}, 70%, 50%)`, width: 1.5 }),
-    });
+    const color = `hsl(${hue}, 70%, 50%)`;
+    const geomType = feature.getGeometry()?.getType();
+    const cacheKey = geomType ? `${geomType}:${hue}` : 'unknown';
+    let s = cache.get(cacheKey);
+    if (s) return s;
+    if (geomType === 'Point') {
+      s = new Style({
+        image: new CircleStyle({
+          radius: 7,
+          fill: new Fill({ color }),
+          stroke: new Stroke({ color: '#fff', width: 1.5 }),
+        }),
+      });
+    } else {
+      s = new Style({
+        stroke: new Stroke({ color, width: 1.5 }),
+      });
+    }
+    cache.set(cacheKey, s);
+    return s;
   };
+}
+
+// ── Soil Type style ──
+// Color map cho các loại đất (mã Loaidat từ DBF)
+const SOIL_COLORS: Record<string, string> = {
+  'GL': '#8B4513',  // Đất phù sa Glây - SaddleBrown
+  'AR': '#2E8B57',  // Đất phù sa - SeaGreen
+  'FL': '#DAA520',  // Đất phèn - Goldenrod
+  'SC': '#CD853F',  // Đất cát - Peru
+  'AL': '#6B8E23',  // Đất phù sa bồi - OliveDrab
+};
+
+const soilStyleCache = new Map<string, Style>();
+
+function soilStyleFunction(feature: any): Style {
+  const geomType = feature.getGeometry()?.getType();
+  const loaidat = feature.get('Loaidat') as string | undefined;
+  const attrVal = feature.get('_vct_attr');
+
+  let color: string;
+  if (loaidat && SOIL_COLORS[loaidat]) {
+    color = SOIL_COLORS[loaidat];
+  } else if (attrVal !== undefined) {
+    const num = Number(attrVal);
+    const hue = !isNaN(num) ? ((num * 60) % 360) : 0;
+    color = `hsl(${hue}, 70%, 50%)`;
+  } else {
+    color = '#999';
+  }
+
+  const cacheKey = (geomType === 'Polygon' || geomType === 'MultiPolygon') ? `soil_poly:${color}` : `soil_line:${color}`;
+  let s = soilStyleCache.get(cacheKey);
+  if (s) return s;
+
+  if (geomType === 'Polygon' || geomType === 'MultiPolygon') {
+    s = new Style({
+      stroke: new Stroke({ color: '#333', width: 0.6 }),
+      fill: new Fill({ color: color + 'cc' }),
+    });
+  } else {
+    s = new Style({
+      stroke: new Stroke({ color: color, width: 1.5 }),
+    });
+  }
+  soilStyleCache.set(cacheKey, s);
+  return s;
+}
+
+// ── Ground Water style ──
+// Màu sắc phân biệt cho 8 điểm giếng
+const GW_COLORS = [
+  '#e74c3c', '#3498db', '#2ecc71', '#f39c12',
+  '#9b59b6', '#1abc9c', '#e67e22', '#2980b9',
+];
+
+// Label offsets đa hướng cho 8 điểm giếng, tránh đè lên nhau
+const GW_LABEL_DIRS = [
+  { ox: 0,  oy: -34 },  // 1: phía trên
+  { ox: 38, oy: -8  },  // 2: bên phải
+  { ox: -38, oy: 10  }, // 3: bên trái-thấp
+  { ox: 0,  oy: 40  },  // 4: phía dưới
+  { ox: 34, oy: -30 },  // 5: trên-phải
+  { ox: -34, oy: 32 },  // 6: dưới-trái
+  { ox: 36, oy: 32  },  // 7: dưới-phải
+  { ox: -36, oy: -30 }, // 8: trên-trái
+];
+
+function groundwaterStyleFunction(feature: any, resolution: number): Style[] {
+  const uniId = feature.get('UNI_ID') as number | undefined;
+  const wellId = feature.get('WELL_ID') as string | undefined;
+  const idx = uniId !== undefined ? Math.min(Math.max(Math.round(Number(uniId)) - 1, 0), GW_COLORS.length - 1) : 0;
+  const color = GW_COLORS[idx] || '#999';
+  const dir = GW_LABEL_DIRS[idx] || GW_LABEL_DIRS[0];
+
+  // Stem line: từ điểm đến sát label (theo đúng hướng offset)
+  const geom = feature.getGeometry();
+  const pointCoords = geom instanceof OLPoint ? geom.getCoordinates() : [0, 0];
+  const stemRatio = 0.92; // gần bằng 1 để chạm tới label
+  // Lưu ý: pixel Y ngược với map Y (screen xuống dưới = map giảm Y)
+  // Nên phải đảo dấu dir.oy khi tính stemDY
+  const stemDX = dir.ox * stemRatio * resolution;
+  const stemDY = -dir.oy * stemRatio * resolution;
+  const stemEnd: [number, number] = [pointCoords[0] + stemDX, pointCoords[1] + stemDY];
+  const stemGeom = new OLLineString([pointCoords, stemEnd]);
+
+  // Text align theo hướng
+  let textAlign: CanvasTextAlign = 'center';
+  if (dir.ox < -5) textAlign = 'right';
+  else if (dir.ox > 5) textAlign = 'left';
+
+  return [
+    new Style({
+      image: new CircleStyle({
+        radius: 12,
+        fill: new Fill({ color }),
+        stroke: new Stroke({ color: '#fff', width: 2.5 }),
+      }),
+    }),
+    new Style({
+      geometry: stemGeom,
+      stroke: new Stroke({ color: '#888', width: 1, lineDash: [3, 4] }),
+    }),
+    new Style({
+      text: new OlText({
+        text: wellId || '',
+        font: 'bold 11px Arial, sans-serif',
+        fill: new Fill({ color: '#111' }),
+        backgroundFill: new Fill({ color: 'rgba(255,255,255,0.95)' }),
+        backgroundStroke: new Stroke({ color: '#bbb', width: 0.5 }),
+        padding: [3, 7, 3, 7],
+        textAlign,
+        offsetX: dir.ox,
+        offsetY: dir.oy,
+      }),
+    }),
+  ];
 }
 
 const FADE_MS = 200;
@@ -699,12 +834,18 @@ export function useS3LayerRenderer(
       }
 
       const isLanduse = id.startsWith('baseline-landuse-plan');
+      const isSoil = id.startsWith('baseline-soil') || id.startsWith('soil');
+      const isGroundwater = id.startsWith('baseline-groundwater') || id.startsWith('groundwater');
       const useVctStyle = vctAttrName || features.some(f => f.get('_vct_attr') !== undefined);
       const vectorStyle: any = isLanduse
         ? landuseStyleFunction
-        : useVctStyle
-          ? vctStyleFunction(vctAttrName || '_vct_attr')
-          : defaultVectorStyle;
+        : isSoil
+          ? soilStyleFunction
+          : isGroundwater
+            ? groundwaterStyleFunction
+            : useVctStyle
+              ? vctStyleFunction(vctAttrName || '_vct_attr')
+              : defaultVectorStyle;
       const vectorSource = new VectorSource({ 
         features: features.sort((a, b) => {
           // Sort by area ascending: larger polygons drawn first (behind)
@@ -774,7 +915,10 @@ export function useS3LayerRenderer(
         });
       }
       const extent = vectorSource.getExtent();
-      if (extent && extent[0] !== Infinity) safeMap.getView().fit(extent, { padding: [48, 48, 48, 48], maxZoom: 16, duration: 300 });
+      if (extent && extent[0] !== Infinity) {
+        const fitPadding = [48, 48, 48, 48]; // Mặc định, chỉ Ground Water mới zoom khi click
+        safeMap.getView().fit(extent, { padding: fitPadding, maxZoom: 16, duration: 300 });
+      }
     }
 
     return () => { isActive = false; };

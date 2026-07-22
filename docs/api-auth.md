@@ -63,26 +63,34 @@ Content-Type: application/json
 
 ## Endpoints & Permissions
 
-### Public (khong can token)
-- `POST /api/auth/register` - Dang ky
-- `POST /api/auth/login` - Dang nhap
-- `GET /api/gis/manual-stations/**` - Xem tram manual
-- `GET /api/gis/water-quality/**` - Xem du lieu chat luong nuoc
-- `GET /api/articles/public/**` - Xem articles cong khai
-- `GET /api/s3/render` - Render GeoTIFF (chi gis-data/ prefix)
-- `GET /api/s3/download` - Download file S3
-- `GET /api/s3/list?prefix=gis-data/` - List gis-data files
-- `GET /swagger-ui/**`, `GET /v3/api-docs/**` - API docs
+### Public (không cần token)
+- `POST /api/auth/register` — Đăng ký
+- `POST /api/auth/login` — Đăng nhập
+- `GET /api/gis/manual-stations/**` — Xem trạm manual
+- `GET /api/gis/water-quality/**` — Xem dữ liệu chất lượng nước
+- `GET /api/articles/public/**` — Xem articles công khai
+- `GET /api/s3/render` — Render GeoTIFF (chỉ gis-data/ prefix)
+- `GET /api/s3/download` — Download file S3 (**public cho `gis-data/`, `station-data/`, `news-images/`**)
+- `GET /api/s3/list` — List files S3 (**public cho `gis-data/` prefix**)
+- `GET /api/gis/landuse-yearly-stats/**` — Landuse statistics
+- `GET /swagger-ui/**`, `GET /v3/api-docs/**` — API docs
 
-### Yeu cau DATA_MANAGER+
-- `GET /api/data/**` - Du lieu endpoint
+### Yêu cầu DATA_MANAGER+
+- `GET /api/data/**` — Dữ liệu endpoint
+- `POST /api/s3/upload` — Upload file
+- `DELETE /api/s3/delete` — Xóa file
+- `POST /api/s3/copy` — Copy file
+- `POST /api/s3/rename` — Rename file
+- `POST /api/s3/create-folder` — Tạo folder
+- `POST /api/s3/rename-folder` — Rename folder
+- `GET /api/s3/stats` — Storage stats
+- GIS CRUD endpoints (layers, datasets, stations, folders, tags, water-quality, monitoring)
+- Articles CRUD
 
-### Yeu cau ADMIN
-- `GET|POST /api/admin/users` - Quan ly users
-- `PUT|DELETE /api/admin/users/{id}` - Sua/xoa user
-
-### Yeu cau authenticated (bat ky role nao)
-- Tat ca cac endpoint con lai (GIS CRUD, S3 upload/delete/copy/rename/folders, Articles management, Backup)
+### Yêu cầu ADMIN
+- `GET|POST /api/admin/users` — Quản lý users
+- `PUT|DELETE /api/admin/users/{id}` — Sửa/xóa user
+- `POST /api/backup` — Trigger backup
 
 ## JWT Configuration
 

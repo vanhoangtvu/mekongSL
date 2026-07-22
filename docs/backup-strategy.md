@@ -20,14 +20,33 @@
 - **User uploads**: Documents, images trong `uploads/`
 - **MySQL backups**: Daily automated backup trong `backups/`
 
-## Cau truc S3 thuc te
+## Cấu trúc S3 thực tế
 
 ```
 c01-mekong-prod-01/
-├── gis-data/                          # GIS raster/vector layers
-│   ├── landsat-imagery/               # Landsat bands
-│   ├── hydrology/                     # Salinity, Tidal, pH
-│   │   └── salinity/{year}/{month}/{day}/{time}/raster/
+├── gis-data/                          # GIS raster/vector layers (953+ files)
+│   ├── landsat-imagery/               # Landsat 7 bands (84 files, 2014-2025)
+│   ├── hydrology/                     # Salinity (~251), Tidal (~245), pH (~250)
+│   │   └── {type}/{year}/{month}/{day}/{time}/raster/
+│   ├── baseline-environment/
+│   │   ├── landuse-classification/    # 35 raster files (~6.8MB mỗi file)
+│   │   ├── landuse-planning/          # 3 vector GeoJSON files
+│   │   └── channel-system/            # Vector files
+│   ├── administration/                # Vector files
+│   ├── flooding-modeling/            # 2 raster files
+│   ├── cog/                           # File COG đã tối ưu (tự động sinh)
+│   │   ├── baseline-environment/landuse-classification/  (35 files)
+│   │   └── landsat-imagery/band-{1..7}/               (84 files)
+│   └── fgb/                           # FlatGeobuf (hiện không dùng)
+├── station-data/                      # Ảnh hiện trường
+│   └── manual-stations/
+├── monitoring-data/                   # Dữ liệu giám sát
+├── news-images/                       # Ảnh bài viết
+└── backups/                           # MySQL backups
+```
+
+> **Ghi chú:** File trong `gis-data/cog/` là bản sao đã tối ưu (COG) của file gốc.
+> Dung lượng giảm 75-95%. File gốc vẫn được giữ nguyên tại `gis-data/`.
 │   ├── baseline-environment/          # Landuse, soil, water body...
 │   │   └── landuse-classification/{class}/{year}/raster/
 │   └── ...

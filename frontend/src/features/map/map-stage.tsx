@@ -992,6 +992,8 @@ export const MapStage = React.memo(function MapStage({ startDateTime, endDateTim
   } | null>(null);
 
   const [hoveredVectorProps, setHoveredVectorProps] = useState<Record<string, string> | null>(null);
+  const [selectedGroundwater, setSelectedGroundwater] = useState<Record<string, string> | null>(null);
+  const selectedGroundwaterRef = useRef<string | null>(null);
 
   const [showLuStats, setShowLuStats] = useState(false);
   const [luStatsResult, setLuStatsResult] = useState<{
@@ -1948,10 +1950,32 @@ export const MapStage = React.memo(function MapStage({ startDateTime, endDateTim
     map.addLayer(inspectLayer);
     inspectLayerRef.current = inspectLayer;
 
-    // Click handler: WQ station popup, Ecowitt popup, and mobile pixel inspection
+    // Click handler: WQ station popup, Ecowitt popup, Ground Water, and mobile pixel inspection
     map.on("click", (evt) => {
       let handled = false;
-      const feature = map.forEachFeatureAtPixel(evt.pixel, (f) => f as Feature | undefined);
+
+      // Tìm tất cả features tại vùng click, chọn cái gần nhất (tránh chọn nhầm khi điểm gần nhau)
+      const clickedFeatures: Feature[] = [];
+      map.forEachFeatureAtPixel(evt.pixel, (f) => {
+        clickedFeatures.push(f as Feature);
+        return undefined;
+      }, { hitTolerance: 40 });
+      const clickCoord = evt.coordinate;
+      let feature: Feature | undefined;
+      let minDist = Infinity;
+      for (const cf of clickedFeatures) {
+        const geom = cf.getGeometry();
+        if (!geom) continue;
+        const closest = geom.getClosestPoint(clickCoord);
+        const dist = Math.sqrt(
+          (closest[0] - clickCoord[0]) ** 2 +
+          (closest[1] - clickCoord[1]) ** 2
+        );
+        if (dist < minDist) {
+          minDist = dist;
+          feature = cf;
+        }
+      }
       if (feature) {
         const wqId = feature.get("wqStationId") as number | undefined;
         if (wqId) {
@@ -2013,10 +2037,61 @@ export const MapStage = React.memo(function MapStage({ startDateTime, endDateTim
           }
           handled = true;
         }
+        // Groundwater well: zoom + open popup on click
+        const wellId = feature.get("WELL_ID") as string | undefined;
+        if (wellId) {
+          if (selectedGroundwaterRef.current === wellId) {
+            setSelectedGroundwater(null);
+            selectedGroundwaterRef.current = null;
+          } else {
+            setPopupDeviceId(null);
+            setSelectedWqStation(null);
+            // Lưu view state trước khi zoom (nếu chưa được lưu bởi effect)
+            const gView = map.getView();
+            if (!previousMapViewStateRef.current) {
+              const gCenter = gView.getCenter();
+              const gZoom = gView.getZoom();
+              if (gCenter && gZoom !== undefined) {
+                previousMapViewStateRef.current = {
+                  center: [gCenter[0], gCenter[1]],
+                  zoom: gZoom,
+                };
+              }
+            }
+            // Zoom sát đến vị trí giếng
+            const geom = feature.getGeometry();
+            if (geom) {
+              const coords = geom.getCoordinates();
+              gView.cancelAnimations();
+              gView.animate({
+                center: coords,
+                zoom: 18,
+                duration: 600,
+                easing: easeOut,
+              });
+            }
+            const props = feature.getProperties();
+            const formatted: Record<string, string> = {};
+            for (const [k, v] of Object.entries(props)) {
+              if (k === 'geometry') continue;
+              // Format X006_01 → 2006-01, X015_02 → 2015-02
+              const isMeasField = k.startsWith('X') && /^X\d{3}_\d{2}$/.test(k);
+              const displayKey = isMeasField
+                ? '20' + k.slice(2, 4) + '-' + k.slice(5)
+                : k;
+              formatted[displayKey] = String(v ?? '');
+            }
+            setSelectedGroundwater(formatted);
+            selectedGroundwaterRef.current = wellId;
+          }
+          handled = true;
+        }
       }
       if (!handled) {
         setPopupDeviceId(null);
         setSelectedWqStation(null);
+        setSelectedGroundwater(null);
+        selectedGroundwaterRef.current = null;
       }
 
       // Mobile: tap to inspect pixel values + vector features (landuse, general)
@@ -2053,7 +2128,9 @@ export const MapStage = React.memo(function MapStage({ startDateTime, endDateTim
           luFeature = feat;
           luLayer = layer;
         }
-        if (!vectorRawProps && !props._code && !props.deviceId && !props.wqStationId) {
+        // Vector properties: hiện cho Soil Type, Channel System...
+        // nhưng KHÔNG hiện cho Ground Water (có WELL_ID) vì đã có popup riêng
+        if (!vectorRawProps && !props._code && !props.deviceId && !props.wqStationId && !props.WELL_ID) {
           vectorRawProps = props;
           // Look up dataset name from layer refs
           const layers = layerRefs.current;
@@ -2112,7 +2189,7 @@ export const MapStage = React.memo(function MapStage({ startDateTime, endDateTim
         setHoveredLuFeature(null);
       }
 
-      // Process general vector
+      // Vector properties: hiện cho Soil Type, Channel System... nhưng ko cho Ground Water
       setHoveredVectorProps(vectorRawProps
         ? Object.fromEntries(
             Object.entries(vectorRawProps)
@@ -2318,7 +2395,7 @@ export const MapStage = React.memo(function MapStage({ startDateTime, endDateTim
     const view = map.getView();
     if (!view) return;
 
-    const hasSelection = !!popupDeviceId || !!selectedWqStation;
+    const hasSelection = !!popupDeviceId || !!selectedWqStation || !!selectedGroundwater;
 
     if (hasSelection) {
       if (!previousMapViewStateRef.current) {
@@ -2345,7 +2422,7 @@ export const MapStage = React.memo(function MapStage({ startDateTime, endDateTim
         });
       }
     }
-  }, [popupDeviceId, selectedWqStation]);
+  }, [popupDeviceId, selectedWqStation, selectedGroundwater]);
 
   // Zoom and pan map to selected manual station, with offset to avoid popup coverage
   useEffect(() => {
@@ -3759,6 +3836,118 @@ export const MapStage = React.memo(function MapStage({ startDateTime, endDateTim
           </div>
         )}
 
+        {/* ---- Ground Water Well Popup ---- */}
+        {selectedGroundwater && (() => {
+          const gw = selectedGroundwater;
+          const wellId = gw['WELL_ID'] || '';
+          const aquifer = gw['AQUIFER'] || '';
+          const minDepth = gw['MIN_DEPTH_'] || '';
+          const maxDepth = gw['MAX_DEPTH_'] || '';
+          const avegDepth = gw['AVEG_DEPTH'] || '';
+          // Collect measurement fields (formatted as YYYY-MM)
+          const measurements = Object.entries(gw)
+            .filter(([k]) => /^\d{4}-\d{2}$/.test(k))
+            .sort(([a], [b]) => a.localeCompare(b));
+          return (
+            <div style={{
+              position: isMobile ? 'fixed' : 'absolute',
+              top: isMobile ? 'auto' : '110px',
+              right: '12px',
+              bottom: isMobile ? '12px' : 'auto',
+              left: isMobile ? '12px' : 'auto',
+              width: isMobile ? 'auto' : '400px',
+              maxWidth: isMobile ? 'min(calc(100vw - 24px), 480px)' : 'calc(100vw - 24px)',
+              maxHeight: isMobile ? '62vh' : '70vh',
+              background: isMobile ? 'rgba(255,255,255,0.92)' : '#ffffff',
+              backdropFilter: isMobile ? 'blur(16px)' : undefined,
+              borderRadius: '16px',
+              boxShadow: '0 6px 32px rgba(0,0,0,0.18)',
+              zIndex: isMobile ? 10000 : 1000,
+              border: '1px solid #e2e8f0',
+              display: 'flex',
+              flexDirection: 'column',
+              overflow: 'hidden',
+              fontFamily: 'system-ui, -apple-system, sans-serif',
+            }}>
+              {isMobile && <div className="bottom-sheet-handle" />}
+              {/* Header */}
+              <div style={{
+                display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                padding: '14px 16px',
+                borderBottom: '1px solid #e2e8f0',
+                background: 'linear-gradient(135deg, rgba(13,110,253,0.05) 0%, #ffffff 100%)',
+                flexShrink: 0,
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', minWidth: 0 }}>
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#0d6efd" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
+                    <path d="M12 2a8 8 0 0 0-8 8c0 5 8 12 8 12s8-7 8-12a8 8 0 0 0-8-8z"/><circle cx="12" cy="10" r="3"/>
+                  </svg>
+                  <div style={{ minWidth: 0 }}>
+                    <div style={{ fontSize: '0.9rem', fontWeight: '700', color: '#0f172a', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} title={wellId}>
+                      Well: {wellId}
+                    </div>
+                    <div style={{ fontSize: '0.72rem', color: '#64748b', fontWeight: '600' }}>
+                      {aquifer}
+                    </div>
+                  </div>
+                </div>
+                <button type="button" onClick={() => { setSelectedGroundwater(null); selectedGroundwaterRef.current = null; }}
+                  style={{ background: '#f1f5f9', border: '1px solid #cbd5e1', cursor: 'pointer', color: '#475569',
+                    width: '28px', height: '28px', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, fontSize: '16px', lineHeight: 1 }}>
+                  ×
+                </button>
+              </div>
+              {/* Body */}
+              <div style={{ flex: 1, overflowY: 'auto', padding: '12px 16px', minHeight: 0 }}>
+                {/* Depth info */}
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '8px', marginBottom: '12px' }}>
+                  <div style={{ padding: '8px', borderRadius: '8px', background: '#f0f9ff', border: '1px solid #bae6fd' }}>
+                    <div style={{ fontSize: '0.6rem', color: '#64748b', fontWeight: '600', textTransform: 'uppercase' }}>Min Depth</div>
+                    <div style={{ fontSize: '0.95rem', fontWeight: '700', color: '#0369a1' }}>{minDepth || '—'} m</div>
+                  </div>
+                  <div style={{ padding: '8px', borderRadius: '8px', background: '#f0fdf4', border: '1px solid #bbf7d0' }}>
+                    <div style={{ fontSize: '0.6rem', color: '#64748b', fontWeight: '600', textTransform: 'uppercase' }}>Max Depth</div>
+                    <div style={{ fontSize: '0.95rem', fontWeight: '700', color: '#16a34a' }}>{maxDepth || '—'} m</div>
+                  </div>
+                  <div style={{ padding: '8px', borderRadius: '8px', background: '#fefce8', border: '1px solid #fde68a' }}>
+                    <div style={{ fontSize: '0.6rem', color: '#64748b', fontWeight: '600', textTransform: 'uppercase' }}>Avg Depth</div>
+                    <div style={{ fontSize: '0.95rem', fontWeight: '700', color: '#ca8a04' }}>{avegDepth || '—'} m</div>
+                  </div>
+                </div>
+                {/* Measurement data */}
+                {measurements.length > 0 && (
+                  <>
+                    <div style={{ fontSize: '0.72rem', fontWeight: '700', color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: '8px' }}>
+                      Measurement Data (Monthly)
+                    </div>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(130px, 1fr))', gap: '6px' }}>
+                      {measurements.map(([dateKey, val]) => (
+                        <div key={dateKey} style={{ padding: '5px 8px', borderRadius: '6px', background: '#f8fafc', border: '1px solid #e2e8f0' }}>
+                          <div style={{ fontSize: '0.65rem', color: '#64748b', fontWeight: '600' }}>{dateKey}</div>
+                          <div style={{ fontSize: '0.82rem', fontWeight: '700', color: '#0f172a', fontFamily: '"JetBrains Mono",monospace' }}>{val}</div>
+                        </div>
+                      ))}
+                    </div>
+                  </>
+                )}
+                {/* Other properties */}
+                <div style={{ marginTop: '12px', borderTop: '1px solid #e2e8f0', paddingTop: '10px' }}>
+                  <div style={{ fontSize: '0.72rem', fontWeight: '700', color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: '6px' }}>Well Info</div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', fontSize: '0.78rem' }}>
+                    {Object.entries(gw)
+                      .filter(([k]) => !['WELL_ID','AQUIFER','MIN_DEPTH_','MAX_DEPTH_','AVEG_DEPTH','geometry','_vct_attr','UNI_ID'].includes(k) && !/^\d{4}-\d{2}$/.test(k))
+                      .map(([k, v]) => (
+                        <div key={k} style={{ display: 'flex', justifyContent: 'space-between' }}>
+                          <span style={{ color: '#64748b', fontWeight: 500 }}>{k}</span>
+                          <span style={{ fontWeight: 600, color: '#0f172a' }}>{v}</span>
+                        </div>
+                      ))}
+                  </div>
+                </div>
+              </div>
+            </div>
+          );
+        })()}
 
         {/* ---- Landuse Stats Panel ---- */}
         {showLuStats && luStatsResult && (

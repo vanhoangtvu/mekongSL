@@ -16,24 +16,29 @@
 
 #### Endpoints Protection
 ```java
-// Public endpoints
+// Public endpoints (không cần auth)
 /api/auth/**                    => Public
 /api/gis/manual-stations/** GET => Public
 /api/gis/water-quality/**   GET => Public
 /api/articles/public/**     GET => Public
-/api/s3/render                  => Public (chi gis-data/ prefix)
-/api/s3/download                => Public
+/api/s3/render                  => Public (chỉ gis-data/ prefix)
+/api/s3/download                => Public (chỉ gis-data/, station-data/, news-images/)
 /api/s3/list GET (gis-data/)    => Public
+/api/gis/landuse-yearly-stats/** => Public
 
 // DATA_MANAGER+
 /api/data/**                    => hasAnyRole(DATA_MANAGER, ADMIN)
-
-// Authenticated
-Tat ca endpoint con lai          => authenticated()
+/api/s3/upload                  => hasAnyRole(DATA_MANAGER, ADMIN)
+/api/s3/delete                  => hasAnyRole(DATA_MANAGER, ADMIN)
+/api/s3/copy                    => hasAnyRole(DATA_MANAGER, ADMIN)
+Giao diện articles CRUD         => hasAnyRole(DATA_MANAGER, ADMIN)
 
 // Admin only
-/api/admin/users                => @PreAuthorize (trong controller)
+/api/admin/users                => @PreAuthorize(hasRole(ADMIN))
+/api/backup                     => @PreAuthorize(hasRole(ADMIN))
 ```
+
+### 2. Frontend Security
 
 ### 2. Frontend Security
 

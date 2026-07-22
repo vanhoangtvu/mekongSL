@@ -1,43 +1,95 @@
-# Phan quyen he thong
+# Phân Quyền Hệ Thống
 
 ## 3 Roles
 
-### 1. USER (Nguoi dung thuong)
-**Quyen han:**
-- Xem ban do (/)
+### 1. USER (Người dùng thường)
+**Quyền hạn:**
+- Xem bản đồ (/)
 - Xem articles public
-- Download files tu S3
-- Xem danh sach files gis-data (S3 list public)
-- Render GeoTIFF tu S3 (chi gis-data/ prefix)
-- Xem tram manual station (GET public)
-- Xem du lieu chat luong nuoc water quality (GET public)
-- KHONG truy cap /data
-- KHONG upload/delete S3
-- KHONG backup
-- KHONG quan ly users/articles
+- Download files từ S3 (prefix công khai: `gis-data/`, `station-data/`, `news-images/`)
+- Xem danh sách files `gis-data` (S3 list public)
+- Render GeoTIFF (chỉ `gis-data/` prefix)
+- Xem trạm manual station (GET public)
+- Xem dữ liệu chất lượng nước (GET public)
+- Xem thống kê landuse (public)
+- **KHÔNG** truy cập `/data`
+- **KHÔNG** upload/delete S3
+- **KHÔNG** backup
+- **KHÔNG** quản lý users/articles
 
 **Default account:**
-- Username: `user`
-- Password: `user123`
+- Username: `user` (tự tạo)
+- Password: `user123` (tự tạo)
+- Backend tạo sẵn: `admin`/`admin123` và `manager`/`manager123`
 
 ---
 
-### 2. DATA_MANAGER (Quan ly du lieu)
-**Quyen han:**
-- Tat ca quyen cua USER
-- Truy cap trang /data
-- Upload files len S3 (POST /api/s3/upload)
-- Delete files tu S3 (DELETE /api/s3/delete)
-- Copy/Rename files va folders trong S3
-- Tao folder moi tren S3
-- Tao signed URLs
+### 2. DATA_MANAGER (Quản lý dữ liệu)
+**Quyền hạn:**
+- Tất cả quyền của USER
+- Truy cập trang `/data`
+- Upload files lên S3 (POST `/api/s3/upload`)
+- Delete files từ S3 (DELETE `/api/s3/delete`)
+- Copy/Rename files và folders trong S3
+- Tạo folder mới trên S3
+- Tạo signed URLs
 - Xem S3 storage stats
 - GIS CRUD endpoints (layers, datasets, stations, folders, tags)
 - Upload layer files, register S3 objects
-- Quan ly manual stations (import Excel)
-- Quan ly water quality (import Excel, Xoa sample)
-- Quan ly monitoring data
-- Quan ly articles (CRUD)
+- Quản lý manual stations (import Excel)
+- Quản lý water quality (import Excel, xóa sample)
+- Quản lý monitoring data
+- Quản lý articles (CRUD)
+
+**Default account:**
+- Username: `manager`
+- Password: `manager123`
+
+---
+
+### 3. ADMIN (Quản trị hệ thống)
+**Quyền hạn:**
+- Tất cả quyền của DATA_MANAGER
+- Quản lý users (CRUD) — `/api/admin/users`
+- Trigger backup — `/api/backup`
+
+**Default account:**
+- Username: `admin`
+- Password: `admin123`
+
+---
+
+## Bảng chi tiết endpoints
+
+| Endpoint | USER | DATA_MANAGER | ADMIN |
+|----------|:----:|:------------:|:-----:|
+| `GET /api/auth/**` | ✅ | ✅ | ✅ |
+| `POST /api/auth/login` | ✅ | ✅ | ✅ |
+| `GET /api/s3/list (gis-data/)` | ✅ | ✅ | ✅ |
+| `GET /api/s3/download (public prefix)` | ✅ | ✅ | ✅ |
+| `GET /api/s3/render` | ✅ | ✅ | ✅ |
+| `GET /api/gis/manual-stations` | ✅ | ✅ | ✅ |
+| `GET /api/gis/water-quality` | ✅ | ✅ | ✅ |
+| `GET /api/articles/public` | ✅ | ✅ | ✅ |
+| `GET /api/gis/landuse-yearly-stats` | ✅ | ✅ | ✅ |
+| `POST /api/s3/upload` | ❌ | ✅ | ✅ |
+| `DELETE /api/s3/delete` | ❌ | ✅ | ✅ |
+| `POST /api/s3/copy` | ❌ | ✅ | ✅ |
+| `POST /api/s3/rename` | ❌ | ✅ | ✅ |
+| `POST /api/s3/create-folder` | ❌ | ✅ | ✅ |
+| `GET /api/s3/stats` | ❌ | ✅ | ✅ |
+| `POST /api/data/**` | ❌ | ✅ | ✅ |
+| GIS CRUD | ❌ | ✅ | ✅ |
+| Articles CRUD | ❌ | ✅ | ✅ |
+| `GET /api/admin/users` | ❌ | ❌ | ✅ |
+| `POST /api/backup` | ❌ | ❌ | ✅ |
+
+## Ghi chú
+
+- Authentication: JWT Bearer token
+- Token hết hạn sau 24h (cấu hình trong `application.yaml`)
+- Tài khoản mặc định được tạo tự động khi backend khởi động lần đầu
+- Có thể tạo/sửa/xóa user qua API `/api/admin/users` (ADMIN)
 - Trigger backup
 -Query MySQL, Export Excel
 - KHONG co quyen quan ly users (admin endpoint)
