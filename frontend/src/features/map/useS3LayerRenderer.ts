@@ -227,7 +227,18 @@ function groundwaterStyleFunction(feature: any, resolution: number): Style[] {
   if (dir.ox < -5) textAlign = 'right';
   else if (dir.ox > 5) textAlign = 'left';
 
+  // Khoảng cách xa nhất từ tâm point đến label (pixels)
+  const maxLabelDist = Math.max(Math.abs(dir.ox), Math.abs(dir.oy)) + 20;
+
   return [
+    // Vùng click mở rộng (trong suốt) để bắt được click trên label
+    new Style({
+      image: new CircleStyle({
+        radius: maxLabelDist,
+        fill: new Fill({ color: 'rgba(0,0,0,0)' }),
+        stroke: null,
+      }),
+    }),
     new Style({
       image: new CircleStyle({
         radius: 12,
