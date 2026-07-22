@@ -231,12 +231,12 @@ function groundwaterStyleFunction(feature: any, resolution: number): Style[] {
   const maxLabelDist = Math.max(Math.abs(dir.ox), Math.abs(dir.oy)) + 20;
 
   return [
-    // Vùng click mở rộng (trong suốt) để bắt được click trên label
+    // Vùng click mở rộng (gần như trong suốt) để bắt được click trên label
     new Style({
       image: new CircleStyle({
         radius: maxLabelDist,
-        fill: new Fill({ color: 'rgba(0,0,0,0)' }),
-        stroke: null,
+        fill: new Fill({ color: 'rgba(255,255,255,0.001)' }),
+        stroke: new Stroke({ color: 'rgba(255,255,255,0.001)', width: 1 }),
       }),
     }),
     new Style({

@@ -1954,12 +1954,12 @@ export const MapStage = React.memo(function MapStage({ startDateTime, endDateTim
     map.on("click", (evt) => {
       let handled = false;
 
-      // Tìm tất cả features tại vùng click, chọn cái gần nhất (tránh chọn nhầm khi điểm gần nhau)
+      // Tìm tất cả features tại vùng click, chọn cái gần nhất
       const clickedFeatures: Feature[] = [];
       map.forEachFeatureAtPixel(evt.pixel, (f) => {
         clickedFeatures.push(f as Feature);
         return undefined;
-      }, { hitTolerance: 40 });
+      }, { hitTolerance: 60 });
       const clickCoord = evt.coordinate;
       let feature: Feature | undefined;
       let minDist = Infinity;
@@ -1974,6 +1974,32 @@ export const MapStage = React.memo(function MapStage({ startDateTime, endDateTim
         if (dist < minDist) {
           minDist = dist;
           feature = cf;
+        }
+      }
+      // Fallback: nếu không tìm thấy feature có WELL_ID qua hit detection,
+      // duyệt thủ công tất cả vector layers tìm điểm Ground Water gần nhất
+      if (!feature?.get('WELL_ID')) {
+        for (const [, olLayer] of Object.entries(layerRefs.current)) {
+          const source = (olLayer as VectorLayer)?.getSource?.() as VectorSource | undefined;
+          if (!source) continue;
+          const features = source.getFeatures();
+          for (const f of features) {
+            if (!f.get('WELL_ID')) continue;
+            const geom = f.getGeometry();
+            if (!geom) continue;
+            const closest = geom.getClosestPoint(clickCoord);
+            const dist = Math.sqrt(
+              (closest[0] - clickCoord[0]) ** 2 +
+              (closest[1] - clickCoord[1]) ** 2
+            );
+            // Chỉ chọn nếu click cách điểm trong phạm vi hợp lý (~60px map units)
+            const view = map.getView();
+            const resolution = view.getResolution() || 1;
+            if (dist < 60 * resolution && dist < minDist) {
+              minDist = dist;
+              feature = f;
+            }
+          }
         }
       }
       if (feature) {
