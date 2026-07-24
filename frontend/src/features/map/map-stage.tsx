@@ -2086,7 +2086,7 @@ export const MapStage = React.memo(function MapStage({ startDateTime, endDateTim
             }
             // Zoom sát đến vị trí giếng
             const geom = feature.getGeometry();
-            if (geom) {
+            if (geom && geom instanceof Point) {
               const coords = geom.getCoordinates();
               gView.cancelAnimations();
               gView.animate({
