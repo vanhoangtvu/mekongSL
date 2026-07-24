@@ -22,7 +22,7 @@ export default function UnauthorizedPage() {
           </button>
           <button onClick={() => router.push('/auth')} className="btn-login">
             <LogIn size={18} />
-            Đăng nhập lại
+            Login Again
           </button>
         </div>
       </div>

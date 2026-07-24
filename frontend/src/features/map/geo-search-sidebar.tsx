@@ -272,7 +272,7 @@ export function GeoSearchSidebar({
                         type="button"
                         aria-label="No child datasets"
                         onClick={() => {
-                          window.alert("Mục này không có dữ liệu con.");
+                          window.alert("This item has no child data.");
                         }}
                       >
                         +

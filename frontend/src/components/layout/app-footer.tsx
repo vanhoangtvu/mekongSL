@@ -44,7 +44,7 @@ export function AppFooter() {
           )}
         </div>
         <div className="app-footer-copyright">
-          © 2026 WebGIS developed by HYDARY Tech.
+          © 2026 WebGIS developed by MSL.
         </div>
       </div>
     </footer>

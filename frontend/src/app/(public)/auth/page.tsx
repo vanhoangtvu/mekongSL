@@ -48,21 +48,23 @@ export default function AuthPage() {
     <div className={styles.authPage}>
       <button className={styles.backHome} onClick={() => router.push('/')}>
         <Home size={20} />
-        Về trang chủ
+        Back to Home
       </button>
 
       <div className={styles.authContainer}>
         <div className={styles.authCard}>
           <div className={styles.authHeader}>
             <div className={styles.authLogo}>
-              <span className={styles.logoIcon}>🌊</span>
-              <h1>Mekong WebGIS</h1>
+              <div className={styles.logoWrapper}>
+                <img src="/logo.png" alt="Mekong Salt Lab" />
+              </div>
             </div>
             <p className={styles.authSubtitle}>
-              {isLogin ? 'Đăng nhập vào hệ thống' : 'Tạo tài khoản mới'}
+              {isLogin ? 'Sign in to the system' : 'Create a new account'}
             </p>
           </div>
 
+          <div className={styles.authBody}>
           <div className={styles.authTabs}>
             <button
               type="button"
@@ -72,7 +74,7 @@ export default function AuthPage() {
                 setError('');
               }}
             >
-              Đăng nhập
+              Sign In
             </button>
             <button
               type="button"
@@ -82,7 +84,7 @@ export default function AuthPage() {
                 setError('');
               }}
             >
-              Đăng ký
+              Sign Up
             </button>
           </div>
 
@@ -97,14 +99,14 @@ export default function AuthPage() {
             <div className={styles.formGroup}>
               <label htmlFor="username">
                 <User size={16} />
-                Tên đăng nhập
+                Username
               </label>
               <input
                 id="username"
                 type="text"
                 value={formData.username}
                 onChange={(e) => setFormData({ ...formData, username: e.target.value })}
-                placeholder="Nhập tên đăng nhập"
+                placeholder="Enter username"
                 required
                 minLength={3}
               />
@@ -121,7 +123,7 @@ export default function AuthPage() {
                   type="email"
                   value={formData.email}
                   onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-                  placeholder="Nhập email"
+                  placeholder="Enter email"
                   required
                 />
               </div>
@@ -130,7 +132,7 @@ export default function AuthPage() {
             <div className={styles.formGroup}>
               <label htmlFor="password">
                 <Lock size={16} />
-                Mật khẩu
+                Password
               </label>
               <div className={styles.passwordInput}>
                 <input
@@ -138,7 +140,7 @@ export default function AuthPage() {
                   type={showPassword ? 'text' : 'password'}
                   value={formData.password}
                   onChange={(e) => setFormData({ ...formData, password: e.target.value })}
-                  placeholder="Nhập mật khẩu (tối thiểu 6 ký tự)"
+                  placeholder="Enter password (min 6 characters)"
                   required
                   minLength={6}
                 />
@@ -154,20 +156,21 @@ export default function AuthPage() {
 
             <button type="submit" className={styles.authSubmit} disabled={loading}>
               {loading ? (
-                <span className={styles.loading}>Đang xử lý...</span>
+                <span className={styles.loading}>Processing...</span>
               ) : isLogin ? (
                 <>
                   <LogIn size={18} />
-                  Đăng nhập
+                  Sign In
                 </>
               ) : (
                 <>
                   <UserPlus size={18} />
-                  Đăng ký
+                  Sign Up
                 </>
               )}
             </button>
           </form>
+          </div>
         </div>
       </div>
     </div>

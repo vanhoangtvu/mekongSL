@@ -605,14 +605,14 @@ function EcowittStationPopup({
   return (
     <div
       style={{
-        position: "absolute",
+        position: isMobile ? "fixed" : "absolute",
         top: isMobile ? "auto" : "110px",
-        bottom: isMobile ? "12px" : undefined,
+        bottom: isMobile ? "100px" : undefined,
         right: isMobile ? "12px" : "12px",
         left: isMobile ? "12px" : undefined,
         width: isMobile ? "auto" : popupW,
         maxWidth: isMobile ? "min(calc(100vw - 24px), 480px)" : "calc(100vw - 24px)",
-        maxHeight: isMobile ? "62vh" : "82vh",
+        maxHeight: isMobile ? "calc(100dvh - 480px)" : "82vh",
         background: isMobile ? "rgba(255,255,255,0.92)" : "#fff",
         backdropFilter: isMobile ? "blur(16px)" : undefined,
         WebkitBackdropFilter: isMobile ? "blur(16px)" : undefined,
@@ -968,10 +968,18 @@ export const MapStage = React.memo(function MapStage({ startDateTime, endDateTim
     mouseCoordsRef.current = coords;
     setMouseCoords(coords);
   }, []);
+  const clearInspector = useCallback(() => {
+    updateMouseCoords(null);
+    setPixelValues({});
+    setPixelValue(null);
+    setHoveredLuFeature(null);
+    setHoveredVectorProps(null);
+  }, [updateMouseCoords]);
   const [inspectorExpandedKey, setInspectorExpandedKey] = useState<string | null>(null);
   const flashCoordsRef = useRef<[number, number] | null>(null);
   const [flashCoords, setFlashCoords] = useState<[number, number] | null>(null);
-  const pendingStationRef = useRef<{ type: 'wq'; id: number; st: ManualStation } | { type: 'ecowitt'; id: string } | null>(null);
+  const flashZoomLevelRef = useRef<number>(12.5);
+  const pendingStationRef = useRef<{ type: 'wq'; id: number; st: ManualStation } | { type: 'ecowitt'; id: string } | { type: 'gw' } | null>(null);
   const skipZoomRef = useRef(false);
   const overlayVisibilityRef = useRef<Record<string, boolean> | null>(null);
   const pointermoveThrottleRef = useRef<number>(0);
@@ -1669,6 +1677,7 @@ export const MapStage = React.memo(function MapStage({ startDateTime, endDateTim
   const removeLayer = (key: string) => {
     setPlayerLayers(prev => prev.map(l => getLayerKey(l) === key ? { ...l, added: false, visible: false, type: undefined } : l));
     setPendingLayerId(prev => prev === key ? null : prev);
+    clearInspector();
     const [id, type] = key.split(/-(?=[^-]*$)/);
     onRemoveDataset?.(id, type ?? "raster");
   };
@@ -1677,6 +1686,11 @@ export const MapStage = React.memo(function MapStage({ startDateTime, endDateTim
   const toggleLayerVisibility = (key: string) => {
     setPlayerLayers(prev => prev.map(l => getLayerKey(l) === key ? { ...l, visible: !l.visible } : l));
     setPendingLayerId(prev => prev === key ? null : prev);
+    // Clear inspector when hiding a layer
+    const layer = playerLayers.find(l => getLayerKey(l) === key);
+    if (layer?.visible) {
+      clearInspector();
+    }
   };
 
   // Drag-and-drop reordering
@@ -1980,9 +1994,9 @@ export const MapStage = React.memo(function MapStage({ startDateTime, endDateTim
       // duyệt thủ công tất cả vector layers tìm điểm Ground Water gần nhất
       if (!feature?.get('WELL_ID')) {
         for (const [, olLayer] of Object.entries(layerRefs.current)) {
-          const source = (olLayer as VectorLayer)?.getSource?.() as VectorSource | undefined;
-          if (!source) continue;
-          const features = source.getFeatures();
+          const source = (olLayer as VectorLayer)?.getSource?.();
+          if (!source || typeof (source as VectorSource).getFeatures !== 'function') continue;
+          const features = (source as VectorSource).getFeatures();
           for (const f of features) {
             if (!f.get('WELL_ID')) continue;
             const geom = f.getGeometry();
@@ -2022,6 +2036,7 @@ export const MapStage = React.memo(function MapStage({ startDateTime, endDateTim
                 const coords = isWgs84
                   ? fromLonLat([st.x, st.y])
                   : transform([st.x, st.y], 'EPSG:32648', 'EPSG:3857');
+                flashZoomLevelRef.current = 12.5;
                 pendingStationRef.current = { type: 'wq', id: wqId, st };
                 setFlashCoords(coords as [number, number]);
               }
@@ -2053,6 +2068,7 @@ export const MapStage = React.memo(function MapStage({ startDateTime, endDateTim
               const device = ecowittDevices.find(d => d.id === devId);
               if (device && device.lat != null && device.lng != null) {
                 const coords = fromLonLat([device.lng, device.lat]);
+                flashZoomLevelRef.current = 12.5;
                 pendingStationRef.current = { type: 'ecowitt', id: devId };
                 setFlashCoords(coords as [number, number]);
               }
@@ -2072,43 +2088,83 @@ export const MapStage = React.memo(function MapStage({ startDateTime, endDateTim
           } else {
             setPopupDeviceId(null);
             setSelectedWqStation(null);
-            // Lưu view state trước khi zoom (nếu chưa được lưu bởi effect)
-            const gView = map.getView();
-            if (!previousMapViewStateRef.current) {
-              const gCenter = gView.getCenter();
-              const gZoom = gView.getZoom();
-              if (gCenter && gZoom !== undefined) {
-                previousMapViewStateRef.current = {
-                  center: [gCenter[0], gCenter[1]],
-                  zoom: gZoom,
-                };
+            if (isMobileRef.current) {
+              // Mobile: zoom with offset to avoid popup covering the well
+              updateMouseCoords(null);
+              setPixelValues({});
+              const gView = map.getView();
+              if (!previousMapViewStateRef.current) {
+                const gCenter = gView.getCenter();
+                const gZoom = gView.getZoom();
+                if (gCenter && gZoom !== undefined) {
+                  previousMapViewStateRef.current = {
+                    center: [gCenter[0], gCenter[1]],
+                    zoom: gZoom,
+                  };
+                }
               }
+              const geom = feature.getGeometry();
+              if (geom && geom instanceof Point) {
+                const coords = geom.getCoordinates();
+                const offsetPx = 220;
+                const res = gView.getResolutionForZoom(18);
+                gView.cancelAnimations();
+                gView.animate({
+                  center: [coords[0], coords[1] - offsetPx * res],
+                  zoom: 18,
+                  duration: 600,
+                  easing: easeOut,
+                });
+              }
+              const props = feature.getProperties();
+              const formatted: Record<string, string> = {};
+              for (const [k, v] of Object.entries(props)) {
+                if (k === 'geometry') continue;
+                const isMeasField = k.startsWith('X') && /^X\d{3}_\d{2}$/.test(k);
+                const displayKey = isMeasField
+                  ? '20' + k.slice(2, 4) + '-' + k.slice(5)
+                  : k;
+                formatted[displayKey] = String(v ?? '');
+              }
+              setSelectedGroundwater(formatted);
+              selectedGroundwaterRef.current = wellId;
+            } else {
+              // Desktop: zoom directly
+              const gView = map.getView();
+              if (!previousMapViewStateRef.current) {
+                const gCenter = gView.getCenter();
+                const gZoom = gView.getZoom();
+                if (gCenter && gZoom !== undefined) {
+                  previousMapViewStateRef.current = {
+                    center: [gCenter[0], gCenter[1]],
+                    zoom: gZoom,
+                  };
+                }
+              }
+              const geom = feature.getGeometry();
+              if (geom && geom instanceof Point) {
+                const coords = geom.getCoordinates();
+                gView.cancelAnimations();
+                gView.animate({
+                  center: coords,
+                  zoom: 18,
+                  duration: 600,
+                  easing: easeOut,
+                });
+              }
+              const props = feature.getProperties();
+              const formatted: Record<string, string> = {};
+              for (const [k, v] of Object.entries(props)) {
+                if (k === 'geometry') continue;
+                const isMeasField = k.startsWith('X') && /^X\d{3}_\d{2}$/.test(k);
+                const displayKey = isMeasField
+                  ? '20' + k.slice(2, 4) + '-' + k.slice(5)
+                  : k;
+                formatted[displayKey] = String(v ?? '');
+              }
+              setSelectedGroundwater(formatted);
+              selectedGroundwaterRef.current = wellId;
             }
-            // Zoom sát đến vị trí giếng
-            const geom = feature.getGeometry();
-            if (geom && geom instanceof Point) {
-              const coords = geom.getCoordinates();
-              gView.cancelAnimations();
-              gView.animate({
-                center: coords,
-                zoom: 18,
-                duration: 600,
-                easing: easeOut,
-              });
-            }
-            const props = feature.getProperties();
-            const formatted: Record<string, string> = {};
-            for (const [k, v] of Object.entries(props)) {
-              if (k === 'geometry') continue;
-              // Format X006_01 → 2006-01, X015_02 → 2015-02
-              const isMeasField = k.startsWith('X') && /^X\d{3}_\d{2}$/.test(k);
-              const displayKey = isMeasField
-                ? '20' + k.slice(2, 4) + '-' + k.slice(5)
-                : k;
-              formatted[displayKey] = String(v ?? '');
-            }
-            setSelectedGroundwater(formatted);
-            selectedGroundwaterRef.current = wellId;
           }
           handled = true;
         }
@@ -2399,7 +2455,7 @@ export const MapStage = React.memo(function MapStage({ startDateTime, endDateTim
     const layer = inspectLayerRef.current;
     if (!source || !layer) return;
 
-    const showPin = isMobile && mouseCoords !== null && Object.keys(pixelValues).length > 0 && !flashCoords;
+    const showPin = isMobile && mouseCoords !== null && !flashCoords;
 
     if (showPin) {
       source.clear();
@@ -2412,7 +2468,7 @@ export const MapStage = React.memo(function MapStage({ startDateTime, endDateTim
       source.clear();
       layer.setVisible(false);
     }
-  }, [isMobile, mouseCoords, pixelValues, flashCoords]);
+  }, [isMobile, mouseCoords, pixelValues, flashCoords, hoveredLuFeature, hoveredVectorProps]);
 
   // Save/Restore Map View State when selecting/deselecting stations
   useEffect(() => {
@@ -2553,11 +2609,15 @@ export const MapStage = React.memo(function MapStage({ startDateTime, endDateTim
       }
     }
 
-    // Zoom to station (no offset, center on station)
+    // Zoom to station - offset center upward so target appears above popup area
     view.cancelAnimations();
+    const targetZoom = flashZoomLevelRef.current;
+    const resolution = view.getResolutionForZoom(targetZoom);
+    const popupOffsetPx = 300; // shift up ~300px to avoid popup covering target
+    const yOffset = popupOffsetPx * resolution;
     view.animate({
-      center: flashCoords,
-      zoom: 12.5,
+      center: [flashCoords[0], flashCoords[1] - yOffset],
+      zoom: targetZoom,
       duration: 700,
       easing: easeOut,
     });
@@ -2589,9 +2649,10 @@ export const MapStage = React.memo(function MapStage({ startDateTime, endDateTim
           skipZoomRef.current = true;
           if (pending.type === 'wq') {
             setSelectedWqStation(pending.st);
-          } else {
+          } else if (pending.type === 'ecowitt') {
             setPopupDeviceId(pending.id);
           }
+          // type === 'gw': popup already set before flash, nothing to do
         }
         setFlashCoords(null);
         return;
@@ -2611,6 +2672,7 @@ export const MapStage = React.memo(function MapStage({ startDateTime, endDateTim
       source!.clear();
       layer!.setVisible(false);
       pendingStationRef.current = null;
+      flashZoomLevelRef.current = 12.5;
     };
   }, [flashCoords]);
 
@@ -2987,60 +3049,69 @@ export const MapStage = React.memo(function MapStage({ startDateTime, endDateTim
                                 <div className={`map-layer-loading-fill is-${status}`} />
                               </div>
                               <span className="map-layer-loading-text">
-                                {status === "listing" ? "Đang tìm dữ liệu..." : "Đang render lên bản đồ..."}
+                                {status === "listing" ? "Listing data..." : "Rendering on map..."}
                               </span>
                             </div>
                           );
                         })()}
 
-                        {/* Opacity slider — only when added */}
-                        {layer.added && (
-                          <input
-                            className="map-player-opacity-slider"
-                            type="range"
-                            min={0} max={1} step={0.05}
-                            value={layer.opacity ?? 0.7}
-                            title={`Opacity: ${Math.round((layer.opacity ?? 0.7) * 100)}%`}
-                            draggable={false}
-                            onMouseDown={(e) => e.stopPropagation()}
-                            onPointerDown={(e) => e.stopPropagation()}
-                            onClick={(e) => e.stopPropagation()}
-                            onChange={(e) => {
-                              const val = parseFloat(e.target.value);
-                              setPlayerLayers(prev => prev.map(l => getLayerKey(l) === layerKey ? { ...l, opacity: val } : l));
-                            }}
-                          />
-                        )}
+                        {/* Controls hidden while loading — show only when ready */}
+                        {(() => {
+                          const loadStatus = loadingStatus[layerKey];
+                          if (loadStatus && loadStatus !== "ready") return null;
+                          return (
+                            <>
+                              {/* Opacity slider — only when added */}
+                              {layer.added && (
+                                <input
+                                  className="map-player-opacity-slider"
+                                  type="range"
+                                  min={0} max={1} step={0.05}
+                                  value={layer.opacity ?? 0.7}
+                                  title={`Opacity: ${Math.round((layer.opacity ?? 0.7) * 100)}%`}
+                                  draggable={false}
+                                  onMouseDown={(e) => e.stopPropagation()}
+                                  onPointerDown={(e) => e.stopPropagation()}
+                                  onClick={(e) => e.stopPropagation()}
+                                  onChange={(e) => {
+                                    const val = parseFloat(e.target.value);
+                                    setPlayerLayers(prev => prev.map(l => getLayerKey(l) === layerKey ? { ...l, opacity: val } : l));
+                                  }}
+                                />
+                              )}
 
-                        {/* Layer type badge */}
-                        {layer.type && (
-                          <span className="map-player-item-type-badge">{isMobile ? layer.type === "raster" ? "R" : layer.type === "vector" ? "V" : layer.type : layer.type}</span>
-                        )}
+                              {/* Layer type badge */}
+                              {layer.type && (
+                                <span className="map-player-item-type-badge">{isMobile ? layer.type === "raster" ? "R" : layer.type === "vector" ? "V" : layer.type : layer.type}</span>
+                              )}
 
-                        {/* Visibility + Remove */}
-                        <div className="map-player-item-actions">
-                          <button
-                            className={`map-player-item-tick ${layer.visible ? "is-visible" : ""}`}
-                            title={layer.visible ? "Hide layer" : "Show layer"}
-                            type="button"
-                            onClick={() => toggleLayerVisibility(layerKey)}
-                          >
-                            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
-                              <polyline points="20 6 9 17 4 12"/>
-                            </svg>
-                          </button>
-                          <button
-                            className="map-player-item-remove"
-                            title="Remove layer"
-                            type="button"
-                            onClick={() => removeLayer(layerKey)}
-                          >
-                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round">
-                              <line x1="18" y1="6" x2="6" y2="18"/>
-                              <line x1="6" y1="6" x2="18" y2="18"/>
-                            </svg>
-                          </button>
-                        </div>
+                              {/* Visibility + Remove */}
+                              <div className="map-player-item-actions">
+                                <button
+                                  className={`map-player-item-tick ${layer.visible ? "is-visible" : ""}`}
+                                  title={layer.visible ? "Hide layer" : "Show layer"}
+                                  type="button"
+                                  onClick={() => toggleLayerVisibility(layerKey)}
+                                >
+                                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+                                    <polyline points="20 6 9 17 4 12"/>
+                                  </svg>
+                                </button>
+                                <button
+                                  className="map-player-item-remove"
+                                  title="Remove layer"
+                                  type="button"
+                                  onClick={() => removeLayer(layerKey)}
+                                >
+                                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round">
+                                    <line x1="18" y1="6" x2="6" y2="18"/>
+                                    <line x1="6" y1="6" x2="18" y2="18"/>
+                                  </svg>
+                                </button>
+                              </div>
+                            </>
+                          );
+                        })()}
                       </div>
                     );
                   })}
@@ -3324,7 +3395,7 @@ export const MapStage = React.memo(function MapStage({ startDateTime, endDateTim
           </div>
         )}
 
-        {((Object.keys(pixelValues).length > 0 || hoveredLuFeature || hoveredVectorProps) && mouseCoords !== null) && (
+        {((isMobile || Object.keys(pixelValues).length > 0 || hoveredLuFeature || hoveredVectorProps) && mouseCoords !== null) && (
           <div className={`geo-map-inspector ${isMobile ? 'geo-map-inspector--mobile' : ''}`}>
             {/* Header */}
             <div 
@@ -3347,7 +3418,7 @@ export const MapStage = React.memo(function MapStage({ startDateTime, endDateTim
                 {isMobile && (
                   <button
                     type="button"
-                    onClick={(e) => { e.stopPropagation(); setPixelValues({}); updateMouseCoords(null); }}
+                    onClick={(e) => { e.stopPropagation(); clearInspector(); }}
                     style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#64748b', display: 'flex', alignItems: 'center', padding: '2px' }}
                     aria-label="Close inspector"
                   >
@@ -3656,9 +3727,10 @@ export const MapStage = React.memo(function MapStage({ startDateTime, endDateTim
             position: isMobile ? 'fixed' : 'absolute',
             top: isMobile ? 'auto' : '110px',
             right: isMobile ? '12px' : '12px',
-            bottom: isMobile ? '12px' : 'auto',
+            bottom: isMobile ? '100px' : 'auto',
             left: isMobile ? '12px' : 'auto',
             width: isMobile ? 'auto' : (selectedWqStation.stationType === 'surface_water' ? '720px' : '420px'), 
+            maxHeight: isMobile ? 'calc(100dvh - 480px)' : undefined, 
             background: isMobile ? 'rgba(255,255,255,0.92)' : '#ffffff', 
             borderRadius: '16px',
             boxShadow: isMobile ? '0 4px 24px rgba(0,0,0,0.15)' : '0 10px 25px -5px rgba(0,0,0,0.1), 0 8px 10px -6px rgba(0,0,0,0.1), 0 0 0 1px rgba(0,0,0,0.05)', 
@@ -3879,15 +3951,15 @@ export const MapStage = React.memo(function MapStage({ startDateTime, endDateTim
               position: isMobile ? 'fixed' : 'absolute',
               top: isMobile ? 'auto' : '110px',
               right: '12px',
-              bottom: isMobile ? '12px' : 'auto',
+              bottom: isMobile ? '100px' : 'auto',
               left: isMobile ? '12px' : 'auto',
               width: isMobile ? 'auto' : '400px',
               maxWidth: isMobile ? 'min(calc(100vw - 24px), 480px)' : 'calc(100vw - 24px)',
-              maxHeight: isMobile ? '62vh' : '70vh',
+              maxHeight: isMobile ? 'calc(100dvh - 480px)' : '70vh',
               background: isMobile ? 'rgba(255,255,255,0.92)' : '#ffffff',
               backdropFilter: isMobile ? 'blur(16px)' : undefined,
               borderRadius: '16px',
-              boxShadow: '0 6px 32px rgba(0,0,0,0.18)',
+              boxShadow: '0 4px 24px rgba(0,0,0,0.15)',
               zIndex: isMobile ? 10000 : 1000,
               border: '1px solid #e2e8f0',
               display: 'flex',
@@ -3899,67 +3971,67 @@ export const MapStage = React.memo(function MapStage({ startDateTime, endDateTim
               {/* Header */}
               <div style={{
                 display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-                padding: '14px 16px',
+                padding: isMobile ? '10px 14px' : '14px 16px',
                 borderBottom: '1px solid #e2e8f0',
                 background: 'linear-gradient(135deg, rgba(13,110,253,0.05) 0%, #ffffff 100%)',
                 flexShrink: 0,
               }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', minWidth: 0 }}>
-                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#0d6efd" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '6px', minWidth: 0 }}>
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#0d6efd" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
                     <path d="M12 2a8 8 0 0 0-8 8c0 5 8 12 8 12s8-7 8-12a8 8 0 0 0-8-8z"/><circle cx="12" cy="10" r="3"/>
                   </svg>
                   <div style={{ minWidth: 0 }}>
-                    <div style={{ fontSize: '0.9rem', fontWeight: '700', color: '#0f172a', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} title={wellId}>
+                    <div style={{ fontSize: isMobile ? '0.82rem' : '0.9rem', fontWeight: '700', color: '#0f172a', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} title={wellId}>
                       Well: {wellId}
                     </div>
-                    <div style={{ fontSize: '0.72rem', color: '#64748b', fontWeight: '600' }}>
+                    <div style={{ fontSize: isMobile ? '0.65rem' : '0.72rem', color: '#64748b', fontWeight: '600' }}>
                       {aquifer}
                     </div>
                   </div>
                 </div>
                 <button type="button" onClick={() => { setSelectedGroundwater(null); selectedGroundwaterRef.current = null; }}
                   style={{ background: '#f1f5f9', border: '1px solid #cbd5e1', cursor: 'pointer', color: '#475569',
-                    width: '28px', height: '28px', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, fontSize: '16px', lineHeight: 1 }}>
+                    width: isMobile ? '32px' : '28px', height: isMobile ? '32px' : '28px', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, fontSize: isMobile ? '18px' : '16px', lineHeight: 1 }}>
                   ×
                 </button>
               </div>
               {/* Body */}
-              <div style={{ flex: 1, overflowY: 'auto', padding: '12px 16px', minHeight: 0 }}>
+              <div style={{ flex: 1, overflowY: 'auto', padding: isMobile ? '10px 14px' : '12px 16px', minHeight: 0 }}>
                 {/* Depth info */}
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '8px', marginBottom: '12px' }}>
-                  <div style={{ padding: '8px', borderRadius: '8px', background: '#f0f9ff', border: '1px solid #bae6fd' }}>
-                    <div style={{ fontSize: '0.6rem', color: '#64748b', fontWeight: '600', textTransform: 'uppercase' }}>Min Depth</div>
-                    <div style={{ fontSize: '0.95rem', fontWeight: '700', color: '#0369a1' }}>{minDepth || '—'} m</div>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: isMobile ? '6px' : '8px', marginBottom: isMobile ? '10px' : '12px' }}>
+                  <div style={{ padding: isMobile ? '6px' : '8px', borderRadius: '8px', background: '#f0f9ff', border: '1px solid #bae6fd' }}>
+                    <div style={{ fontSize: isMobile ? '0.55rem' : '0.6rem', color: '#64748b', fontWeight: '600', textTransform: 'uppercase' }}>Min</div>
+                    <div style={{ fontSize: isMobile ? '0.85rem' : '0.95rem', fontWeight: '700', color: '#0369a1' }}>{minDepth || '—'} m</div>
                   </div>
-                  <div style={{ padding: '8px', borderRadius: '8px', background: '#f0fdf4', border: '1px solid #bbf7d0' }}>
-                    <div style={{ fontSize: '0.6rem', color: '#64748b', fontWeight: '600', textTransform: 'uppercase' }}>Max Depth</div>
-                    <div style={{ fontSize: '0.95rem', fontWeight: '700', color: '#16a34a' }}>{maxDepth || '—'} m</div>
+                  <div style={{ padding: isMobile ? '6px' : '8px', borderRadius: '8px', background: '#f0fdf4', border: '1px solid #bbf7d0' }}>
+                    <div style={{ fontSize: isMobile ? '0.55rem' : '0.6rem', color: '#64748b', fontWeight: '600', textTransform: 'uppercase' }}>Max</div>
+                    <div style={{ fontSize: isMobile ? '0.85rem' : '0.95rem', fontWeight: '700', color: '#16a34a' }}>{maxDepth || '—'} m</div>
                   </div>
-                  <div style={{ padding: '8px', borderRadius: '8px', background: '#fefce8', border: '1px solid #fde68a' }}>
-                    <div style={{ fontSize: '0.6rem', color: '#64748b', fontWeight: '600', textTransform: 'uppercase' }}>Avg Depth</div>
-                    <div style={{ fontSize: '0.95rem', fontWeight: '700', color: '#ca8a04' }}>{avegDepth || '—'} m</div>
+                  <div style={{ padding: isMobile ? '6px' : '8px', borderRadius: '8px', background: '#fefce8', border: '1px solid #fde68a' }}>
+                    <div style={{ fontSize: isMobile ? '0.55rem' : '0.6rem', color: '#64748b', fontWeight: '600', textTransform: 'uppercase' }}>Avg</div>
+                    <div style={{ fontSize: isMobile ? '0.85rem' : '0.95rem', fontWeight: '700', color: '#ca8a04' }}>{avegDepth || '—'} m</div>
                   </div>
                 </div>
                 {/* Measurement data */}
                 {measurements.length > 0 && (
                   <>
-                    <div style={{ fontSize: '0.72rem', fontWeight: '700', color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: '8px' }}>
-                      Measurement Data (Monthly)
+                    <div style={{ fontSize: isMobile ? '0.65rem' : '0.72rem', fontWeight: '700', color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: isMobile ? '6px' : '8px' }}>
+                      Monthly Data
                     </div>
-                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(130px, 1fr))', gap: '6px' }}>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(110px, 1fr))', gap: isMobile ? '5px' : '6px' }}>
                       {measurements.map(([dateKey, val]) => (
-                        <div key={dateKey} style={{ padding: '5px 8px', borderRadius: '6px', background: '#f8fafc', border: '1px solid #e2e8f0' }}>
-                          <div style={{ fontSize: '0.65rem', color: '#64748b', fontWeight: '600' }}>{dateKey}</div>
-                          <div style={{ fontSize: '0.82rem', fontWeight: '700', color: '#0f172a', fontFamily: '"JetBrains Mono",monospace' }}>{val}</div>
+                        <div key={dateKey} style={{ padding: isMobile ? '4px 6px' : '5px 8px', borderRadius: '6px', background: '#f8fafc', border: '1px solid #e2e8f0' }}>
+                          <div style={{ fontSize: isMobile ? '0.6rem' : '0.65rem', color: '#64748b', fontWeight: '600' }}>{dateKey}</div>
+                          <div style={{ fontSize: isMobile ? '0.78rem' : '0.82rem', fontWeight: '700', color: '#0f172a', fontFamily: '"JetBrains Mono",monospace' }}>{val}</div>
                         </div>
                       ))}
                     </div>
                   </>
                 )}
                 {/* Other properties */}
-                <div style={{ marginTop: '12px', borderTop: '1px solid #e2e8f0', paddingTop: '10px' }}>
-                  <div style={{ fontSize: '0.72rem', fontWeight: '700', color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: '6px' }}>Well Info</div>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', fontSize: '0.78rem' }}>
+                <div style={{ marginTop: isMobile ? '10px' : '12px', borderTop: '1px solid #e2e8f0', paddingTop: isMobile ? '8px' : '10px' }}>
+                  <div style={{ fontSize: isMobile ? '0.65rem' : '0.72rem', fontWeight: '700', color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: '4px' }}>Well Info</div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '3px', fontSize: isMobile ? '0.72rem' : '0.78rem' }}>
                     {Object.entries(gw)
                       .filter(([k]) => !['WELL_ID','AQUIFER','MIN_DEPTH_','MAX_DEPTH_','AVEG_DEPTH','geometry','_vct_attr','UNI_ID'].includes(k) && !/^\d{4}-\d{2}$/.test(k))
                       .map(([k, v]) => (

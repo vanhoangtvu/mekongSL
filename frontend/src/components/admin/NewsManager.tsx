@@ -795,7 +795,7 @@ export default function NewsManager() {
                 })}
                 <div className="nm-sidebar-acts">
                   <button className="nm-btn nm-btn-primary nm-btn-block" type="submit" disabled={saving}>
-                    {saving ? "Đang lưu..." : editingId ? "Cập nhật" : "Đăng bài"}
+                    {saving ? "Saving..." : editingId ? "Update" : "Publish"}
                   </button>
                   <button className="nm-btn nm-btn-ghost nm-btn-block" type="button" onClick={cancelEdit}>
                     Hủy

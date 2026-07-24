@@ -391,7 +391,7 @@ export default function DashboardPage() {
                       <div className="d-grid-2">
                         {[
                           { key: "users" as const, icon: Users, label: "Người dùng", desc: "Quản lý tài khoản & phân quyền", color: "#6366f1" },
-                          { key: "news" as const, icon: Newspaper, label: "Tin tức", desc: "Đăng bài viết & sự kiện mới", color: "#3b82f6" },
+                          { key: "news" as const, icon: Newspaper, label: "News", desc: "Post articles & new events", color: "#3b82f6" },
                           { key: "storage" as const, icon: Server, label: "S3 Storage", desc: "Quản lý tệp tin trực tuyến", color: "#10b981" },
                           { key: "gis" as const, icon: FolderOpen, label: "GIS Layers", desc: "Cấu trúc bản đồ & dữ liệu", color: "#f59e0b" },
                           { key: "data" as const, icon: Database, label: "Dữ liệu", desc: "Đồng bộ hóa & xuất báo cáo", color: "#ec4899" },

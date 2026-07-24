@@ -60,7 +60,7 @@ export function AppHeader({ onToggleSidebar, isSidebarOpen }: AppHeaderProps) {
               </span>
               <button onClick={handleLogout} className="logout-btn">
                 <LogOut size={16} />
-                <span className="logout-btn-text">Đăng xuất</span>
+                <span className="logout-btn-text">Sign Out</span>
               </button>
             </>
           ) : (
