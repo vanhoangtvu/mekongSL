@@ -344,7 +344,7 @@ start_frontend() {
   echo -e "  ${YELLOW}→ Khởi động frontend...${NC}"
   cd "$FRONTEND_DIR"
   > "$FE_LOG"
-  nohup npm run dev > "$FE_LOG" 2>&1 &
+  setsid npm run dev > "$FE_LOG" 2>&1 &
   local pid=$!
   disown "$pid" 2>/dev/null || true
   echo "$pid" > "$FE_PID_FILE"
@@ -377,7 +377,7 @@ start_frontend_prod() {
   }
   echo -e "  ${YELLOW}→ Khởi động frontend production...${NC}"
   > "$FE_LOG"
-  nohup npm run start > "$FE_LOG" 2>&1 &
+  setsid npm run start > "$FE_LOG" 2>&1 &
   local pid=$!
   disown "$pid" 2>/dev/null || true
   echo "$pid" > "$FE_PID_FILE"

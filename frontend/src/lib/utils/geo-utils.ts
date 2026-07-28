@@ -11,8 +11,9 @@ export function computePolygonAreaHa(geom: OLGeometry | null | undefined): numbe
   try {
     const gt = geom.getType();
     if (gt !== 'Polygon' && gt !== 'MultiPolygon') { areaCache.set(geom, 0); return 0; }
-    // Use ol/sphere.getArea for accurate geodesic area (handles Web Mercator distortion)
-    const areaSqM = getArea(geom as any);
+    // Geometry is in EPSG:3857 (Web Mercator), tell getArea so it can transform to lon/lat
+    // before computing geodesic area. Without projection, getArea assumes EPSG:4326.
+    const areaSqM = getArea(geom as any, { projection: 'EPSG:3857' });
     const result = areaSqM / 10000;
     areaCache.set(geom, result);
     return result;

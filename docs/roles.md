@@ -39,7 +39,7 @@
 - Quản lý manual stations (import Excel)
 - Quản lý water quality (import Excel, xóa sample)
 - Quản lý monitoring data
-- Quản lý articles (CRUD)
+- Xem articles (danh sách & chi tiết)
 
 **Default account:**
 - Username: `manager`
@@ -80,7 +80,8 @@
 | `GET /api/s3/stats` | ❌ | ✅ | ✅ |
 | `POST /api/data/**` | ❌ | ✅ | ✅ |
 | GIS CRUD | ❌ | ✅ | ✅ |
-| Articles CRUD | ❌ | ✅ | ✅ |
+| Articles list (GET) | ✅ | ✅ | ✅ |
+| Articles create/update/delete | ❌ | ❌ | ✅ |
 | `GET /api/admin/users` | ❌ | ❌ | ✅ |
 | `POST /api/backup` | ❌ | ❌ | ✅ |
 
@@ -147,7 +148,8 @@
 | `/api/gis/tags` (CRUD) | ALL | Ko | Co | Co |
 | `/api/gis/manual-stations` (POST/PUT/DELETE) | WRITE | Ko | Co | Co |
 | `/api/gis/water-quality` (POST/DELETE) | WRITE | Ko | Co | Co |
-| `/api/articles` (CRUD) | ALL | Ko | Co | Co |
+| `/api/articles` (GET) | GET | Ko | Co | Co |
+| `/api/articles` (POST/PUT/DELETE) | WRITE | Ko | Ko | Co |
 | `/api/backup` | ALL | Ko | Co | Co |
 | `/api/admin/users` | GET/POST | Ko | Ko | Co |
 | `/api/admin/users/{id}` | PUT/DELETE | Ko | Ko | Co |

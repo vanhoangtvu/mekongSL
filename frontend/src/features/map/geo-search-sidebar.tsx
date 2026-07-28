@@ -178,9 +178,9 @@ export function GeoSearchSidebar({
 
   const isAdminDataset = (id: string) => id.startsWith("admin-");
 
-  const hasRasterOption = (id: string) => !isAdminDataset(id) && !id.startsWith('baseline-landuse-plan') && !id.startsWith('channel-system/') && !id.startsWith('ecology-') && !id.startsWith('baseline-soil') && !id.startsWith('baseline-groundwater') && !id.startsWith('baseline-road');
+  const hasRasterOption = (id: string) => !isAdminDataset(id) && !id.startsWith('baseline-landuse-plan') && !id.startsWith('channel-system/') && !id.startsWith('ecology-') && !id.startsWith('baseline-soil') && !id.startsWith('baseline-groundwater') && !id.startsWith('baseline-road') && !id.startsWith('flooding/');
 
-  const hasVectorOption = (id: string) => !id.startsWith('landuse-classification/') && !id.startsWith('hydro-') && !id.startsWith('landsat-') && !id.startsWith('flooding');
+  const hasVectorOption = (id: string) => !id.startsWith('landuse-classification/') && !id.startsWith('hydro-') && !id.startsWith('landsat-');
 
   const getDefaultDatasetType = (datasetId: string): "raster" | "vector" => {
     if (isAdminDataset(datasetId) || datasetId.startsWith('ecology-') || datasetId.startsWith('baseline-soil') || datasetId.startsWith('baseline-groundwater') || datasetId.startsWith('baseline-road')) return "vector";

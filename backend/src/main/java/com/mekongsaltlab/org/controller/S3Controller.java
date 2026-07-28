@@ -104,9 +104,23 @@ public class S3Controller {
         InputStream inputStream = s3Service.downloadFile(cleanKey);
         String filename = cleanKey.contains("/") ? cleanKey.substring(cleanKey.lastIndexOf("/") + 1) : cleanKey;
 
+        // Detect image MIME types for inline display (instead of attachment download)
+        String ext = filename.contains(".") ? filename.substring(filename.lastIndexOf('.') + 1).toLowerCase() : "";
+        MediaType mediaType = switch (ext) {
+            case "jpg", "jpeg" -> MediaType.IMAGE_JPEG;
+            case "png" -> MediaType.IMAGE_PNG;
+            case "gif" -> MediaType.IMAGE_GIF;
+            case "webp" -> MediaType.valueOf("image/webp");
+            case "bmp" -> MediaType.valueOf("image/bmp");
+            case "svg" -> MediaType.valueOf("image/svg+xml");
+            case "tif", "tiff" -> MediaType.valueOf("image/tiff");
+            default -> MediaType.APPLICATION_OCTET_STREAM;
+        };
+        boolean isImage = mediaType != MediaType.APPLICATION_OCTET_STREAM;
+
         return ResponseEntity.ok()
-                .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + filename + "\"")
-                .contentType(MediaType.APPLICATION_OCTET_STREAM)
+                .header(HttpHeaders.CONTENT_DISPOSITION, isImage ? "inline" : "attachment; filename=\"" + filename + "\"")
+                .contentType(mediaType)
                 .body(new InputStreamResource(inputStream));
     }
 

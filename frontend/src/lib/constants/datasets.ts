@@ -126,7 +126,10 @@ export const DATASETS: DatasetItem[] = [
     name: "Flooding Modeling",
     slug: "flooding-modeling",
     group: "gis",
-    timeScale: "year",
+    children: [
+      { id: "flooding/flooding-distribution", name: "Flooding Distribution", type: "vector", timeScale: "year" },
+      { id: "flooding/flood-depth", name: "Flood Depth", type: "vector", timeScale: "year" },
+    ],
   },
   {
     id: "hydrology",

@@ -20,6 +20,7 @@ import { register } from "ol/proj/proj4";
 import { DATASETS, getRootDataset, getDatasetSlug, getParentDataset, getDatasetById, getTimeScale, type TimeScale } from "../../lib/constants/datasets";
 import { ECOWITT_DEVICES, type EcowittDevice } from "../../lib/constants/data-sources";
 import { LAND_NAMES, LAYER_NAMES } from "../../lib/constants/landuse-codes";
+import { TRA_VINH_AREA_HA } from "../../lib/constants/app";
 import { computePolygonAreaHa } from "../../lib/utils/geo-utils";
 import { useS3DatasetLayers } from "./useS3DatasetLayers";
 import type { ManualStation } from "../../lib/admin-api";
@@ -994,7 +995,7 @@ export const MapStage = React.memo(function MapStage({ startDateTime, endDateTim
   const landuseStatsFetching = useRef<Set<string>>(new Set());
 
   const [hoveredLuFeature, setHoveredLuFeature] = useState<{
-    code: string; name: string; color: string; area: string; pctOfTotal: string;
+    code: string; name: string; color: string; area: string; pctOfProvince: string;
     layerName: string; geomType: string; linetype: string; entityHandle: string; subClass: string;
     district: string;
   } | null>(null);
@@ -2239,11 +2240,11 @@ export const MapStage = React.memo(function MapStage({ startDateTime, endDateTim
         const geom = luFeature.getGeometry();
         const areaHa = computePolygonAreaHa(geom);
         const area = areaHa > 1 ? areaHa.toFixed(1) + ' ha' : (areaHa * 10000).toFixed(0) + ' m²';
-        let pctOfTotal = '';
+        let pctOfProvince = '';
         try {
           const luStats = (luLayer as any)?.get('_luStats');
-          if (luStats && luStats.totalAreaHa > 0 && luStats.codeAreaHa[code]) {
-            pctOfTotal = (luStats.codeAreaHa[code] * 100 / luStats.totalAreaHa).toFixed(1) + '%';
+          if (luStats && luStats.codeAreaHa[code]) {
+            pctOfProvince = (luStats.codeAreaHa[code] * 100 / TRA_VINH_AREA_HA).toFixed(1) + '%';
           }
         } catch {}
         const layerName = LAYER_NAMES[props.Layer] || props.Layer || 'N/A';
@@ -2264,7 +2265,7 @@ export const MapStage = React.memo(function MapStage({ startDateTime, endDateTim
           }
         } catch {}
         setHoveredLuFeature({
-          code, name: LAND_NAMES[code] || code, color, area, pctOfTotal,
+          code, name: LAND_NAMES[code] || code, color, area, pctOfProvince,
           layerName, geomType, linetype, entityHandle, subClass, district: districtName,
         });
       } else {
@@ -2613,7 +2614,7 @@ export const MapStage = React.memo(function MapStage({ startDateTime, endDateTim
     view.cancelAnimations();
     const targetZoom = flashZoomLevelRef.current;
     const resolution = view.getResolutionForZoom(targetZoom);
-    const popupOffsetPx = 300; // shift up ~300px to avoid popup covering target
+    const popupOffsetPx = 180; // shift up to avoid popup + timeline covering target
     const yOffset = popupOffsetPx * resolution;
     view.animate({
       center: [flashCoords[0], flashCoords[1] - yOffset],
@@ -3478,7 +3479,7 @@ export const MapStage = React.memo(function MapStage({ startDateTime, endDateTim
                           </div>
                           <div style={{ display:'flex', flexDirection:'column', gap:'4px', marginTop:'4px', paddingLeft:'18px', fontSize:'0.78rem' }}>
                             {lu.area && <div style={{ display:'flex', justifyContent:'space-between' }}><span style={{ color:'#64748b', fontWeight:500 }}>Area</span><span style={{ fontWeight:700, color:'#0f172a' }}>{lu.area}</span></div>}
-                            {lu.pctOfTotal && <div style={{ display:'flex', justifyContent:'space-between' }}><span style={{ color:'#64748b', fontWeight:500 }}>% of Total</span><span style={{ fontWeight:700, color:'#0f172a' }}>{lu.pctOfTotal}</span></div>}
+                            {lu.pctOfProvince && <div style={{ display:'flex', justifyContent:'space-between' }}><span style={{ color:'#64748b', fontWeight:500 }}>% of Trà Vinh</span><span style={{ fontWeight:700, color:'#0f172a' }}>{lu.pctOfProvince}</span></div>}
                             {lu.district && <div style={{ display:'flex', justifyContent:'space-between' }}><span style={{ color:'#64748b', fontWeight:500 }}>District</span><span style={{ fontWeight:600, color:'#0f172a' }}>{lu.district}</span></div>}
                             <div style={{ display:'flex', justifyContent:'space-between' }}><span style={{ color:'#64748b', fontWeight:500 }}>Layer</span><span style={{ fontWeight:600, color:'#0f172a' }}>{lu.layerName}</span></div>
                             <div style={{ display:'flex', justifyContent:'space-between' }}><span style={{ color:'#64748b', fontWeight:500 }}>Type</span><span style={{ fontWeight:600, color:'#0f172a' }}>{lu.geomType}</span></div>
@@ -3575,7 +3576,7 @@ export const MapStage = React.memo(function MapStage({ startDateTime, endDateTim
                                   </span>
                                 </div>
                                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                                  <span style={{ color: '#64748b', fontWeight: 500 }}>Landuse (%)</span>
+                                  <span style={{ color: '#64748b', fontWeight: 500 }}>% of Trà Vinh</span>
                                   <span style={{ fontWeight: '700', color: '#0f172a' }}>
                                     {luStats.percentage.toFixed(1)}%
                                   </span>
@@ -3671,7 +3672,7 @@ export const MapStage = React.memo(function MapStage({ startDateTime, endDateTim
                             {luStats && (
                               <>
                                 <div><span className="geo-map-inspector-label" style={{ fontWeight: 600 }}>Area:</span> {luStats.areaHa.toLocaleString(undefined, { maximumFractionDigits: 0 })} ha</div>
-                                <div><span className="geo-map-inspector-label" style={{ fontWeight: 600 }}>Coverage:</span> {luStats.percentage.toFixed(1)}%</div>
+                                <div><span className="geo-map-inspector-label" style={{ fontWeight: 600 }}>% of Trà Vinh:</span> {luStats.percentage.toFixed(1)}%</div>
                               </>
                             )}
                             <div><span className="geo-map-inspector-label" style={{ fontWeight: 600 }}>Layer key:</span> {key}</div>

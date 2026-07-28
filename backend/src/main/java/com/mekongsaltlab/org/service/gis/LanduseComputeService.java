@@ -167,6 +167,9 @@ public class LanduseComputeService {
                     log.info("[lu:compute] Computing: {} / {}", luKey, year);
                     try {
                         LanduseYearlyStats stats = computeSingleTiff(luKey, year, s3Key);
+                        // Nếu đã có dữ liệu cũ, cập nhật thay vì INSERT (tránh duplicate key)
+                        statsRepository.findByLanduseKeyAndYear(luKey, year)
+                            .ifPresent(existing -> stats.setId(existing.getId()));
                         statsRepository.save(stats);
                         progress.get(luKey).put(String.valueOf(year), "done");
                         log.info("[lu:compute] Done: {} / {} → {} ha ({} pixels)", luKey, year, stats.getAreaHa(), stats.getClassPixels());
@@ -250,7 +253,8 @@ public class LanduseComputeService {
         }
 
         double areaHa = (classPixels * pixelAreaM2) / 10000.0;
-        double percentage = totalPixels > 0 ? (classPixels * 100.0 / totalPixels) : 0.0;
+        // Percentage = area of this class relative to actual Tra Vinh province area (211,074 ha)
+        double percentage = (areaHa * 100.0) / 211074.0;
 
         LanduseYearlyStats stats = new LanduseYearlyStats();
         stats.setLanduseKey(landuseKey);

@@ -253,7 +253,8 @@ const GIS_DATASETS = {
   'flooding-modeling': {
     label: 'Flooding Modeling',
     categories: [
-      { key: 'flooding-modeling', label: 'Flooding Modeling' }
+      { key: 'flooding-distribution', label: 'Flooding Distribution' },
+      { key: 'flood-depth', label: 'Flood Depth' }
     ]
   },
   'hydrology': {
@@ -2834,7 +2835,7 @@ function ScheduleConfig({ source }: { source: string }) {
   const autoDetectType = (fileName: string) => {
     const ext = fileName.substring(fileName.lastIndexOf('.')).toLowerCase();
     const rasterExts = ['.tif', '.tiff', '.cog', '.png', '.jpg', '.jpeg', '.rst'];
-    const vectorExts = ['.geojson', '.shp', '.kml', '.gpkg', '.zip', '.vtc', '.vct', '.vdc'];
+    const vectorExts = ['.geojson', '.shp', '.kml', '.gpkg', '.zip', '.vtc', '.vct', '.vdc', '.dbf'];
     
     if (uploadGroup === 'gis') {
       if (rasterExts.includes(ext)) {
@@ -2855,12 +2856,12 @@ function ScheduleConfig({ source }: { source: string }) {
           return { valid: false, message: `File Raster không hợp lệ. Chỉ cho phép các định dạng: ${allowed.join(', ')}` };
         }
       } else if (gisDataType === 'vector') {
-        const allowed = ['.geojson', '.shp', '.kml', '.gpkg', '.zip', '.vtc', '.vct', '.vdc'];
+        const allowed = ['.geojson', '.shp', '.kml', '.gpkg', '.zip', '.vtc', '.vct', '.vdc', '.dbf'];
         if (!allowed.includes(ext)) {
           return { valid: false, message: `File Vector không hợp lệ. Chỉ cho phép các định dạng: ${allowed.join(', ')}` };
         }
       } else {
-        const allowed = ['.tif', '.tiff', '.cog', '.png', '.jpg', '.jpeg', '.rst', '.geojson', '.shp', '.kml', '.gpkg', '.zip', '.vtc', '.vct', '.vdc'];
+        const allowed = ['.tif', '.tiff', '.cog', '.png', '.jpg', '.jpeg', '.rst', '.geojson', '.shp', '.kml', '.gpkg', '.zip', '.vtc', '.vct', '.vdc', '.dbf'];
         if (!allowed.includes(ext)) {
           return { valid: false, message: `File GIS không hợp lệ. Chỉ cho phép các định dạng: ${allowed.join(', ')}` };
         }
