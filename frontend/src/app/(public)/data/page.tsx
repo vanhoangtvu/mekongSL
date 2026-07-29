@@ -1876,6 +1876,12 @@ export default function DataPage() {
   const [authChecked, setAuthChecked] = useState(false);
   const canManageData = useMemo(() => authService.canAccess('DATA_MANAGER'), []);
   const [showExportModal, setShowExportModal] = useState(false);
+  const [showEcowittExport, setShowEcowittExport] = useState(false);
+  const [ecowittExportMode, setEcowittExportMode] = useState<'daily' | 'monthly' | 'all'>('daily');
+  const [ecowittExportDate, setEcowittExportDate] = useState(() => getLocalDateInputValue());
+  const [ecowittExportMonth, setEcowittExportMonth] = useState(new Date().getMonth() + 1);
+  const [ecowittExportYear, setEcowittExportYear] = useState(new Date().getFullYear());
+  const [ecowittExportLoading, setEcowittExportLoading] = useState(false);
   const [deviceId, setDeviceId] = useState('');
   const [ecowittDevices, setEcowittDevices] = useState<Array<{ id: string; name: string }>>([]);
 
@@ -2754,6 +2760,64 @@ function ScheduleConfig({ source }: { source: string }) {
     }
   };
 
+  const handleEcowittExport = async () => {
+    setEcowittExportLoading(true);
+    try {
+      const token = authService.getToken();
+      let url = '/api/ecowitt/export?';
+
+      if (ecowittExportMode === 'daily') {
+        if (!ecowittExportDate) {
+          alert('Vui lòng chọn ngày xuất!');
+          setEcowittExportLoading(false);
+          return;
+        }
+        url += `date=${encodeURIComponent(ecowittExportDate)}`;
+      } else if (ecowittExportMode === 'monthly') {
+        // For monthly, export whole month using dateFrom/dateTo
+        const monthStr = String(ecowittExportMonth).padStart(2, '0');
+        const firstDay = `${ecowittExportYear}-${monthStr}-01`;
+        // Calculate last day of month
+        const lastDay = new Date(ecowittExportYear, ecowittExportMonth, 0).getDate();
+        const lastDayStr = `${ecowittExportYear}-${monthStr}-${String(lastDay).padStart(2, '0')}`;
+        url += `dateFrom=${encodeURIComponent(firstDay)}&dateTo=${encodeURIComponent(lastDayStr)}`;
+      }
+      // 'all' mode: no date filter, gets last 7 days
+
+      if (deviceId) {
+        url += `&deviceId=${encodeURIComponent(deviceId)}`;
+      }
+
+      const res = await fetch(url, {
+        headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+      });
+
+      if (!res.ok) {
+        const body = await res.json().catch(() => null);
+        alert('Lỗi khi xuất Ecowitt: ' + (body?.error || 'Server error'));
+        setEcowittExportLoading(false);
+        return;
+      }
+
+      const blob = await res.blob();
+      const filename = res.headers.get('content-disposition')?.split('filename=')[1]?.replace(/\"/g, '') || 'ecowitt_export.xlsx';
+      const urlBlob = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = urlBlob;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      window.URL.revokeObjectURL(urlBlob);
+      alert('✓ Đã tải file Ecowitt Excel thành công!');
+      setShowEcowittExport(false);
+    } catch (e) {
+      alert('Lỗi kết nối: ' + (e instanceof Error ? e.message : String(e)));
+    } finally {
+      setEcowittExportLoading(false);
+    }
+  };
+
   const getS3PrefixForSelection = (): string => {
     if (uploadGroup === 'gis') {
       let prefix = 'gis-data/';
@@ -3074,26 +3138,49 @@ function ScheduleConfig({ source }: { source: string }) {
                   Tải lại bảng DB
                 </button>
 
-                <button
-                  onClick={() => setShowExportModal(true)}
-                  disabled={loading}
-                  style={{
-                    padding: '10px 16px',
-                    background: 'var(--accent)',
-                    color: '#fff',
-                    border: 'none',
-                    borderRadius: 'var(--radius-md)',
-                    fontSize: '0.9rem',
-                    fontWeight: '500',
-                    cursor: 'pointer',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '8px',
-                    transition: 'all 0.2s',
-                  }}
-                >
-                  <FileSpreadsheet size={16} /> Tải Excel
-                </button>
+                {selectedSource === 'mekong' ? (
+                  <button
+                    onClick={() => setShowExportModal(true)}
+                    disabled={loading}
+                    style={{
+                      padding: '10px 16px',
+                      background: 'var(--accent)',
+                      color: '#fff',
+                      border: 'none',
+                      borderRadius: 'var(--radius-md)',
+                      fontSize: '0.9rem',
+                      fontWeight: '500',
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '8px',
+                      transition: 'all 0.2s',
+                    }}
+                  >
+                    <FileSpreadsheet size={16} /> Tải Excel
+                  </button>
+                ) : (
+                  <button
+                    onClick={() => setShowEcowittExport(true)}
+                    disabled={loading}
+                    style={{
+                      padding: '10px 16px',
+                      background: 'var(--accent)',
+                      color: '#fff',
+                      border: 'none',
+                      borderRadius: 'var(--radius-md)',
+                      fontSize: '0.9rem',
+                      fontWeight: '500',
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '8px',
+                      transition: 'all 0.2s',
+                    }}
+                  >
+                    <FileSpreadsheet size={16} /> Tải Excel
+                  </button>
+                )}
               </>
             )}
           </div>
@@ -3103,6 +3190,106 @@ function ScheduleConfig({ source }: { source: string }) {
       {/* Main Content */}
       {showExportModal && (
         <DataExportModal open={showExportModal} onClose={() => setShowExportModal(false)} timeframes={timeframes} date={dateFilter} />
+      )}
+
+      {/* Ecowitt Export Panel */}
+      {showEcowittExport && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1200 }}>
+          <div style={{ width: 520, background: 'var(--surface)', borderRadius: 12, padding: 24, boxShadow: 'var(--shadow)' }}>
+            <h3 style={{ margin: '0 0 16px 0' }}>Xuất dữ liệu Ecowitt ra Excel</h3>
+            
+            <div style={{ display: 'flex', gap: 12, marginBottom: 16 }}>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <input type="radio" name="ecowittMode" checked={ecowittExportMode === 'daily'} onChange={() => setEcowittExportMode('daily')} /> Theo ngày
+              </label>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <input type="radio" name="ecowittMode" checked={ecowittExportMode === 'monthly'} onChange={() => setEcowittExportMode('monthly')} /> Theo tháng
+              </label>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <input type="radio" name="ecowittMode" checked={ecowittExportMode === 'all'} onChange={() => setEcowittExportMode('all')} /> 7 ngày gần nhất
+              </label>
+            </div>
+
+            {ecowittExportMode === 'daily' && (
+              <div style={{ marginBottom: 16 }}>
+                <label style={{ display: 'block', marginBottom: 4 }}>Chọn ngày:</label>
+                <input
+                  type="date"
+                  value={ecowittExportDate}
+                  onChange={(e) => setEcowittExportDate(e.target.value)}
+                  style={{ padding: '8px 12px', border: '1px solid var(--border)', borderRadius: 6, width: '100%' }}
+                />
+              </div>
+            )}
+
+            {ecowittExportMode === 'monthly' && (
+              <div style={{ display: 'flex', gap: 12, marginBottom: 16 }}>
+                <div style={{ flex: 1 }}>
+                  <label style={{ display: 'block', marginBottom: 4 }}>Năm:</label>
+                  <input
+                    type="number"
+                    value={ecowittExportYear}
+                    onChange={(e) => setEcowittExportYear(Number(e.target.value))}
+                    style={{ padding: '8px 12px', border: '1px solid var(--border)', borderRadius: 6, width: '100%' }}
+                  />
+                </div>
+                <div style={{ flex: 1 }}>
+                  <label style={{ display: 'block', marginBottom: 4 }}>Tháng:</label>
+                  <select
+                    value={ecowittExportMonth}
+                    onChange={(e) => setEcowittExportMonth(Number(e.target.value))}
+                    style={{ padding: '8px 12px', border: '1px solid var(--border)', borderRadius: 6, width: '100%' }}
+                  >
+                    {Array.from({ length: 12 }, (_, i) => i + 1).map((m) => (
+                      <option key={m} value={m}>Tháng {m}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+            )}
+
+            <div style={{ marginBottom: 16 }}>
+              <label style={{ display: 'block', marginBottom: 4 }}>Thiết bị (tùy chọn):</label>
+              <select
+                value={deviceId}
+                onChange={(e) => setDeviceId(e.target.value)}
+                style={{ padding: '8px 12px', border: '1px solid var(--border)', borderRadius: 6, width: '100%' }}
+              >
+                <option value="">Tất cả thiết bị</option>
+                {ecowittDevices.map((d) => (
+                  <option key={d.id} value={d.id}>{d.name}</option>
+                ))}
+              </select>
+            </div>
+
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+              <button
+                onClick={() => setShowEcowittExport(false)}
+                disabled={ecowittExportLoading}
+                style={{ padding: '8px 16px', border: '1px solid var(--border)', borderRadius: 6, background: 'var(--surface)', cursor: 'pointer' }}
+              >
+                Huỷ
+              </button>
+              <button
+                onClick={handleEcowittExport}
+                disabled={ecowittExportLoading}
+                style={{
+                  padding: '8px 16px',
+                  background: ecowittExportLoading ? 'var(--text-muted)' : 'var(--accent)',
+                  color: '#fff',
+                  border: 'none',
+                  borderRadius: 6,
+                  cursor: ecowittExportLoading ? 'not-allowed' : 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 8,
+                }}
+              >
+                {ecowittExportLoading ? 'Đang xuất...' : 'Tải xuống'}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
       <div style={{ maxWidth: 'var(--max-width)', margin: '0 auto', padding: '24px', width: '100%', flex: 1, display: 'flex', flexDirection: 'column', gap: '24px' }}>
         
