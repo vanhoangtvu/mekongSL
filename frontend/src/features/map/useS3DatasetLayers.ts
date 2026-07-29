@@ -278,6 +278,12 @@ export function useS3DatasetLayers(
           allBasePrefixes.unshift(cogPrefix);
         }
         
+        // For Flooding, also search COG path first
+        if (rootId === "flooding") {
+          const cogPrefix = basePrefix.replace("gis-data/", "gis-data/cog/");
+          allBasePrefixes.unshift(cogPrefix);
+        }
+        
         const leafSlug2 = getDatasetSlug(dsId) || dsId.split('/').pop() || dsId;
         if (leafSlug2 && leafSlug2 !== categorySlug) {
           allBasePrefixes.push(`gis-data/${datasetSlug}/${leafSlug2}/`);

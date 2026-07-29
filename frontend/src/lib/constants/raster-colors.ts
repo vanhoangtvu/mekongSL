@@ -52,6 +52,17 @@ export const WATER_LEVEL_STOPS: ColorStop[] = [
   { value: 200,   color: [255, 0, 0, 1] },
 ];
 
+export const FLOODING_STOPS: ColorStop[] = [
+  { value: 0,    color: [255, 255, 255, 0] },
+  { value: 0.1,  color: [215, 235, 250, 1] },
+  { value: 1,    color: [170, 210, 240, 1] },
+  { value: 3,    color: [100, 175, 220, 1] },
+  { value: 5,    color: [50, 140, 200, 1] },
+  { value: 10,   color: [20, 100, 180, 1] },
+  { value: 30,   color: [10, 60, 140, 1] },
+  { value: 100,  color: [5, 25, 80, 1] },
+];
+
 export const DEFAULT_STOPS: ColorStop[] = [
   { value: 0.06, color: [0, 0, 255, 1] },
   { value: 21.0, color: [255, 0, 0, 1] },
@@ -217,6 +228,10 @@ export function getRasterStyle(
   }
   if (lowerId.includes("tidal") || lowerUrl.includes("tidal") || lowerId.includes("temp") || lowerUrl.includes("water-level")) {
     return buildInterpolateStyle(WATER_LEVEL_STOPS, nodata, -100, 200);
+  }
+
+  if (lowerId.includes("flooding")) {
+    return buildInterpolateStyle(FLOODING_STOPS, nodata, 0, 100);
   }
 
   if (isLandsatBand(lowerId)) {

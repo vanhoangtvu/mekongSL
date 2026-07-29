@@ -138,6 +138,21 @@ for f in files:
   done
   
   echo ""
+  echo "📡 Raster: checking flooding-modeling TIF files..."
+  curl -s "$BACKEND/api/s3/list?prefix=gis-data/flooding-modeling/" 2>/dev/null | \
+    python3 -c "
+import sys, json
+d = json.load(sys.stdin)
+files = d.get('files', [])
+for f in files:
+    key = f['key']
+    if key.endswith('.tif') and not key.endswith('_cog.tif') and 'cog' not in key.split('/')[-1]:
+        print(key)
+" 2>/dev/null | while read key; do
+    convert_file "$key"
+  done
+  
+  echo ""
   echo "📡 Raster: checking landsat-imagery TIF files..."
   curl -s "$BACKEND/api/s3/list?prefix=gis-data/landsat-imagery/" 2>/dev/null | \
     python3 -c "
