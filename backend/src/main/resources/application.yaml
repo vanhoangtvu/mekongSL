@@ -28,7 +28,7 @@ jwt:
   expiration: 86400000
 
 cors:
-  allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:3004,http://localhost:3000,http://123.22.61.134:3004}
+  allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:3004,http://localhost:3000,http://123.22.61.134:3004,http://123.22.60.218:3004}
 
 s3:
   endpoint: https://backup.hci.vn
@@ -37,3 +37,4 @@ s3:
   secret-key: ${S3_SECRET_KEY:dummy-secret-key}
   region: us-east-1
   max-file-size: 104857600 # 100MB
+

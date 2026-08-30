@@ -14,7 +14,8 @@ import XYZ from "ol/source/XYZ";
 import VectorSource from "ol/source/Vector";
 import Feature from "ol/Feature";
 import Point from "ol/geom/Point";
-import { Style, Circle, Fill, Stroke, Text } from "ol/style";
+import Geolocation from "ol/Geolocation";
+import { Style, Circle, Fill, Stroke, Text, Icon } from "ol/style";
 import proj4 from "proj4";
 import { register } from "ol/proj/proj4";
 import { DATASETS, getRootDataset, getDatasetSlug, getParentDataset, getDatasetById, getTimeScale, type TimeScale } from "../../lib/constants/datasets";
@@ -25,7 +26,7 @@ import { computePolygonAreaHa } from "../../lib/utils/geo-utils";
 import { useS3DatasetLayers } from "./useS3DatasetLayers";
 import type { ManualStation } from "../../lib/admin-api";
 import { listWaterQualitySamples, getWaterQualitySample, getBackendAdminUrl, listS3Files, type WaterQualitySampleDto } from "../../lib/admin-api";
-import { MapPin, Activity, Image, Calendar, X, Play, Pause, SkipForward, SkipBack, Layers, Clock, Map as MapIcon, Download, SlidersHorizontal } from "lucide-react";
+import { MapPin, Activity, Image, Calendar, X, Play, Pause, SkipForward, SkipBack, Layers, Clock, Map as MapIcon, Download, SlidersHorizontal, Navigation } from "lucide-react";
 import { TemporalTimelineControl } from "./temporal-timeline-control";
 import { useLanduseYearlyStats } from "./useLanduseYearlyStats";
 
@@ -249,15 +250,15 @@ const baseLayers = {
   light: {
     name: "Light",
     source: () => new XYZ({
-      url: "https://{a-c}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}.png",
-      attributions: "© OpenStreetMap contributors, © CARTO",
+      url: "https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Light_Gray_Base/MapServer/tile/{z}/{y}/{x}",
+      attributions: "Tiles © Esri",
     }),
   },
   dark: {
     name: "Dark",
     source: () => new XYZ({
-      url: "https://{a-c}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png",
-      attributions: "© OpenStreetMap contributors, © CARTO",
+      url: "https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}",
+      attributions: "Tiles © Esri",
     }),
   },
 };
@@ -957,6 +958,10 @@ export const MapStage = React.memo(function MapStage({ startDateTime, endDateTim
   isMobileRef.current = isMobile;
   const inspectLayerRef = useRef<VectorLayer<VectorSource> | null>(null);
   const inspectSourceRef = useRef<VectorSource | null>(null);
+  const geolocationRef = useRef<Geolocation | null>(null);
+  const userLocationLayerRef = useRef<VectorLayer<VectorSource> | null>(null);
+  const userLocationSourceRef = useRef<VectorSource | null>(null);
+  const [isTrackingLocation, setIsTrackingLocation] = useState(false);
   const [pixelValue, setPixelValue] = useState<number | null>(null);
   const [pixelValues, setPixelValues] = useState<Record<string, number>>({});
   const [mouseCoords, setMouseCoords] = useState<[number, number] | null>(null);
@@ -1789,6 +1794,43 @@ export const MapStage = React.memo(function MapStage({ startDateTime, endDateTim
     });
 
     mapRef.current = map;
+
+    // --- GEOLOCATION FEATURE ---
+    const userLocationSource = new VectorSource();
+    userLocationSourceRef.current = userLocationSource;
+    const userLocationLayer = new VectorLayer({
+      source: userLocationSource,
+      zIndex: 9999, // Keep it on top
+    });
+    userLocationLayerRef.current = userLocationLayer;
+    map.addLayer(userLocationLayer);
+
+    const geolocation = new Geolocation({
+      trackingOptions: { enableHighAccuracy: true },
+      projection: map.getView().getProjection(),
+    });
+    geolocationRef.current = geolocation;
+
+    const svgMapPin = 'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="36" height="36" viewBox="0 0 24 24" fill="%230d6efd" stroke="%23ffffff" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"></path><circle cx="12" cy="10" r="3" fill="%23ffffff"></circle></svg>';
+
+    const positionFeature = new Feature();
+    positionFeature.setStyle(
+      new Style({
+        image: new Icon({
+          src: svgMapPin,
+          anchor: [0.5, 1],
+          scale: 1,
+        }),
+      })
+    );
+    userLocationSource.addFeature(positionFeature);
+
+    geolocation.on("change:position", () => {
+      const coordinates = geolocation.getPosition();
+      if (coordinates) {
+        positionFeature.setGeometry(new Point(coordinates));
+      }
+    });
 
     // Ecowitt station markers layer
     const ecowittSource = new VectorSource();
@@ -3241,7 +3283,38 @@ export const MapStage = React.memo(function MapStage({ startDateTime, endDateTim
           )}
 
           {/* Base Layer Switcher */}
-          <div className="map-layer-switcher">
+          <div className="map-layer-switcher" style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+            <button
+              className="map-layer-toggle"
+              onClick={() => {
+                const geo = geolocationRef.current;
+                const m = mapRef.current;
+                if (!geo || !m) return;
+                
+                const isTracking = !isTrackingLocation;
+                geo.setTracking(isTracking);
+                setIsTrackingLocation(isTracking);
+                
+                if (isTracking) {
+                  const pos = geo.getPosition();
+                  if (pos) {
+                    m.getView().animate({ center: pos, zoom: 14, duration: 1000 });
+                  } else {
+                    geo.once("change:position", () => {
+                      const newPos = geo.getPosition();
+                      if (newPos) {
+                        m.getView().animate({ center: newPos, zoom: 14, duration: 1000 });
+                      }
+                    });
+                  }
+                }
+              }}
+              type="button"
+              title={isTrackingLocation ? "Stop Tracking" : "Locate Me"}
+              style={{ background: isTrackingLocation ? '#0d6efd' : '#fff', color: isTrackingLocation ? '#fff' : '#64748b' }}
+            >
+              <Navigation size={18} />
+            </button>
             <button
               className="map-layer-toggle"
               onClick={() => setShowLayerMenu(!showLayerMenu)}

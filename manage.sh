@@ -16,6 +16,10 @@ FE_MODE_FILE="$FRONTEND_DIR/.frontend.mode"
 TITILER_DIR="$SCRIPT_DIR/scripts"
 TITILER_LOG="$SCRIPT_DIR/titiler.log"
 TITILER_ENV="$HOME/titiler-env"
+AI_DIR="$SCRIPT_DIR/ai-service"
+AI_PID_FILE="$AI_DIR/.ai.pid"
+AI_LOG="$AI_DIR/ai-service.log"
+AI_PORT=8090
 
 GREEN='\033[0;32m'; YELLOW='\033[1;33m'; RED='\033[0;31m'; CYAN='\033[0;36m'; BOLD='\033[1m'; NC='\033[0m'
 
@@ -51,6 +55,14 @@ find_be_pid() {
 find_ti_pid() {
   local pid=$(find_pid_by_port "$TI_PORT")
   if [[ -n "$pid" ]]; then echo "$pid"; return; fi
+  echo ""
+}
+
+find_ai_pid() {
+  local pid=$(find_pid_by_port "$AI_PORT")
+  if [[ -n "$pid" ]]; then echo "$pid"; return; fi
+  local file_pid=$(get_pid "$AI_PID_FILE")
+  if is_pid_running "$file_pid"; then echo "$file_pid"; return; fi
   echo ""
 }
 
@@ -265,6 +277,12 @@ print_status() {
   local ti_up=$(get_uptime "$ti_pid")
   local ti_mem=$(get_mem "$ti_pid")
   display_line "TiTiler"  "$ti_pid" "$ti_port" "$ti_up" "$ti_mem" "Tile"
+  
+  local ai_pid=$(find_ai_pid)
+  local ai_port=$(get_port "$ai_pid" "$AI_PORT")
+  local ai_up=$(get_uptime "$ai_pid")
+  local ai_mem=$(get_mem "$ai_pid")
+  display_line "AI Serv"  "$ai_pid" "$ai_port" "$ai_up" "$ai_mem" "Py"
   print_line_left "" "─"
   
   if [[ -n "$current_ip" ]]; then
@@ -281,12 +299,14 @@ print_menu() {
   print_line_left "  ${BOLD}MENU CHỨC NĂNG${NC}"
   print_line_left "" "─"
   print_menu_row "1" "Khởi động backend"       "6" "Build & Restart backend"
-  print_menu_row "2" "FE Dev mode"             "7" "Xem log backend"
-  print_menu_row "3" "FE Production mode"      "8" "Xem log frontend"
-  print_menu_row "4" "Dừng backend"           "9" "Đổi IP"
-  print_menu_row "5" "Dừng frontend"         "10" "Start TiTiler"
-  print_menu_row "0" "Thoát"               "11" "Stop TiTiler"
-  print_menu_row "C" "Auto convert COG"   ""  ""
+  print_menu_row "2" "FE Dev mode"             "7" "Start AI Service"
+  print_menu_row "3" "FE Production mode"      "8" "Stop AI Service"
+  print_menu_row "4" "Dừng backend"           "9" "Start TiTiler"
+  print_menu_row "5" "Dừng frontend"         "10" "Stop TiTiler"
+  print_menu_row "C" "Xem logs Backend"      "L" "Xem logs Frontend"
+  print_menu_row "I" "Xem logs AI Service"   "T" "Xem logs TiTiler"
+  print_menu_row "A" "Restart All Services"  "P" "Đổi IP"
+  print_menu_row "0" "Thoát"                 ""  ""
 }
 
 pause() {
@@ -344,7 +364,7 @@ start_frontend() {
   echo -e "  ${YELLOW}→ Khởi động frontend...${NC}"
   cd "$FRONTEND_DIR"
   > "$FE_LOG"
-  setsid npm run dev > "$FE_LOG" 2>&1 &
+  setsid npx next dev -p 3004 > "$FE_LOG" 2>&1 &
   local pid=$!
   disown "$pid" 2>/dev/null || true
   echo "$pid" > "$FE_PID_FILE"
@@ -377,7 +397,7 @@ start_frontend_prod() {
   }
   echo -e "  ${YELLOW}→ Khởi động frontend production...${NC}"
   > "$FE_LOG"
-  setsid npm run start > "$FE_LOG" 2>&1 &
+  setsid npx next start -H 0.0.0.0 -p 3004 > "$FE_LOG" 2>&1 &
   local pid=$!
   disown "$pid" 2>/dev/null || true
   echo "$pid" > "$FE_PID_FILE"
@@ -508,6 +528,34 @@ stop_titiler() {
   stop_pid_graceful "$ti_pid" "TiTiler"
 }
 
+start_ai() {
+  local ai_pid=$(find_ai_pid)
+  if is_pid_running "$ai_pid"; then
+    echo -e "  ${YELLOW}AI Service đang chạy (PID: $ai_pid)${NC}"; return
+  fi
+  echo -e "  ${YELLOW}→ Khởi động AI Service (port $AI_PORT)...${NC}"
+  cd "$AI_DIR"
+  if [[ -f "$SCRIPT_DIR/.env" ]]; then
+    set -a; source "$SCRIPT_DIR/.env"; set +a
+  fi
+  source "venv/bin/activate"
+  nohup python main.py > "$AI_LOG" 2>&1 &
+  local pid=$!
+  disown "$pid" 2>/dev/null || true
+  sleep 3
+  if find_ai_pid > /dev/null; then
+    echo -e "  ${GREEN}✓ AI Service khởi động (PID: $(find_ai_pid), port $AI_PORT)${NC}"
+  else
+    echo -e "  ${RED}✗ AI Service khởi động thất bại. Log: $AI_LOG${NC}"
+  fi
+  cd "$SCRIPT_DIR"
+}
+
+stop_ai() {
+  local ai_pid=$(find_ai_pid)
+  stop_pid_graceful "$ai_pid" "AI Service"
+}
+
 trap cleanup INT TERM
 
 while true; do
@@ -522,13 +570,16 @@ while true; do
     4) stop_backend; pause ;;
     5) stop_frontend; pause ;;
     6) rebuild_backend; pause ;;
-    7) view_log "$BE_LOG" "backend" ;;
-    8) view_log "$FE_LOG" "frontend" ;;
-    9) change_ip; pause ;;
-    10) start_titiler; pause ;;
-    11) stop_titiler; pause ;;
-    C|c) echo ""; bash "$SCRIPT_DIR/scripts/auto-cog-watch.sh"; pause ;;
-    A|a) stop_backend || true; stop_frontend || true; stop_titiler || true; sleep 1; start_backend || true; start_frontend || true; start_titiler || true; pause ;;
+    7) start_ai; pause ;;
+    8) stop_ai; pause ;;
+    9) start_titiler; pause ;;
+    10) stop_titiler; pause ;;
+    C|c) view_log "$BE_LOG" "backend" ;;
+    L|l) view_log "$FE_LOG" "frontend" ;;
+    I|i) view_log "$AI_LOG" "AI Service" ;;
+    T|t) view_log "$TITILER_LOG" "TiTiler" ;;
+    P|p) change_ip; pause ;;
+    A|a) stop_backend || true; stop_frontend || true; stop_ai || true; stop_titiler || true; sleep 1; start_backend || true; start_frontend || true; start_ai || true; start_titiler || true; pause ;;
     0) cleanup ;;
     *) echo -e "  ${RED}Lựa chọn không hợp lệ${NC}"; sleep 1 ;;
   esac

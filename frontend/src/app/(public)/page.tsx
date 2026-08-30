@@ -8,6 +8,8 @@ import { SearchTabs, GeoSearchSidebar } from "../../features/map/geo-search-side
 import { ResizablePanel } from "../../components/layout/resizable-panel";
 import { MapStage } from "../../features/map/map-stage";
 import { listManualStations, type ManualStation } from "../../lib/admin-api";
+import { AIChatPanel } from "../../features/ai";
+import { Bot } from "lucide-react";
 
 type TabType = "datasets" | "additional" | "results";
 
@@ -35,6 +37,7 @@ export default function PublicHomePage() {
   const [hoveredDatasetId, setHoveredDatasetId] = useState<string | null>(null);
   const [wqStations, setWqStations] = useState<ManualStation[]>([]);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+  const [isAIChatOpen, setIsAIChatOpen] = useState(false);
   const [isMobile, setIsMobile] = useState(false);
 
   useEffect(() => {
@@ -124,13 +127,97 @@ export default function PublicHomePage() {
               onHoverDataset={setHoveredDatasetId}
             />
           </ResizablePanel>
-          <div className="geo-panel">
+          <div className="geo-panel" style={{ position: 'relative', overflow: 'hidden' }}>
             <MapStage startDateTime={startDateTime} endDateTime={endDateTime} appliedDatasets={appliedDatasets} onRemoveDataset={handleRemoveDataset} onAddDataset={handleAddDataset} hasExplicitRange={hasExplicitRange} onStartDateTimeChange={handleStartDateTimeChange} onEndDateTimeChange={handleEndDateTimeChange} waterQualityStations={wqStations} isMobile={isMobile} hoveredDatasetId={hoveredDatasetId} />
+            
+            {/* AI Assistant Floating Trigger Button */}
+            <button
+              className={`ai-trigger-fab ${isAIChatOpen ? 'active' : ''}`}
+              onClick={() => setIsAIChatOpen(prev => !prev)}
+              title="Mở Trợ lý AI Phân tích"
+            >
+              <div className="ai-fab-icon">
+                <Bot size={22} />
+              </div>
+              <span className="ai-fab-text">AI Assistant</span>
+              <span className="ai-fab-badge">PRO</span>
+            </button>
+
+            {/* AI Chat Panel */}
+            <AIChatPanel
+              open={isAIChatOpen}
+              onClose={() => setIsAIChatOpen(false)}
+            />
           </div>
         </div>
       </main>
       
       <AppFooter />
+
+      <style jsx>{`
+        .ai-trigger-fab {
+          position: absolute;
+          bottom: 28px;
+          right: 24px;
+          z-index: 99;
+          display: flex;
+          align-items: center;
+          gap: 10px;
+          padding: 10px 18px;
+          border-radius: 999px;
+          background: linear-gradient(135deg, #163c66 0%, #20538c 100%);
+          border: 1px solid rgba(0, 212, 255, 0.4);
+          color: #ffffff;
+          box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3), 0 0 20px rgba(0, 212, 255, 0.2);
+          cursor: pointer;
+          transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+        .ai-trigger-fab:hover {
+          transform: translateY(-3px) scale(1.03);
+          border-color: rgba(0, 212, 255, 0.8);
+          box-shadow: 0 15px 35px rgba(0, 0, 0, 0.4), 0 0 30px rgba(0, 212, 255, 0.4);
+        }
+        .ai-trigger-fab.active {
+          background: linear-gradient(135deg, #0080ff 0%, #6c63ff 100%);
+          border-color: rgba(255, 255, 255, 0.5);
+          right: 435px;
+        }
+        @media (max-width: 640px) {
+          .ai-trigger-fab.active {
+            display: none;
+          }
+        }
+        .ai-fab-icon {
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          color: #00d4ff;
+          filter: drop-shadow(0 0 8px rgba(0, 212, 255, 0.8));
+        }
+        .ai-trigger-fab.active .ai-fab-icon {
+          color: #ffffff;
+        }
+        .ai-fab-text {
+          font-size: 0.92rem;
+          font-weight: 700;
+          letter-spacing: 0.02em;
+        }
+        .ai-fab-badge {
+          background: rgba(0, 212, 255, 0.2);
+          border: 1px solid rgba(0, 212, 255, 0.4);
+          color: #00d4ff;
+          font-size: 0.65rem;
+          font-weight: 800;
+          padding: 2px 6px;
+          border-radius: 6px;
+        }
+        .ai-trigger-fab.active .ai-fab-badge {
+          background: rgba(255, 255, 255, 0.2);
+          border-color: rgba(255, 255, 255, 0.4);
+          color: #ffffff;
+        }
+      `}</style>
     </div>
   );
 }
+

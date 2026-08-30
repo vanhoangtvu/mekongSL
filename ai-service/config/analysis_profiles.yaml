@@ -1,0 +1,129 @@
+# ================================================================
+# Analysis Profiles — Quy tắc chuyên ngành (Domain Rules)
+# Dùng bởi AnalysisEngine để đánh giá số liệu
+# ================================================================
+
+profiles:
+
+  # ── Nuôi tôm nước lợ (Thẻ tôm sú, tôm thẻ chân trắng) ──
+  shrimp_farming:
+    name: "Nuôi tôm nước lợ"
+    description: "Đánh giá mức độ phù hợp cho nuôi tôm thẻ, tôm sú vùng ven biển và nước lợ."
+    missing_data:
+      required_threshold: 80
+    confidence:
+      minimum: 70
+    scoring:
+      method: "continuous"
+    indicators:
+      salinity:
+        weight: 0.30
+        optimal: [10, 25]       
+        acceptable: [5, 30]     
+        warning: "Tôm nước lợ cần độ mặn tối thiểu 5‰. Dưới mức này tôm dễ bệnh, trên 30‰ tôm chậm lớn."
+      ph:
+        weight: 0.20
+        optimal: [7.5, 8.5]
+        acceptable: [7.0, 9.0]
+        warning: "pH lý tưởng cho tôm là 7.5 - 8.5. Ngoài khoảng này tôm stress và lột vỏ kém."
+      do:
+        weight: 0.20
+        optimal: [4.0, 10.0]
+        acceptable: [3.0, 10.0]
+        warning: "Oxy hòa tan (DO) cần > 4 mg/L để tôm hô hấp tốt."
+      temperature:
+        weight: 0.15
+        optimal: [26, 30]
+        acceptable: [24, 32]
+        warning: "Nhiệt độ ngoài 24-32°C sẽ làm tôm bỏ ăn."
+      flood:
+        weight: 0.10
+        optimal: [0, 0.2]
+        acceptable: [0, 0.5]
+        warning: "Nguy cơ ngập sâu > 0.5m, cần xây bờ bao cao để tránh tràn ao."
+      waterway:
+        weight: 0.05
+        optimal: [0, 1000]
+        acceptable: [0, 5000]
+        warning: "Khu vực quá xa hệ thống kênh rạch, khó cấp thoát nước."
+
+  # ── Nuôi cá nước ngọt (Cá tra, cá lóc, cá diêu hồng...) ──
+  fish_farming:
+    name: "Nuôi cá nước ngọt"
+    description: "Đánh giá mức độ phù hợp cho nuôi cá nước ngọt."
+    missing_data:
+      required_threshold: 70
+    confidence:
+      minimum: 60
+    scoring:
+      method: "continuous"
+    indicators:
+      salinity:
+        weight: 0.35
+        optimal: [0, 2]         
+        acceptable: [0, 4]      
+        warning: "Độ mặn quá 4‰ sẽ làm cá nước ngọt sốc và chết."
+      ph:
+        weight: 0.20
+        optimal: [6.5, 8.5]
+        acceptable: [6.0, 9.0]
+        warning: "pH lý tưởng 6.5 - 8.5."
+      do:
+        weight: 0.20
+        optimal: [3.0, 10.0]
+        acceptable: [2.0, 10.0]
+        warning: "Oxy tối thiểu > 3 mg/L."
+      flood:
+        weight: 0.25
+        optimal: [0, 0.5]
+        acceptable: [0, 1.0]
+        warning: "Nguy cơ ngập sâu > 1.0m, cần hệ thống đê bao chắc chắn."
+
+  # ── Trồng lúa nước ──
+  rice_farming:
+    name: "Trồng lúa nước"
+    description: "Đánh giá mức độ phù hợp nước tưới cho lúa."
+    missing_data:
+      required_threshold: 60
+    confidence:
+      minimum: 50
+    scoring:
+      method: "continuous"
+    indicators:
+      salinity:
+        weight: 0.40
+        optimal: [0, 1.5]
+        acceptable: [0, 2.5]
+        warning: "Cây lúa rất nhạy cảm với mặn. Độ mặn > 2.5‰ sẽ gây chết mạ hoặc lép hạt."
+      ph:
+        weight: 0.30
+        optimal: [5.5, 7.5]
+        acceptable: [4.5, 8.0]
+        warning: "pH quá thấp (< 4.5) cảnh báo đất nhiễm phèn nặng."
+      flood:
+        weight: 0.30
+        optimal: [0, 0.3]
+        acceptable: [0, 0.8]
+        warning: "Ngập úng kéo dài > 0.8m có thể làm chết lúa non."
+
+  # ── Tiêu chuẩn nước chung (Sinh hoạt, tưới tiêu) ──
+  water_quality_general:
+    name: "Chất lượng nước chung"
+    description: "Đánh giá mức độ an toàn của nguồn nước nói chung."
+    missing_data:
+      required_threshold: 50
+    confidence:
+      minimum: 50
+    scoring:
+      method: "continuous"
+    indicators:
+      salinity:
+        weight: 0.50
+        optimal: [0, 1.0]
+        acceptable: [0, 2.0]
+        warning: "Độ mặn an toàn cho tưới tiêu và sinh hoạt là < 1‰."
+      ph:
+        weight: 0.50
+        optimal: [6.5, 8.5]
+        acceptable: [5.5, 9.0]
+        warning: "Nước quá chua hoặc quá kiềm."

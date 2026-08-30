@@ -17,7 +17,16 @@ function getBackendUrl() {
 }
 
 function getBearerToken(request: NextRequest) {
-  const header = request.headers.get('authorization');
+  let header = request.headers.get('authorization');
+  
+  // Fallback cho luồng tải file native của trình duyệt (không gửi được header)
+  if (!header) {
+    const urlToken = request.nextUrl.searchParams.get('token');
+    if (urlToken) {
+      header = `Bearer ${urlToken}`;
+    }
+  }
+
   if (!header?.startsWith('Bearer ')) {
     return null;
   }

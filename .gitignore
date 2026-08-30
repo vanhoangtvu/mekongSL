@@ -44,3 +44,13 @@ Thumbs.db
 *.swo
 *.pid
 .frontend.mode
+
+# Python
+venv/
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# Archives
+*.zip

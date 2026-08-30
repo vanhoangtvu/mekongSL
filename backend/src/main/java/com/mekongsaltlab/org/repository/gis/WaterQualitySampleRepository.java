@@ -11,7 +11,7 @@ import java.util.Optional;
 
 public interface WaterQualitySampleRepository extends JpaRepository<WaterQualitySample, Long> {
 
-    @Query("SELECT s FROM WaterQualitySample s JOIN FETCH s.station WHERE s.station.id = :stationId ORDER BY s.sampleDate DESC")
+    @Query("SELECT s FROM WaterQualitySample s LEFT JOIN FETCH s.parameters JOIN FETCH s.station WHERE s.station.id = :stationId ORDER BY s.sampleDate DESC")
     List<WaterQualitySample> findByStationIdOrderBySampleDateDesc(@Param("stationId") Long stationId);
 
     @Query("SELECT s FROM WaterQualitySample s JOIN FETCH s.station WHERE s.station.id = :stationId AND s.sampleDate = :sampleDate")
@@ -31,4 +31,10 @@ public interface WaterQualitySampleRepository extends JpaRepository<WaterQuality
 
     @Query("SELECT s FROM WaterQualitySample s JOIN FETCH s.station ORDER BY s.importedAt DESC, s.id DESC")
     List<WaterQualitySample> findAllOrderByImportedAtDesc();
+    
+    // New methods for AI service  
+    @Query("SELECT s FROM WaterQualitySample s LEFT JOIN FETCH s.parameters WHERE s.station = :station AND s.sampleDate BETWEEN :startDate AND :endDate ORDER BY s.sampleDate")
+    List<WaterQualitySample> findByStationAndSampleDateBetween(@Param("station") com.mekongsaltlab.org.entity.gis.ManualStation station, 
+                                                                 @Param("startDate") LocalDate startDate, 
+                                                                 @Param("endDate") LocalDate endDate);
 }

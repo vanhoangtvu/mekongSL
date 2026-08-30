@@ -8,4 +8,8 @@ import java.util.List;
 public interface ManualStationRepository extends JpaRepository<ManualStation, Long> {
     List<ManualStation> findByIsActiveTrue();
     List<ManualStation> findByStationTypeAndIsActiveTrue(String stationType);
+    
+    // New methods for AI service
+    List<ManualStation> findByStationIdIn(List<String> stationIds);
+    List<ManualStation> findByStationType(String stationType);
 }

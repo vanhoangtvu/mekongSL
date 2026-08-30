@@ -1,0 +1,168 @@
+# ================================================================
+# Data Catalog — Mô tả nguồn dữ liệu có sẵn trong hệ thống
+# Dùng bởi DataPlanner để lập kế hoạch truy vấn
+# ================================================================
+
+datasets:
+
+  # ── Dữ liệu quan trắc chất lượng nước (MySQL) ─────────────────
+  salinity:
+    label: "Độ mặn"
+    source: s3
+    spatial_type: raster
+    s3_prefix: "gis-data/"
+    file_pattern: "salinity"
+    unit: "‰"
+    temporal: false
+
+  ph:
+    label: "pH"
+    source: s3
+    spatial_type: raster
+    s3_prefix: "gis-data/"
+    file_pattern: "pH"
+    unit: ""
+    temporal: false
+
+  do:
+    label: "Oxy hòa tan (DO)"
+    source: mysql
+    api_path: /api/gis/water-quality
+    parameter_names: ["DO", "Oxy hòa tan", "Dissolved Oxygen"]
+    unit: "mg/L"
+    spatial_type: point
+    temporal: true
+    min_stations: 1
+
+  turbidity:
+    label: "Độ đục"
+    source: mysql
+    api_path: /api/gis/water-quality
+    parameter_names: ["Độ đục", "Turbidity", "TSS", "Chất lơ lửng"]
+    unit: "NTU"
+    spatial_type: point
+    temporal: true
+    min_stations: 1
+
+  water_quality:
+    label: "Chất lượng nước tổng hợp"
+    source: mysql
+    api_path: /api/gis/water-quality
+    parameter_names: []  # lấy tất cả thông số
+    unit: ""
+    spatial_type: point
+    temporal: true
+    min_stations: 1
+
+  # ── Dữ liệu trạm (MySQL) ──────────────────────────────────────
+  stations:
+    label: "Danh sách trạm quan trắc"
+    source: mysql
+    api_path: /api/gis/manual-stations
+    spatial_type: point
+    temporal: false
+
+  # ── Dữ liệu Thời tiết thực tế (MySQL - Ecowitt) ───────────────
+  temperature:
+    label: "Nhiệt độ môi trường"
+    source: mysql_ecowitt
+    spatial_type: point
+    unit: "°C"
+    temporal: true
+
+  humidity:
+    label: "Độ ẩm không khí"
+    source: mysql_ecowitt
+    spatial_type: point
+    unit: "%"
+    temporal: true
+
+  rain:
+    label: "Lượng mưa"
+    source: mysql_ecowitt
+    spatial_type: point
+    unit: "mm"
+    temporal: true
+
+  wind_speed:
+    label: "Tốc độ gió"
+    source: mysql_ecowitt
+    spatial_type: point
+    unit: "m/s"
+    temporal: true
+
+  # ── Dữ liệu GIS raster (S3) ───────────────────────────────────
+  landuse:
+    label: "Sử dụng đất"
+    source: s3
+    s3_prefix: "gis-data/cog/baseline-environment/landuse-classification/aquaculture/{year}/raster/"
+    file_pattern: "Landuse_"
+    latest_year: 2025
+    spatial_type: raster
+    clip_required: true
+    temporal: false
+
+  flood:
+    label: "Nguy cơ ngập lũ"
+    source: s3
+    s3_prefix: "gis-data/cog/flooding-modeling/flooding-distribution/{year}/raster/"
+    file_pattern: "flooding_{year}_cog.tif"
+    latest_year: 2000
+    spatial_type: raster
+    clip_required: true
+    temporal: false
+
+  soil:
+    label: "Thổ nhưỡng đất"
+    source: s3
+    s3_prefix: "gis-data/soil/"
+    file_pattern: "soil_{year}.tif"
+    latest_year: 2024
+    spatial_type: raster
+    clip_required: true
+    temporal: false
+
+  waterway:
+    label: "Hệ thống kênh rạch"
+    source: s3
+    s3_prefix: "gis-data/baseline-environment/landuse-planning/tra-vinh-cang-long/2026/vector/"
+    file_pattern: "canglong_display.geojson"
+    spatial_type: vector
+    clip_required: true
+    temporal: false
+
+# ── Mapping từ "yêu cầu phân tích" → các dataset cần thiết ─────
+activity_data_requirements:
+  shrimp_farming:
+    - salinity
+    - ph
+    - water_quality
+    - temperature
+    - rain
+    - landuse
+    - flood
+  rice_farming:
+    - salinity
+    - water_quality
+    - landuse
+    - flood
+  fish_farming:
+    - water_quality
+    - do
+    - ph
+    - turbidity
+    - landuse
+  vegetable_growing:
+    - water_quality
+    - soil
+    - flood
+  flood_risk:
+    - flood
+    - waterway
+  landuse_analysis:
+    - landuse
+  water_quality_query:
+    - water_quality
+    - salinity
+    - ph
+    - do
